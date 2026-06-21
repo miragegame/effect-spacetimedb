@@ -1,0 +1,154 @@
+{
+  "name": "effect-spacetimedb",
+  "version": "0.1.0",
+  "description": "Effect-first toolkit for typed SpacetimeDB modules, clients, and generated bindings.",
+  "keywords": [
+    "effect",
+    "spacetimedb",
+    "typescript",
+    "realtime",
+    "database"
+  ],
+  "author": "effect-spacetimedb contributors",
+  "homepage": "https://github.com/miragegame/effect-spacetimedb#readme",
+  "bugs": {
+    "url": "https://github.com/miragegame/effect-spacetimedb/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/miragegame/effect-spacetimedb.git",
+    "directory": "packages/effect-spacetimedb"
+  },
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": [
+    "./src/server-polyfills.ts"
+  ],
+  "files": [
+    "src/**/*.ts",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "README.md"
+  ],
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "default": "./src/client/index.ts"
+    },
+    "./server": {
+      "types": "./src/server/index.ts",
+      "default": "./src/server/index.ts"
+    },
+    "./server-compiler": {
+      "types": "./src/server-compiler.ts",
+      "default": "./src/server-compiler.ts"
+    },
+    "./server-polyfills": {
+      "types": "./src/server-polyfills.ts",
+      "default": "./src/server-polyfills.ts"
+    },
+    "./dev-server": {
+      "types": "./src/dev-server/index.ts",
+      "default": "./src/dev-server/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing.ts",
+      "default": "./src/testing.ts"
+    },
+    "./testing/spacetime-sys": {
+      "types": "./src/testing/spacetime-sys.ts",
+      "default": "./src/testing/spacetime-sys.ts"
+    },
+    "./testing/example-module": {
+      "types": "./examples/publishable-module/src/canonical-example-module.ts",
+      "default": "./examples/publishable-module/src/canonical-example-module.ts"
+    },
+    "./testing/example-client": {
+      "types": "./examples/publishable-module/generated/index.ts",
+      "default": "./examples/publishable-module/generated/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && node scripts/effect-tsgo.mjs -p tsconfig.dist.json",
+    "codegen": "node scripts/codegen.mjs",
+    "codegen:check": "node scripts/codegen.mjs --check",
+    "prepack": "npm run build && node scripts/prepare-pack.mjs",
+    "postpack": "node scripts/restore-pack.mjs",
+    "typecheck": "node scripts/effect-tsgo.mjs -b tsconfig.build.json tsconfig.test.json examples/publishable-module/tsconfig.build.json",
+    "test": "bun --bun vitest run",
+    "test:watch": "bun --bun vitest",
+    "test:live": "bun --bun vitest run --config vitest.live.config.ts",
+    "smoke:dev-server-node": "node scripts/dev-server-node-smoke.mjs"
+  },
+  "dependencies": {
+    "headers-polyfill": "^4"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.0-beta.68",
+    "spacetimedb": "^2.5.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.2.2",
+    "@effect/language-service": "0.86.2",
+    "@effect/platform-node": "4.0.0-beta.68",
+    "@effect/tsgo": "0.14.0",
+    "@effect/vitest": "4.0.0-beta.68",
+    "@types/node": "22.10.1",
+    "@typescript/native-preview": "7.0.0-dev.20260218.1",
+    "bun-types": "1.3.0",
+    "effect": "4.0.0-beta.68",
+    "spacetimedb": "2.5.0",
+    "typescript": "^5.9.3",
+    "undici": "^7.16.0",
+    "vitest": "4.1.2"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "sideEffects": [
+      "./dist/server-polyfills.js"
+    ],
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "default": "./dist/client/index.js"
+      },
+      "./server": {
+        "types": "./dist/server/index.d.ts",
+        "default": "./dist/server/index.js"
+      },
+      "./server-compiler": {
+        "types": "./dist/server-compiler.d.ts",
+        "default": "./dist/server-compiler.js"
+      },
+      "./server-polyfills": {
+        "types": "./dist/server-polyfills.d.ts",
+        "default": "./dist/server-polyfills.js"
+      },
+      "./dev-server": {
+        "types": "./dist/dev-server/index.d.ts",
+        "default": "./dist/dev-server/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing.d.ts",
+        "default": "./dist/testing.js"
+      },
+      "./testing/spacetime-sys": {
+        "types": "./dist/testing/spacetime-sys.d.ts",
+        "default": "./dist/testing/spacetime-sys.js"
+      }
+    }
+  }
+}

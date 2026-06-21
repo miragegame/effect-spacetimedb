@@ -1,0 +1,12 @@
+node_modules/
+.cache/
+dist/
+dist-types/
+packages/*/node_modules/
+packages/*/dist/
+packages/*/dist-types/
+examples/*/node_modules/
+examples/*/dist/
+examples/*/dist-types/
+website/node_modules/
+website/dist/

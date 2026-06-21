@@ -1,0 +1,10 @@
+{
+  "ok": {
+    "id": "capture-subscribe-thing",
+    "label": "Subscribe Fixture",
+    "count": {
+      "$capturedType": "BigInt",
+      "value": "1"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "effect-spacetimedb-publishable-example",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "scripts": {
+    "typecheck": "../../node_modules/.bin/tsc --noEmit"
+  },
+  "dependencies": {
+    "effect": "4.0.0-beta.68",
+    "effect-spacetimedb": "workspace:*",
+    "spacetimedb": "2.5.0"
+  }
+}

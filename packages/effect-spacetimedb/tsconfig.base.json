@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "target": "ES2022",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "noEmit": true,
+    "paths": {
+      "effect-spacetimedb": ["./src/index.ts"],
+      "effect-spacetimedb/client": ["./src/client/index.ts"],
+      "effect-spacetimedb/dev-server": ["./src/dev-server/index.ts"],
+      "effect-spacetimedb/server": ["./src/server/index.ts"],
+      "effect-spacetimedb/server-compiler": ["./src/server-compiler.ts"],
+      "effect-spacetimedb/server-polyfills": ["./src/server-polyfills.ts"],
+      "effect-spacetimedb/testing": ["./src/testing.ts"],
+      "effect-spacetimedb/testing/example-client": [
+        "./examples/publishable-module/generated/index.ts"
+      ],
+      "effect-spacetimedb/testing/example-module": [
+        "./examples/publishable-module/src/canonical-example-module.ts"
+      ],
+      "effect-spacetimedb/testing/spacetime-sys": [
+        "./src/testing/spacetime-sys.ts"
+      ]
+    },
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnostics": true,
+        "diagnosticSeverity": {
+          "anyUnknownInErrorContext": "error",
+          "missingEffectServiceDependency": "error",
+          "leakingRequirements": "error",
+          "unsafeEffectTypeAssertion": "error",
+          "unnecessaryEffectGen": "error",
+          "unnecessaryPipe": "error",
+          "unnecessaryPipeChain": "error",
+          "unnecessaryFailYieldableError": "error",
+          "effectFnOpportunity": "error",
+          "effectMapVoid": "error",
+          "effectSucceedWithVoid": "error",
+          "catchAllToMapError": "error",
+          "catchToOrElseSucceed": "error",
+          "redundantSchemaTagIdentifier": "error",
+          "schemaStructWithTag": "error",
+          "returnEffectInGen": "error",
+          "runEffectInsideEffect": "error",
+          "tryCatchInEffectGen": "error",
+          "multipleCatchTag": "error",
+          "redundantMapError": "error",
+          "redundantOrDie": "error",
+          "effectMapFlatten": "error",
+          "catchUnfailableEffect": "error",
+          "lazyEffect": "error",
+          "newSchemaClass": "error",
+          "missedPipeableOpportunity": "error",
+          "instanceOfSchema": "error",
+          "unnecessaryArrowBlock": "error",
+          "nestedEffectGenYield": "error",
+          "serviceNotAsClass": "error",
+          "effectDoNotation": "error",
+          "schemaUnionOfLiterals": "error",
+          "deterministicKeys": "error",
+          "schemaNumber": "error",
+          "strictEffectProvide": "error",
+          "unnecessaryTypeofType": "error",
+          "strictBooleanExpressions": "error"
+        },
+        "overrides": [
+          {
+            "include": [
+              "**/*.test.ts",
+              "src/**/*.test.ts",
+              "src/**/*.test.tsx",
+              "**/*.spec.ts",
+              "src/**/*.spec.ts",
+              "src/**/*.spec.tsx",
+              "packages/tests/**",
+              "../../tests/**",
+              "../../../tests/**",
+              "**/packages/tests/**"
+            ],
+            "options": {
+              "diagnosticSeverity": {
+                "strictEffectProvide": "off"
+              }
+            }
+          }
+        ],
+        "allowedDuplicatedPackages": [
+          "@distilled.cloud/aws",
+          "@distilled.cloud/cloudflare"
+        ],
+        "includeSuggestionsInTsc": false,
+        "ignoreEffectWarningsInTscExitCode": false,
+        "ignoreEffectErrorsInTscExitCode": false
+      }
+    ]
+  }
+}
