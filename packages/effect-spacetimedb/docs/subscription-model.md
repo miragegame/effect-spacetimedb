@@ -1,4 +1,10 @@
-# Client Subscription Model: Native Query Sets and Stream Failure Propagation
+# Client Subscription Model Implementation Notes
+
+> **Implementation notes.** The user-facing version of this topic lives at
+> <https://effect-spacetimedb.dev/core-concepts/subscriptions>.
+> This file documents implementation detail, rationale, and
+> native behavior not covered on the public docs site. Keep user-facing
+> conceptual prose on the website to avoid drift between the two surfaces.
 
 Design rationale for the client subscription layer (`session-stream.ts`,
 `ws-client.ts`, and `ws-subscription-adapter.ts`). The wrapper intentionally
@@ -47,19 +53,6 @@ always read the connection-owned table state rather than a wrapper-local copy.
 A transaction applies atomically before callbacks fire. The native SDK merges a
 transaction's table updates into the cache and then dispatches row callbacks,
 so snapshot reads taken from callbacks observe the post-transaction cache.
-
-## Stream setup failures must reach the stream
-
-`Stream.callback`'s setup effect is forked unobserved: effect v4's
-`Channel.asyncQueue` runs it via `Effect.forkIn(...)` and never inspects the
-fiber's exit. A setup effect that fails - subscription rejected, connection
-invalidated, transport error - fails silently unless the callback explicitly
-fails the queue.
-
-`sessionStream` therefore routes setup failures into the queue with
-`Queue.failCauseUnsafe`. Interrupt causes pass through untouched
-(`Cause.hasInterruptsOnly`) because normal stream teardown interrupts the
-forked setup fiber and must not surface as a stream failure.
 
 ## tableGroup emission granularity
 

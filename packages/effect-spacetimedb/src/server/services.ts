@@ -6,38 +6,71 @@ import type { FieldOptionsOf, FieldValue } from "../contract/field.ts"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import type { AnyTableSpec, TableRow } from "../contract/table.ts"
 import { StdbDecodeError } from "../decode-error.ts"
+import { errorTypeId, hasErrorTypeId } from "../error-identity.ts"
 
+const StdbHostCallErrorTypeId = errorTypeId("StdbHostCallError")
 export class StdbHostCallError extends Data.TaggedError("StdbHostCallError")<{
   readonly op: string
   readonly cause: unknown
   readonly hostErrorName?: string
-}> {}
+}> {
+  readonly [StdbHostCallErrorTypeId] = StdbHostCallErrorTypeId
+  static is = hasErrorTypeId<StdbHostCallError>(StdbHostCallErrorTypeId)
+}
 
+const StdbUniqueAlreadyExistsErrorTypeId = errorTypeId(
+  "StdbUniqueAlreadyExistsError",
+)
 export class StdbUniqueAlreadyExistsError extends Data.TaggedError(
   "StdbUniqueAlreadyExistsError",
 )<{
   readonly op: string
   readonly cause: unknown
-}> {}
+}> {
+  readonly [StdbUniqueAlreadyExistsErrorTypeId] =
+    StdbUniqueAlreadyExistsErrorTypeId
+  static is = hasErrorTypeId<StdbUniqueAlreadyExistsError>(
+    StdbUniqueAlreadyExistsErrorTypeId,
+  )
+}
 
+const StdbAutoIncOverflowErrorTypeId = errorTypeId("StdbAutoIncOverflowError")
 export class StdbAutoIncOverflowError extends Data.TaggedError(
   "StdbAutoIncOverflowError",
 )<{
   readonly op: string
   readonly cause: unknown
-}> {}
+}> {
+  readonly [StdbAutoIncOverflowErrorTypeId] = StdbAutoIncOverflowErrorTypeId
+  static is = hasErrorTypeId<StdbAutoIncOverflowError>(
+    StdbAutoIncOverflowErrorTypeId,
+  )
+}
 
+const StdbNoSuchRowErrorTypeId = errorTypeId("StdbNoSuchRowError")
 export class StdbNoSuchRowError extends Data.TaggedError("StdbNoSuchRowError")<{
   readonly op: string
   readonly cause: unknown
-}> {}
+}> {
+  readonly [StdbNoSuchRowErrorTypeId] = StdbNoSuchRowErrorTypeId
+  static is = hasErrorTypeId<StdbNoSuchRowError>(StdbNoSuchRowErrorTypeId)
+}
 
+const StdbScheduleDelayTooLongErrorTypeId = errorTypeId(
+  "StdbScheduleDelayTooLongError",
+)
 export class StdbScheduleDelayTooLongError extends Data.TaggedError(
   "StdbScheduleDelayTooLongError",
 )<{
   readonly op: string
   readonly cause: unknown
-}> {}
+}> {
+  readonly [StdbScheduleDelayTooLongErrorTypeId] =
+    StdbScheduleDelayTooLongErrorTypeId
+  static is = hasErrorTypeId<StdbScheduleDelayTooLongError>(
+    StdbScheduleDelayTooLongErrorTypeId,
+  )
+}
 
 export type StdbHostFailure =
   | StdbHostCallError
@@ -47,11 +80,11 @@ export type StdbHostFailure =
   | StdbScheduleDelayTooLongError
 
 export const isStdbHostFailure = (error: unknown): error is StdbHostFailure =>
-  error instanceof StdbHostCallError ||
-  error instanceof StdbUniqueAlreadyExistsError ||
-  error instanceof StdbAutoIncOverflowError ||
-  error instanceof StdbNoSuchRowError ||
-  error instanceof StdbScheduleDelayTooLongError
+  StdbHostCallError.is(error) ||
+  StdbUniqueAlreadyExistsError.is(error) ||
+  StdbAutoIncOverflowError.is(error) ||
+  StdbNoSuchRowError.is(error) ||
+  StdbScheduleDelayTooLongError.is(error)
 
 // Discriminates native SpaceTimeDB host errors by their pinned class name.
 // `spacetimedb/server` cannot be value-imported here because it loads the
@@ -80,9 +113,18 @@ export const toHostFailure = (op: string, cause: unknown): StdbHostFailure => {
   return new StdbHostCallError({ op, cause })
 }
 
+const ReducerAsyncNotAllowedErrorTypeId = errorTypeId(
+  "ReducerAsyncNotAllowedError",
+)
 export class ReducerAsyncNotAllowedError extends Data.TaggedError(
   "ReducerAsyncNotAllowedError",
-) {}
+) {
+  readonly [ReducerAsyncNotAllowedErrorTypeId] =
+    ReducerAsyncNotAllowedErrorTypeId
+  static is = hasErrorTypeId<ReducerAsyncNotAllowedError>(
+    ReducerAsyncNotAllowedErrorTypeId,
+  )
+}
 
 export class ReducerGlobalRandomNotAllowedError extends Data.TaggedError(
   "ReducerGlobalRandomNotAllowedError",
@@ -98,9 +140,13 @@ export class ReducerWallClockNotAllowedError extends Data.TaggedError(
     "Wall-clock time (Date.now / new Date()) is not available in SpaceTimeDB reducers. Use ctx.timestamp, or Effect Clock/DateTime (wired to the transaction timestamp), instead." as const
 }
 
+const StdbSenderFailureTypeId = errorTypeId("StdbSenderFailure")
 export class StdbSenderFailure extends Data.TaggedError("StdbSenderFailure")<{
   readonly value: string
-}> {}
+}> {
+  readonly [StdbSenderFailureTypeId] = StdbSenderFailureTypeId
+  static is = hasErrorTypeId<StdbSenderFailure>(StdbSenderFailureTypeId)
+}
 
 export class StdbDeclaredErrorEncodingFailure extends Data.TaggedError(
   "StdbDeclaredErrorEncodingFailure",

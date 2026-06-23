@@ -1,21 +1,15 @@
 # Value-type design: why opaque, not a plain effect schema
 
-This explains why an effect-spacetimedb value-type (`Stdb.string(...)`, `Stdb.u64(...)`,
-`Stdb.struct({...})`, …) is an **opaque object that *wraps* an effect schema** (exposed as
-`.schema`) rather than *being* an effect schema. It is a deliberate trade-off; read this
-before "simplifying" value-types back into plain schemas.
+> **Implementation notes.** The user-facing version of this topic lives at
+> <https://effect-spacetimedb.dev/the-effect-layer/value-type-design>.
+> This file documents implementation detail, rationale, and
+> native behavior not covered on the public docs site. Keep user-facing
+> conceptual prose on the website to avoid drift between the two surfaces.
 
-## What a value-type has to do
-A value-type must satisfy two things at once:
-
-1. **Be reusable as an ordinary effect schema** — decode/encode, compose, reuse in non-STDB
-   code. (One declaration, used in both worlds.)
-2. **Be distinguishable, at the boundary, from a *raw* effect schema** — so that SATS
-   positions (struct fields, table columns, reducer/procedure params, procedure/view returns)
-   only accept things that were declared via an `Stdb.*` constructor and carry a SpacetimeDB
-   native type. A raw `Schema.String` in a table column is a mistake we want caught.
-
-The tension is entirely in *how* (2) is enforced **at compile time**.
+This ADR records why an effect-spacetimedb value-type (`Stdb.string(...)`,
+`Stdb.u64(...)`, `Stdb.struct({...})`, ...) is an opaque wrapper around an effect
+schema instead of being the schema itself. Read this before "simplifying"
+value-types back into plain schemas.
 
 ## Two facts about effect that constrain the design
 - **Annotations are runtime-only at the type level.** We *do* store the real SATS info as

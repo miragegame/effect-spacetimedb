@@ -44,8 +44,8 @@ build step, so those commands reuse the prebuilt bundle instead of invoking
 
 `examples/publishable-module/generated/` is a committed generated client
 fixture used by this repository's regression tests. It is generated from
-`examples/publishable-module` and guarded by the root
-`bun run check:stdb-client-drift` drift check in CI. The fixture and its
+`examples/publishable-module` and guarded by this package's
+`bun run codegen:check` drift check in CI. The fixture and its
 `effect-spacetimedb/testing/example-client` repository export are not included
 in the published npm package.
 
@@ -400,16 +400,17 @@ run-to-completion, single-transaction, deterministic**. The headline constraints
 
 - **No async** — promises, timers, `queueMicrotask`, and `Effect.sleep` are rejected
   (`ReducerAsyncNotAllowedError`); keep handler bodies straight-line.
-- **No `Math.random`** — use `Effect.Random.*` (wired to `ctx.random`); it is
+- **No `Math.random`** — use `Random.*` from `effect/Random` (wired to `ctx.random`); it is
   deterministic and **not** cryptographically secure.
 - **No wall clock** — use `ctx.timestamp` / `Effect.Clock`, never `Date.now`.
 - **Transactions** — reducers write `Db` directly; procedures/HTTP handlers must
   `tx.run(...)`; bodies may re-run on commit conflict, so keep them pure DB work.
 - **Tracing is disabled** server-side, and logs bridge to the host console.
 
-See [Runtime model and constraints](./docs/runtime-model.md) for the full list, and
-[Randomness and determinism](./docs/randomness-and-determinism.md) for the
-randomness contract.
+See [Runtime model and constraints](https://effect-spacetimedb.dev/the-effect-layer/runtime-model)
+for the full list, and
+[Randomness and determinism](https://effect-spacetimedb.dev/the-effect-layer/randomness-and-determinism)
+for the randomness contract.
 
 ## HTTP routes
 

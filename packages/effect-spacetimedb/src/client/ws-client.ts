@@ -63,6 +63,7 @@ import {
   fromBuilder as subscriptionAdapterFromBuilder,
   unsubscribeHandle,
 } from "./ws-subscription-adapter.ts"
+import { makeTableRefAccess } from "./ws-table-ref.ts"
 
 export type {
   SubscriptionBuilderLike,
@@ -164,7 +165,7 @@ type TableCacheClient<Row> = {
   }
 }
 
-type PublicTableCache<Module extends AnyModuleSpec> = {
+export type PublicTableCache<Module extends AnyModuleSpec> = {
   readonly [Key in PublicPersistentTableKeys<Module>]: TableCacheClient<
     TableRow<Module["tables"][Key]>
   >
@@ -405,6 +406,15 @@ export const makeFromModulePlan = <
       subscriptionTargetLabel(target),
     )
 
+  const subscribeTableTarget = <Key extends PublicPersistentTableKeys<Module>>(
+    key: Key,
+  ) =>
+    subscribe({
+      kind: "table",
+      key,
+      name: module.tables[key]!.name,
+    })
+
   const rpc = makeRpc({
     reducers: options.plan.publicReducers,
     procedures: options.plan.publicProcedures,
@@ -501,7 +511,7 @@ export const makeFromModulePlan = <
         Effect.try({
           try: () => Array.from(relation.iter()),
           catch: (cause) =>
-            cause instanceof StdbDecodeError
+            StdbDecodeError.is(cause)
               ? cause
               : new StdbDecodeError({
                   phase: "row",
@@ -549,11 +559,7 @@ export const makeFromModulePlan = <
     return streamTableChanges(
       connectionState,
       relation,
-      subscribe({
-        kind: "table",
-        key,
-        name: module.tables[key]!.name,
-      }),
+      subscribeTableTarget(key),
       (row) => decodeTableRow(key, row),
       streamOptions?.buffer,
     )
@@ -596,11 +602,7 @@ export const makeFromModulePlan = <
     return streamTableChangesWithContext(
       connectionState,
       relation,
-      subscribe({
-        kind: "table",
-        key,
-        name: module.tables[key]!.name,
-      }),
+      subscribeTableTarget(key),
       (row) => decodeTableRow(key, row),
       streamOptions?.buffer,
     )
@@ -637,16 +639,9 @@ export const makeFromModulePlan = <
           >,
       ),
     )
-    const groupSubscribe = Effect.forEach(
-      keys,
-      (key) =>
-        subscribe({
-          kind: "table",
-          key,
-          name: module.tables[key]!.name,
-        }),
-      { discard: true },
-    )
+    const groupSubscribe = Effect.forEach(keys, subscribeTableTarget, {
+      discard: true,
+    })
     const changes = Stream.concat(
       Stream.fromEffect(readSnapshot),
       streamTableGroupChanges(
@@ -732,13 +727,25 @@ export const makeFromModulePlan = <
   const cache = {
     tables,
   } as PublicCache<Module>
+  const tableRefAccess = makeTableRefAccess({
+    module,
+    connection: options.connection,
+    connectionState,
+    tables,
+    subscribeTable: subscribeTableTarget,
+  })
 
   return {
+    moduleName: module.name,
     cache,
     procedures: rpc.procedures,
     reducers: rpc.reducers,
     isInvalidated: connectionState.isInvalidated,
     subscribe,
+    subscribeTableRef: tableRefAccess.subscribeTableRef,
+    subscribeRowRef: tableRefAccess.subscribeRowRef,
+    subscribeTableGroupRef: tableRefAccess.subscribeTableGroupRef,
+    rowMatchesPrimaryKey: tableRefAccess.rowMatchesPrimaryKey,
     streamEventTable: streamEventTableForKey,
     streamRows,
     tableGroup,

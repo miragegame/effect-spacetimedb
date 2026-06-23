@@ -1,84 +1,65 @@
-# Runtime Model And Constraints
+# Runtime Model Implementation Notes
 
-SpaceTimeDB runs module code (reducers, procedures, views, HTTP handlers) inside a
-single V8 isolate under a strict contract: each call is **synchronous**,
-**run-to-completion**, **single-transaction**, and **deterministic**. The host
-deliberately removes the non-deterministic and asynchronous capabilities a normal
-JS runtime provides.
+> **Implementation notes.** The user-facing version of this topic lives at
+> <https://effect-spacetimedb.dev/the-effect-layer/runtime-model>.
+> This file documents implementation detail, rationale, and
+> native behavior not covered on the public docs site. Keep user-facing
+> conceptual prose on the website to avoid drift between the two surfaces.
 
-`effect-spacetimedb` runs your Effect programs *inside* that contract. This page
-collects the resulting quirks and restrictions in one place — what the runtime
-forbids, why, and what to use instead. For the authoring API (builders, tables,
-groups, capability scoping) see [the README](../README.md); for the randomness
-details see [Randomness And Determinism](./randomness-and-determinism.md).
+For the authoring API (builders, tables, groups, capability scoping) see
+[the README](../README.md). For internal random/entropy notes see
+[Randomness And Determinism](./randomness-and-determinism.md).
 
-## Execution Model: Synchronous, Run-To-Completion
+## Execution Internals
 
-Each reducer/procedure/handler is executed at the boundary with the sync runner's
-`runSyncExit` (`src/server/bind.ts`), with `Scheduler.PreventSchedulerYield` set so
-the fiber cannot yield to a later tick. The whole Effect must complete in one
-synchronous pass.
+Each reducer, procedure, view, HTTP handler, and lifecycle handler is executed at
+the boundary with the sync runner's `runSyncExit` (`src/server/bind.ts`), with
+`Scheduler.PreventSchedulerYield` set so the fiber cannot yield to a later tick.
+Anything that suspends the fiber surfaces as `ReducerAsyncNotAllowedError`.
 
-Consequences:
+`Clock.sleep` fails with the same error in all modes. In `dev-guarded` mode the
+timer and microtask globals are also replaced with stubs that throw immediately
+so accidental use fails loudly in tests/CI. Finalizers still run synchronously
+before SpaceTimeDB commits or rolls back, so `Effect.acquireRelease` and scoped
+resources are safe when the resource is bounded to the current call.
 
-- **No async.** Promises, `async` functions, `setTimeout`/`setInterval`,
-  `queueMicrotask`, `Effect.sleep`, and anything that suspends the fiber are not
-  allowed. They surface as `ReducerAsyncNotAllowedError`. In `dev-guarded` mode the
-  timer globals are replaced with stubs that throw immediately so accidental use
-  fails loudly in tests/CI; `Clock.sleep` fails with the same error in all modes.
-- **Finalizers run synchronously** before SpaceTimeDB commits or rolls back, so
-  `Effect.acquireRelease` / scoped resources are safe within a single call.
-- Effect's scheduler optimizations that assume a microtask queue do not apply; keep
-  handler bodies straight-line and synchronous.
+Effect scheduler optimizations that assume a microtask queue do not apply in the
+module host. Handler bodies should stay straight-line and synchronous.
 
-If you need work that is genuinely async (network I/O, timers, queues), it belongs
-**outside** the reducer — on the host, an edge worker, a Durable Object, or a
-client — not inside module code.
+## Determinism Wiring
 
-## Determinism: No Ambient Entropy Or Clock
+Host-source verification matters: SpaceTimeDB replaces `Math.random` with a
+throwing getter, while `Date` remains live unless this package's constrained
+runtime guards are installed.
 
-Every replica must reproduce the same state from the same logged inputs, so the
-host strips or guards some non-deterministic globals and the runtime provides
-deterministic substitutes from the call context. Host-source verification matters:
-`Math.random` throws, while `Date` remains live unless the constrained runtime's
-dev guards are installed.
+The server runtime wires `Random.*` from `effect/Random` to `ctx.random` via
+`makeServerRandom`. `dev-guarded` mode replaces `Math.random` with a throwing
+guard (`ReducerGlobalRandomNotAllowedError`); `runtime` mode keeps a deterministic
+`mulberry32` fallback as a non-semantic backstop for stray library paths.
 
-- **No `Math.random`.** SpaceTimeDB replaces it with a throwing getter. Use
-  `Effect.Random.*`, which the runtime wires to `ctx.random` via `makeServerRandom`.
-  `dev-guarded` mode replaces `Math.random` with a throwing guard
-  (`ReducerGlobalRandomNotAllowedError`); `runtime` mode keeps a deterministic
-  `mulberry32` fallback as a non-semantic backstop. **`ctx.random` is gameplay-grade,
-  not cryptographically secure** — see
-  [Randomness And Determinism](./randomness-and-determinism.md).
-- **No wall clock.** The host leaves `Date.now()` and no-argument `new Date()`
-  live, so they are a determinism hazard. `dev-guarded` mode replaces them with
-  throwing guards (`ReducerWallClockNotAllowedError`). The runtime provides
-  `Clock` from `ctx.timestamp` (`makeServerClock`), so `Effect.Clock` and
-  `DateTime.now` reflect the transaction timestamp. Use `ctx.timestamp` for time.
-- **Determinism is for replication, not secrecy.** Anything reproducible from logged
-  inputs is predictable to anyone who can reconstruct them; you cannot mint secrets
-  or unpredictable values inside a reducer.
+The runtime provides `Clock` from `ctx.timestamp` through `makeServerClock`, so
+`Effect.Clock` and `DateTime.now` reflect the transaction timestamp. In
+`dev-guarded` mode, `Date.now()` and no-argument `new Date()` throw
+`ReducerWallClockNotAllowedError`; explicit conversions such as `new Date(123)`,
+`new Date(value)`, `Date.parse`, and `Date.UTC` remain available.
 
-## Transactions
+## Transaction Internals
 
-- **Reducers run inside one ambient host transaction.** The writable `Db` view is
-  available directly; all writes commit or roll back together when the reducer
-  returns.
-- **Procedures and HTTP handlers have no ambient transaction.** They must open one
-  explicitly with `Tx.run(...)` / `HttpTx.run(...)` (i.e. the module's `withTx`).
-  `Db` is only reachable inside that body — the type system forbids it elsewhere.
-- **Only mutable transactions exist.** SpaceTimeDB exposes no read-only transaction
+- Reducers run inside one ambient host transaction. The writable `Db` view is
+  available directly, and all writes commit or roll back together when the
+  reducer returns.
+- Procedures and HTTP handlers have no ambient transaction. They must open one
+  explicitly with `Tx.run(...)` / `HttpTx.run(...)` (the module's `withTx`).
+  `Db` is only reachable inside that body; the type system forbids it elsewhere.
+- Only mutable transactions exist. SpaceTimeDB exposes no read-only transaction
   for procedures; a "read-only tx" would be a type-level convention, not a host
   feature.
-- **Optimistic concurrency may re-run a transaction body.** On a commit conflict the
-  native SDK re-executes the `withTx` body. Keep transaction bodies pure database
-  work — **no external side effects, no non-idempotent logic** inside `tx.run(...)`.
-- **No cross-transaction atomicity.** A procedure that opens several transactions has
-  no automatic rollback across them; multi-step sagas are developer-managed (status
-  rows + a reaper, as in matchmaking).
-
-Which accessors are legal in which scope is enforced at compile time — see the
-**Capability scoping** table in [the README](../README.md).
+- On a commit conflict, the native SDK may re-execute the `withTx` body. Keep
+  transaction bodies pure database work, with no external side effects or
+  non-idempotent logic inside `tx.run(...)`.
+- A procedure that opens several transactions has no automatic rollback across
+  them. Multi-step sagas are developer-managed with status rows and a reaper, as
+  in matchmaking.
 
 ## Host Call Failures
 
@@ -146,14 +127,3 @@ guards that make forbidden operations throw loudly: timer/microtask globals and
 `runtime` (production) keeps the non-throwing deterministic fallbacks. Write code
 that passes in `dev-guarded` mode and it will behave deterministically in
 production.
-
-## Quick Rules
-
-- Keep handler bodies synchronous; no promises, timers, or `Effect.sleep`.
-- Randomness: `Effect.Random.*` (never `Math.random`); treat it as deterministic and
-  non-secure.
-- Time: `ctx.timestamp` / `Effect.Clock` (never `Date.now`).
-- `Db` writes in reducers directly; in procedures/HTTP handlers only inside
-  `tx.run(...)`.
-- Keep transaction bodies pure DB work — they may run more than once.
-- Do async/network/secret work outside the reducer and pass results in as arguments.

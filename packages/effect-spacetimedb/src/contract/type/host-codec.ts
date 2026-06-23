@@ -2,6 +2,7 @@
 import * as Data from "effect/Data"
 import * as Match from "effect/Match"
 import * as Schema from "effect/Schema"
+import { errorTypeId, hasErrorTypeId } from "../../error-identity.ts"
 import { pascalCaseName } from "../canonical-name.ts"
 import type { AnyValueType } from "../type.ts"
 import * as Type from "../type.ts"
@@ -51,9 +52,13 @@ const hostEncodeErrorMessage = (error: StdbHostEncodeErrorFields): string =>
     Match.exhaustive,
   )
 
+const StdbHostEncodeErrorTypeId = errorTypeId("StdbHostEncodeError")
 export class StdbHostEncodeError extends Data.TaggedError(
   "StdbHostEncodeError",
 )<StdbHostEncodeErrorFields> {
+  readonly [StdbHostEncodeErrorTypeId] = StdbHostEncodeErrorTypeId
+  static is = hasErrorTypeId<StdbHostEncodeError>(StdbHostEncodeErrorTypeId)
+
   override get message(): string {
     return hostEncodeErrorMessage(this)
   }

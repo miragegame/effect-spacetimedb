@@ -76,6 +76,24 @@ export type {
 } from "./session-stream.ts"
 export { EventTableStreamOverflowError } from "./session-stream.ts"
 export {
+  canonicalizeTableGroupKeys,
+  canonicalRowKey,
+  canonicalTableGroupKey,
+  canonicalTableKey,
+  canonicalValueKey,
+  type RowRef,
+  type RowRefValue,
+  subscribeRowRef,
+  subscribeSnapshotRef,
+  subscribeTableGroupRef,
+  subscribeTableRef,
+  type TableGroupRef,
+  type TableGroupRefValue,
+  type TableRef,
+  type TableRefFailure,
+  type TableRefValue,
+} from "./table-ref.ts"
+export {
   type SubscriptionFailure,
   SubscriptionInvalidatedError,
   SubscriptionRejectedError,

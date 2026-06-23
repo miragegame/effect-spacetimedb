@@ -31,7 +31,7 @@ export const stringifyFailure = (error: unknown): string => {
   if (typeof error === "string") {
     return error
   }
-  if (error instanceof StdbSenderFailure) {
+  if (StdbSenderFailure.is(error)) {
     return error.value
   }
   if (error instanceof Error) {
@@ -54,10 +54,7 @@ const reducerAsyncNotAllowedDefect = (
   cause.reasons
     .filter(Cause.isDieReason)
     .map((reason) => reason.defect)
-    .find(
-      (defect): defect is ReducerAsyncNotAllowedError =>
-        defect instanceof ReducerAsyncNotAllowedError,
-    )
+    .find(ReducerAsyncNotAllowedError.is)
 
 const hostFailureToThrow = (error: StdbHostFailure): Error =>
   new Error(
@@ -340,7 +337,7 @@ const throwFailureValue = (
   if (isStdbHostFailure(error)) {
     throw hostFailureToThrow(error)
   }
-  if (options.senderError === true && error instanceof StdbSenderFailure) {
+  if (options.senderError === true && StdbSenderFailure.is(error)) {
     throw new SenderError(error.value)
   }
 
