@@ -5,15 +5,16 @@ import * as Queue from "effect/Queue"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { StdbDecodeError } from "../decode-error.ts"
+import { errorTypeId, hasErrorTypeId } from "../error-identity.ts"
 import type {
   ConnectionInvalidation,
   WsConnectionState,
 } from "./connection-state.ts"
 import type { InsertEvent, RelationHandle } from "./relation.ts"
 import {
+  type SubscriptionFailure,
   SubscriptionInvalidatedError,
   SubscriptionTransportError,
-  type SubscriptionFailure,
 } from "./ws-subscription.ts"
 
 export type TableChange<Row> = Data.TaggedEnum<{
@@ -60,6 +61,8 @@ export type SessionStreamBufferOptions = {
   readonly strategy?: "sliding" | "dropping"
 }
 
+export type SnapshotSignal = "applied" | "changed"
+
 export type EventTableStreamBufferOptions = {
   readonly bufferSize?: number
 }
@@ -69,11 +72,20 @@ type RuntimeSessionStreamBufferOptions = {
   readonly strategy?: "sliding" | "dropping" | "suspend"
 }
 
+const EventTableStreamOverflowErrorTypeId = errorTypeId(
+  "EventTableStreamOverflowError",
+)
 export class EventTableStreamOverflowError extends Data.TaggedError(
   "EventTableStreamOverflowError",
 )<{
   readonly bufferSize: number
 }> {
+  readonly [EventTableStreamOverflowErrorTypeId] =
+    EventTableStreamOverflowErrorTypeId
+  static is = hasErrorTypeId<EventTableStreamOverflowError>(
+    EventTableStreamOverflowErrorTypeId,
+  )
+
   override get message(): string {
     return `Event-table stream buffer capacity ${this.bufferSize.toString()} was exceeded`
   }
@@ -138,7 +150,7 @@ const registerCallback =
         emit.single(options.mapEvent(...args))
       } catch (cause) {
         emit.fail(
-          cause instanceof StdbDecodeError
+          StdbDecodeError.is(cause)
             ? cause
             : new SubscriptionTransportError({
                 cause,
@@ -177,6 +189,7 @@ const sessionStream = <A>(options: {
   readonly connectionState: WsConnectionState
   readonly registrations: ReadonlyArray<SessionRegistration<A>>
   readonly subscribe?: Effect.Effect<unknown, SubscriptionFailure, Scope.Scope>
+  readonly emitAfterSubscribe?: () => A
   readonly buffer?: RuntimeSessionStreamBufferOptions
   readonly overflowFailure?: (bufferSize: number) => SubscriptionFailure
 }) =>
@@ -213,6 +226,9 @@ const sessionStream = <A>(options: {
           yield* options.connectionState.observeInvalidation(onInvalidation)
           if (options.subscribe != null) {
             yield* options.subscribe
+          }
+          if (options.emitAfterSubscribe != null) {
+            emit.single(options.emitAfterSubscribe())
           }
         }),
       ),
@@ -331,24 +347,45 @@ export const streamTableGroupChanges = <Ctx = unknown>(
 ) =>
   sessionStream<void>({
     connectionState,
-    registrations: relations.flatMap((relation) => [
-      registerCallback({
-        register: (callback) => relation.onInsert(callback),
-        unregister: (callback) => relation.removeOnInsert(callback),
-        mapEvent: () => undefined,
-      }),
-      registerCallback({
-        register: (callback) => relation.onDelete(callback),
-        unregister: (callback) => relation.removeOnDelete(callback),
-        mapEvent: () => undefined,
-      }),
-      registerCallback({
-        register: (callback) => relation.onUpdate(callback),
-        unregister: (callback) => relation.removeOnUpdate(callback),
-        mapEvent: () => undefined,
-      }),
-    ]),
+    registrations: relations.flatMap((relation) =>
+      relationSignalRegistrations(relation, undefined),
+    ),
     ...(subscribe != null ? { subscribe } : {}),
+    buffer: snapshotStreamBuffer(buffer),
+  })
+
+const relationSignalRegistrations = <Row, Ctx, A>(
+  relation: RelationHandle<Row, Ctx>,
+  signal: A,
+) => [
+  registerCallback({
+    register: (callback) => relation.onInsert(callback),
+    unregister: (callback) => relation.removeOnInsert(callback),
+    mapEvent: () => signal,
+  }),
+  registerCallback({
+    register: (callback) => relation.onDelete(callback),
+    unregister: (callback) => relation.removeOnDelete(callback),
+    mapEvent: () => signal,
+  }),
+  registerCallback({
+    register: (callback) => relation.onUpdate(callback),
+    unregister: (callback) => relation.removeOnUpdate(callback),
+    mapEvent: () => signal,
+  }),
+]
+
+export const streamTableSnapshotSignals = <Row, Ctx = unknown>(
+  connectionState: WsConnectionState,
+  relation: RelationHandle<Row, Ctx>,
+  subscribe?: Effect.Effect<unknown, SubscriptionFailure, Scope.Scope>,
+  buffer?: SessionStreamBufferOptions,
+) =>
+  sessionStream<SnapshotSignal>({
+    connectionState,
+    registrations: relationSignalRegistrations(relation, "changed" as const),
+    ...(subscribe != null ? { subscribe } : {}),
+    emitAfterSubscribe: () => "applied" as const,
     buffer: snapshotStreamBuffer(buffer),
   })
 

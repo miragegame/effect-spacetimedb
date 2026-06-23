@@ -1,5 +1,6 @@
 import * as Cause from "effect/Cause"
 import * as Data from "effect/Data"
+import { errorTypeId, hasErrorTypeId } from "./error-identity.ts"
 
 export type StdbDecodePhase = "args" | "ok" | "row" | "declaredError"
 
@@ -20,6 +21,8 @@ const messageFromUnknown = (cause: unknown): string => {
   return String(cause)
 }
 
+const StdbDecodeErrorTypeId = errorTypeId("StdbDecodeError")
+
 export class StdbDecodeError extends Data.TaggedError("StdbDecodeError")<{
   readonly phase: StdbDecodePhase
   readonly cause: unknown
@@ -28,6 +31,9 @@ export class StdbDecodeError extends Data.TaggedError("StdbDecodeError")<{
   readonly op?: string
   readonly declaredTag?: string
 }> {
+  readonly [StdbDecodeErrorTypeId] = StdbDecodeErrorTypeId
+  static is = hasErrorTypeId<StdbDecodeError>(StdbDecodeErrorTypeId)
+
   override get message(): string {
     const context = [
       this.table != null ? `table=${this.table}` : undefined,
@@ -72,6 +78,4 @@ export const decodeDefectFromCause = (
   cause.reasons
     .filter(Cause.isDieReason)
     .map((reason) => reason.defect)
-    .find(
-      (defect): defect is StdbDecodeError => defect instanceof StdbDecodeError,
-    )
+    .find(StdbDecodeError.is)

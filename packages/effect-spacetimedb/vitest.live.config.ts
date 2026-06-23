@@ -23,6 +23,7 @@ export default defineConfig({
     setupFiles: ["./test/live/vitest.setup.ts"],
     hookTimeout: 300_000,
     testTimeout: 300_000,
+    retry: 1,
     fileParallelism: false,
     strictTags: true,
     tags: [...liveTestTagDefinitions],

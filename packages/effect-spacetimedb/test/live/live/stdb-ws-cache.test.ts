@@ -1,17 +1,22 @@
+import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as EffectVitest from "@effect/vitest"
+import * as SubscriptionRef from "effect/SubscriptionRef"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+
 const { describe, expect, live } = EffectVitest
+
 import * as ExampleModuleFixture from "effect-spacetimedb/testing/example-module"
 import {
   callLiveReducer,
-  liveHarness,
   liveFunctionName,
+  liveHarness,
   provideLiveTest,
   type TypedLiveConnection,
   waitForRows,
 } from "../helpers/live-harness"
+
 const {
   Example: Live,
   ExampleModule: LiveModule,
@@ -68,6 +73,76 @@ describe("effect-spacetimedb live ws cache", () => {
               (row) =>
                 row.id === decodeUserId("cache-user-2") &&
                 row.name === decodeUserName("Grace"),
+            ),
+          ).toBe(true)
+        }),
+      ),
+    { timeout: 180_000 },
+  )
+  live(
+    "exposes live table snapshots through subscription refs",
+    () =>
+      provideLiveTest(
+        Effect.gen(function* () {
+          const live = yield* liveHarness
+          const session = yield* Live.client.ws.scoped(
+            live.makeWsConfig(LiveModule),
+          )
+          const connection =
+            session.connection as unknown as TypedLiveConnection<
+              typeof LiveModule
+            >
+
+          yield* callLiveReducer(connection, wireFunction("userUpsert"), {
+            userId: decodeUserId("cache-ref-user-1"),
+            name: decodeUserName("Margaret"),
+          })
+          const ref = yield* session.subscribeTableRef("user")
+          const firstRows = yield* waitForRows(
+            () =>
+              SubscriptionRef.get(ref).pipe(
+                Effect.map((result) =>
+                  AsyncResult.isSuccess(result) ? result.value : [],
+                ),
+              ),
+            (rows) =>
+              rows.some(
+                (row) =>
+                  row.id === decodeUserId("cache-ref-user-1") &&
+                  row.name === decodeUserName("Margaret"),
+              ),
+          )
+          expect(
+            firstRows.some(
+              (row) =>
+                row.id === decodeUserId("cache-ref-user-1") &&
+                row.name === decodeUserName("Margaret"),
+            ),
+          ).toBe(true)
+
+          yield* callLiveReducer(connection, wireFunction("userUpsert"), {
+            userId: decodeUserId("cache-ref-user-2"),
+            name: decodeUserName("Evelyn"),
+          })
+          const updatedRows = yield* waitForRows(
+            () =>
+              SubscriptionRef.get(ref).pipe(
+                Effect.map((result) =>
+                  AsyncResult.isSuccess(result) ? result.value : [],
+                ),
+              ),
+            (rows) =>
+              rows.some(
+                (row) =>
+                  row.id === decodeUserId("cache-ref-user-2") &&
+                  row.name === decodeUserName("Evelyn"),
+              ),
+          )
+          expect(
+            updatedRows.some(
+              (row) =>
+                row.id === decodeUserId("cache-ref-user-2") &&
+                row.name === decodeUserName("Evelyn"),
             ),
           ).toBe(true)
         }),

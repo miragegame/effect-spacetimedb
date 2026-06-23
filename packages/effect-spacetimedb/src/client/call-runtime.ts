@@ -104,12 +104,12 @@ type ProcedureEnvelopeRuntime =
 const isTransportCallFailure = (
   cause: unknown,
 ): cause is StdbDecodeError | RemoteRejectedError | TransportError =>
-  cause instanceof StdbDecodeError ||
-  cause instanceof RemoteRejectedError ||
-  cause instanceof TransportError
+  StdbDecodeError.is(cause) ||
+  RemoteRejectedError.is(cause) ||
+  TransportError.is(cause)
 
 const isRawCallFailure = <E>(cause: unknown): cause is RawCallFailure<E> =>
-  isTransportCallFailure(cause) || cause instanceof DomainCallError
+  isTransportCallFailure(cause) || DomainCallError.is(cause)
 
 const failDeclaredDomain = <E>(
   error: E,

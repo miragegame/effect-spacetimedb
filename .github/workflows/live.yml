@@ -1,0 +1,35 @@
+name: Live
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  effect-spacetimedb-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install SpaceTimeDB 2.5.0
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/spacetimedb.tar.gz"
+          extract_dir="${RUNNER_TEMP}/spacetimedb"
+          bin_dir="${RUNNER_TEMP}/spacetimedb-bin"
+          curl -L "https://github.com/clockworklabs/SpacetimeDB/releases/download/v2.5.0/spacetime-x86_64-unknown-linux-gnu.tar.gz" -o "${archive}"
+          mkdir -p "${extract_dir}" "${bin_dir}"
+          tar -xzf "${archive}" -C "${extract_dir}"
+          cli_path="$(find "${extract_dir}" -type f -name spacetimedb-cli -perm -111 | head -n 1)"
+          standalone_path="$(find "${extract_dir}" -type f -name spacetimedb-standalone -perm -111 | head -n 1)"
+          test -n "${cli_path}"
+          test -n "${standalone_path}"
+          cp "${cli_path}" "${bin_dir}/spacetimedb-cli"
+          cp "${standalone_path}" "${bin_dir}/spacetimedb-standalone"
+          ln -sf "${bin_dir}/spacetimedb-cli" "${bin_dir}/spacetime"
+          chmod +x "${bin_dir}/spacetimedb-cli" "${bin_dir}/spacetimedb-standalone" "${bin_dir}/spacetime"
+          echo "SPACETIME_CLI_BIN=${bin_dir}/spacetime" >> "${GITHUB_ENV}"
+          echo "${bin_dir}" >> "${GITHUB_PATH}"
+      - run: bun install
+      - run: bun --cwd=packages/effect-spacetimedb run test:live
