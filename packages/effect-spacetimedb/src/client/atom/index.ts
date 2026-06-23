@@ -113,10 +113,7 @@ const refAtom = <A, E>(
     })
     const cancel = Effect.runCallbackWith(services)(run, {
       onExit: (exit) => {
-        if (
-          Exit.isFailure(exit) &&
-          !exit.cause.reasons.every(Cause.isInterruptReason)
-        ) {
+        if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
           setValue(exit.cause.pipe((cause) => AsyncResult.failure<A, E>(cause)))
         }
       },
