@@ -1,6 +1,7 @@
 import * as Data from "effect/Data"
 import type { Identity } from "spacetimedb"
 import type { AnyModuleSpec } from "../contract/module.ts"
+import { errorTypeId, hasErrorTypeId } from "../error-identity.ts"
 import type { WsCallableTransport, WsConnectionLike } from "./ws-client.ts"
 
 export type WsCompression = "gzip" | "brotli" | "none"
@@ -109,11 +110,20 @@ export type GeneratedWsClientConfig<
   readonly DbConnection: GeneratedConnectionClassLike
 }
 
+const WsUnsupportedBuilderFeatureErrorTypeId = errorTypeId(
+  "WsUnsupportedBuilderFeatureError",
+)
 export class WsUnsupportedBuilderFeatureError extends Data.TaggedError(
   "WsUnsupportedBuilderFeatureError",
 )<{
   readonly feature: "withLightMode" | "withConfirmedReads" | "withWSFn"
-}> {}
+}> {
+  readonly [WsUnsupportedBuilderFeatureErrorTypeId] =
+    WsUnsupportedBuilderFeatureErrorTypeId
+  static is = hasErrorTypeId<WsUnsupportedBuilderFeatureError>(
+    WsUnsupportedBuilderFeatureErrorTypeId,
+  )
+}
 
 export const generatedConfig = <
   Module extends AnyModuleSpec,

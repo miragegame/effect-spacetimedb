@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import { decodeDefectFromCause, type StdbDecodeError } from "../decode-error.ts"
+import { errorTypeId, hasErrorTypeId } from "../error-identity.ts"
 import type {
   AnyServerContextRequirements,
   Db,
@@ -49,14 +50,20 @@ type ScopedTxRunnerOptions<
   ) => Effect.Effect<A, E, RuntimeR>
 }
 
+const TxDomainFailureTypeId = errorTypeId("TxDomainFailure")
 class TxDomainFailure {
   readonly _tag = "TxDomainFailure"
+  readonly [TxDomainFailureTypeId] = TxDomainFailureTypeId
+  static is = hasErrorTypeId<TxDomainFailure>(TxDomainFailureTypeId)
 
   constructor(readonly error: unknown) {}
 }
 
+const TxDomainDefectTypeId = errorTypeId("TxDomainDefect")
 class TxDomainDefect {
   readonly _tag = "TxDomainDefect"
+  readonly [TxDomainDefectTypeId] = TxDomainDefectTypeId
+  static is = hasErrorTypeId<TxDomainDefect>(TxDomainDefectTypeId)
 
   constructor(readonly defect: unknown) {}
 }
@@ -112,18 +119,14 @@ const makeScopedTxRunner = <
             })
           }),
         catch: (cause) =>
-          cause instanceof TxDomainFailure || cause instanceof TxDomainDefect
+          TxDomainFailure.is(cause) || TxDomainDefect.is(cause)
             ? cause
             : toHostFailure("withTx", cause),
       }).pipe(
-        Effect.catchIf(
-          (cause): cause is TxDomainFailure => cause instanceof TxDomainFailure,
-          (cause) => Effect.fail(cause.error as E | StdbDecodeError),
+        Effect.catchIf(TxDomainFailure.is, (cause) =>
+          Effect.fail(cause.error as E | StdbDecodeError),
         ),
-        Effect.catchIf(
-          (cause): cause is TxDomainDefect => cause instanceof TxDomainDefect,
-          (cause) => Effect.die(cause.defect),
-        ),
+        Effect.catchIf(TxDomainDefect.is, (cause) => Effect.die(cause.defect)),
       ),
   }) satisfies ScopedTxRunner<RuntimeR, Allowed>
 

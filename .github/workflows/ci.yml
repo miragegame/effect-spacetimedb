@@ -14,3 +14,4 @@ jobs:
       - run: bun install
       - run: bun run typecheck
       - run: bun run test
+      - run: bun --cwd=packages/effect-spacetimedb run attw

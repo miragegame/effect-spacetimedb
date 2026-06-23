@@ -199,5 +199,5 @@ export const decodeStdbEventContext = (
   Effect.try({
     try: () => decodeStdbEventContextSync(value, context),
     catch: (cause) =>
-      cause instanceof StdbDecodeError ? cause : decodeFailure(cause, context),
+      StdbDecodeError.is(cause) ? cause : decodeFailure(cause, context),
   })

@@ -4,32 +4,53 @@ import { InternalError, SenderError } from "spacetimedb"
 import * as ErrorCodec from "../contract/error.ts"
 import * as Type from "../contract/type.ts"
 import { StdbDecodeError } from "../decode-error.ts"
+import { errorTypeId, hasErrorTypeId } from "../error-identity.ts"
 import { prepareHttpInputValue } from "./http-json.ts"
 import * as TransportCodec from "./value-codec.ts"
 
+const DomainCallErrorTypeId = errorTypeId("DomainCallError")
 export class DomainCallError<E> extends Data.TaggedError("DomainCallError")<{
   readonly error: E
   readonly remote?: RemoteRejectedError
-}> {}
+}> {
+  readonly [DomainCallErrorTypeId] = DomainCallErrorTypeId
+  static is = hasErrorTypeId<DomainCallError<unknown>>(DomainCallErrorTypeId)
+}
 
+const RemoteRejectedErrorTypeId = errorTypeId("RemoteRejectedError")
 export class RemoteRejectedError extends Data.TaggedError(
   "RemoteRejectedError",
 )<{
   readonly raw: string
   readonly declaredTag?: string
-}> {}
+}> {
+  readonly [RemoteRejectedErrorTypeId] = RemoteRejectedErrorTypeId
+  static is = hasErrorTypeId<RemoteRejectedError>(RemoteRejectedErrorTypeId)
+}
 
+const RemoteRejectedBodyTypeId = errorTypeId("RemoteRejectedBody")
 export class RemoteRejectedBody extends Data.TaggedError("RemoteRejectedBody")<{
   readonly raw: string
-}> {}
+}> {
+  readonly [RemoteRejectedBodyTypeId] = RemoteRejectedBodyTypeId
+  static is = hasErrorTypeId<RemoteRejectedBody>(RemoteRejectedBodyTypeId)
+}
 
+const TransportErrorTypeId = errorTypeId("TransportError")
 export class TransportError extends Data.TaggedError("TransportError")<{
   readonly cause: unknown
-}> {}
+}> {
+  readonly [TransportErrorTypeId] = TransportErrorTypeId
+  static is = hasErrorTypeId<TransportError>(TransportErrorTypeId)
+}
 
+const WsRpcInvokeErrorTypeId = errorTypeId("WsRpcInvokeError")
 export class WsRpcInvokeError extends Data.TaggedError("WsRpcInvokeError")<{
   readonly cause: unknown
-}> {}
+}> {
+  readonly [WsRpcInvokeErrorTypeId] = WsRpcInvokeErrorTypeId
+  static is = hasErrorTypeId<WsRpcInvokeError>(WsRpcInvokeErrorTypeId)
+}
 
 export type CallFailure<E> =
   | E
@@ -105,7 +126,7 @@ type UnhandledDomainError<Domain extends TaggedDomainError, Handlers> = [
 
 const isDomainCallError = <Domain>(
   cause: unknown,
-): cause is DomainCallError<Domain> => cause instanceof DomainCallError
+): cause is DomainCallError<Domain> => DomainCallError.is(cause)
 
 type ProtocolChannelTop = {} | null | undefined
 
@@ -188,13 +209,13 @@ export const messageFromUnknown = (cause: unknown): string | undefined => {
 export const remoteFailureMessageFromUnknown = (
   cause: unknown,
 ): string | undefined => {
-  if (cause instanceof WsRpcInvokeError) {
+  if (WsRpcInvokeError.is(cause)) {
     return remoteFailureMessageFromUnknown(cause.cause)
   }
   if (typeof cause === "string") {
     return cause
   }
-  if (cause instanceof RemoteRejectedBody) {
+  if (RemoteRejectedBody.is(cause)) {
     return cause.raw
   }
   if (cause instanceof SenderError || cause instanceof InternalError) {
@@ -302,10 +323,10 @@ export const remoteRejectedFromRaw = (raw: string): RemoteRejectedError => {
 }
 
 export const classifyRawCallFailure = <E>(cause: unknown): CallFailure<E> =>
-  cause instanceof WsRpcInvokeError
+  WsRpcInvokeError.is(cause)
     ? classifyRawCallFailure(cause.cause)
-    : cause instanceof RemoteRejectedBody || typeof cause === "string"
+    : RemoteRejectedBody.is(cause) || typeof cause === "string"
       ? (remoteRejectedFromRaw(
-          cause instanceof RemoteRejectedBody ? cause.raw : cause,
+          RemoteRejectedBody.is(cause) ? cause.raw : cause,
         ) as CallFailure<E>)
       : (new TransportError({ cause }) as CallFailure<E>)

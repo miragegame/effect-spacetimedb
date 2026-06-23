@@ -103,7 +103,7 @@ const readResponseText = <E>(response: {
   response.text.pipe(Effect.mapError((cause) => new TransportError({ cause })))
 
 const transportErrorFrom = (cause: unknown): TransportError =>
-  cause instanceof TransportError ? cause : new TransportError({ cause })
+  TransportError.is(cause) ? cause : new TransportError({ cause })
 
 const decodeHttpBody = <A>(
   type: AnyValueType,

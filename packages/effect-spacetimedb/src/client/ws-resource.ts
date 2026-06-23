@@ -7,6 +7,7 @@ import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import type { Identity } from "spacetimedb"
 import type { AnyModuleSpec } from "../contract/module.ts"
+import { errorTypeId, hasErrorTypeId } from "../error-identity.ts"
 import type { ModulePlan } from "../module-plan.ts"
 import { makeModulePlan } from "../module-plan.ts"
 import { prefixId } from "../utils.ts"
@@ -68,10 +69,14 @@ export type WsSession<
  * Connection acquisition failure. Unsupported generated builder capabilities
  * are exposed as `WsUnsupportedBuilderFeatureError` in `cause`.
  */
+const WsConnectErrorTypeId = errorTypeId("WsConnectError")
 export class WsConnectError extends Data.TaggedError("WsConnectError")<{
   readonly cause: unknown
   readonly context?: unknown
-}> {}
+}> {
+  readonly [WsConnectErrorTypeId] = WsConnectErrorTypeId
+  static is = hasErrorTypeId<WsConnectError>(WsConnectErrorTypeId)
+}
 
 class WsDisconnectError extends Data.TaggedError("WsDisconnectError")<{
   readonly cause: unknown

@@ -1,4 +1,6 @@
 // lint-ignore: effect-no-throw-in-effect-callgraph - mock transports intentionally throw synchronously to test wrapper failure classification.
+
+import * as EffectVitest from "@effect/vitest"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -8,27 +10,44 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as EffectVitest from "@effect/vitest"
+import * as SubscriptionRef from "effect/SubscriptionRef"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AtomRegistry from "effect/unstable/reactivity/AtomRegistry"
+
 const { describe, expect, it } = EffectVitest
+
 import * as Stdb from "effect-spacetimedb"
+import {
+  canonicalRowKey,
+  canonicalTableGroupKey,
+  canonicalTableKey,
+  canonicalValueKey,
+  type RowRefValue,
+} from "effect-spacetimedb/client"
+import {
+  rowAtomFamily,
+  tableAtomFamily,
+  tableGroupAtomFamily,
+} from "effect-spacetimedb/client/atom"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import { FullModule, UserId, UserName } from "../fixtures/full-module"
 import type { SdkEventContext } from "../helpers/sdk-event-oracle"
 import {
-  StableTimestamp,
   errorContext,
-  reducerContext as sdkReducerContext,
   reducerErr,
   reducerInfo,
   reducerInternalError,
   reducerOk,
   reducerOkEmpty,
+  StableTimestamp,
+  reducerContext as sdkReducerContext,
   subscribeAppliedContext,
   transactionContext,
   unsubscribeAppliedContext,
 } from "../helpers/sdk-event-oracle"
 import { waitForPredicate } from "../helpers/wait-for-predicate"
 import { makeFullModuleWsDb } from "../helpers/ws-fixtures"
+
 type UnknownEventContext = {
   readonly event: {
     readonly tag: "UnknownNativeEvent"
@@ -415,6 +434,291 @@ describe("relation streams", () => {
           ],
         ])
       }).pipe(Effect.scoped),
+  )
+  it.effect(
+    "subscribeTableRef seeds from the applied snapshot instead of the pre-applied cache",
+    () =>
+      Effect.gen(function* () {
+        const userRelation = makeSnapshotRelation<RawUserRow, EventContext>([])
+        const eventRelation = makeRelation<RawPresenceRow, EventContext>()
+        const { client, applySubscription, subscribeCalls } = makeClient(
+          userRelation.handle,
+          eventRelation.handle,
+        )
+        const ref = yield* client.subscribeTableRef("user")
+        const valuesFiber = yield* SubscriptionRef.changes(ref).pipe(
+          Stream.take(2),
+          Stream.runCollect,
+          Effect.forkScoped,
+        )
+
+        yield* waitForPredicate(
+          () => subscribeCalls() === 1,
+          "subscribeTableRef did not start subscription",
+        )
+        userRelation.emitInsert(
+          reducerContext("userUpsert"),
+          rawUserRow("user-pre-applied", "Ignored"),
+        )
+        yield* Effect.yieldNow
+        userRelation.replaceRows([rawUserRow("user-1", "Ada Lovelace")])
+        applySubscription()
+
+        const values = Array.from(yield* Fiber.join(valuesFiber))
+        expect(AsyncResult.isInitial(values[0]!)).toBe(true)
+        expect(values[1]).toMatchObject({
+          _tag: "Success",
+          value: [{ id: "user-1", name: "Ada Lovelace" }],
+        })
+      }).pipe(Effect.scoped),
+  )
+  it.effect(
+    "subscribeTableRef stores post-applied failures in the ref value",
+    () =>
+      Effect.gen(function* () {
+        const userRelation = makeSnapshotRelation<RawUserRow, EventContext>([])
+        const eventRelation = makeRelation<RawPresenceRow, EventContext>()
+        const { client, applySubscription, failSubscription, subscribeCalls } =
+          makeClient(userRelation.handle, eventRelation.handle)
+        const ref = yield* client.subscribeTableRef("user")
+
+        yield* waitForPredicate(
+          () => subscribeCalls() === 1,
+          "failing subscribeTableRef did not start subscription",
+        )
+        applySubscription()
+        failSubscription("connection lost", new Error("connection lost"))
+        yield* waitForPredicate(
+          () => ref.pipe(SubscriptionRef.getUnsafe, AsyncResult.isFailure),
+          "subscribeTableRef did not publish post-applied failure",
+        )
+
+        expect(AsyncResult.isFailure(SubscriptionRef.getUnsafe(ref))).toBe(true)
+      }).pipe(Effect.scoped),
+  )
+  it.effect("same-table row refs share one table subscription", () =>
+    Effect.gen(function* () {
+      const userRelation = makeSnapshotRelation<RawUserRow, EventContext>([])
+      const eventRelation = makeRelation<RawPresenceRow, EventContext>()
+      const { client, applySubscription, subscribeCalls } = makeClient(
+        userRelation.handle,
+        eventRelation.handle,
+      )
+      const adaRef = yield* client.subscribeRowRef("user", "user-1")
+      const graceRef = yield* client.subscribeRowRef("user", "user-2")
+
+      yield* waitForPredicate(
+        () => subscribeCalls() === 1,
+        "same-table row refs opened more than one subscription",
+      )
+      userRelation.replaceRows([
+        rawUserRow("user-1", "Ada"),
+        rawUserRow("user-2", "Grace"),
+      ])
+      applySubscription()
+      yield* waitForPredicate(
+        () =>
+          adaRef.pipe(SubscriptionRef.getUnsafe, AsyncResult.isSuccess) &&
+          graceRef.pipe(SubscriptionRef.getUnsafe, AsyncResult.isSuccess),
+        "row refs did not receive the shared table snapshot",
+      )
+
+      const ada = adaRef.pipe(SubscriptionRef.getUnsafe)
+      const grace = graceRef.pipe(SubscriptionRef.getUnsafe)
+      expect(subscribeCalls()).toBe(1)
+      expect(AsyncResult.isSuccess(ada)).toBe(true)
+      expect(AsyncResult.isSuccess(grace)).toBe(true)
+      if (AsyncResult.isSuccess(ada)) {
+        expect(Option.getOrUndefined(ada.value)).toEqual({
+          id: "user-1",
+          name: "Ada",
+        })
+      }
+      if (AsyncResult.isSuccess(grace)) {
+        expect(Option.getOrUndefined(grace.value)).toEqual({
+          id: "user-2",
+          name: "Grace",
+        })
+      }
+    }).pipe(Effect.scoped),
+  )
+  it.effect("table refs and table group refs share table subscriptions", () =>
+    Effect.gen(function* () {
+      const userRelation = makeSnapshotRelation<RawUserRow, EventContext>([])
+      const eventRelation = makeRelation<RawPresenceRow, EventContext>()
+      const { client, applySubscription, subscribeCalls } = makeClient(
+        userRelation.handle,
+        eventRelation.handle,
+      )
+      const tableRef = yield* client.subscribeTableRef("user")
+      const groupRef = yield* client.subscribeTableGroupRef(["user"] as const)
+
+      yield* waitForPredicate(
+        () => subscribeCalls() === 1,
+        "table and table-group refs opened more than one subscription",
+      )
+      userRelation.replaceRows([rawUserRow("user-1", "Ada")])
+      applySubscription()
+      yield* waitForPredicate(
+        () =>
+          tableRef.pipe(SubscriptionRef.getUnsafe, AsyncResult.isSuccess) &&
+          groupRef.pipe(SubscriptionRef.getUnsafe, AsyncResult.isSuccess),
+        "table and table-group refs did not receive the shared snapshot",
+      )
+
+      const table = tableRef.pipe(SubscriptionRef.getUnsafe)
+      const group = groupRef.pipe(SubscriptionRef.getUnsafe)
+      expect(subscribeCalls()).toBe(1)
+      expect(AsyncResult.isSuccess(table)).toBe(true)
+      expect(AsyncResult.isSuccess(group)).toBe(true)
+      if (AsyncResult.isSuccess(table)) {
+        expect(table.value).toEqual([
+          {
+            id: "user-1",
+            name: "Ada",
+          },
+        ])
+      }
+      if (AsyncResult.isSuccess(group)) {
+        expect(group.value).toEqual({
+          user: [
+            {
+              id: "user-1",
+              name: "Ada",
+            },
+          ],
+        })
+      }
+    }).pipe(Effect.scoped),
+  )
+  it("canonical subscription keys distinguish structured values", () => {
+    expect(canonicalValueKey(["x", "y"])).not.toBe(
+      canonicalValueKey(["x,string:y"]),
+    )
+    expect(canonicalValueKey({ b: [2], a: 1 })).toBe(
+      canonicalValueKey({ a: 1, b: [2] }),
+    )
+    expect(canonicalTableKey("module:table", "key")).not.toBe(
+      canonicalTableKey("module", "table:key"),
+    )
+    expect(canonicalRowKey("module", "row:key", "value")).not.toBe(
+      canonicalRowKey("module:row", "key", "value"),
+    )
+    expect(canonicalTableGroupKey("module", ["a|b", "c"])).not.toBe(
+      canonicalTableGroupKey("module", ["a", "b|c"]),
+    )
+    expect(() => canonicalValueKey(Symbol("unsupported"))).toThrow(TypeError)
+  })
+  it("atom families dedupe canonical binary row and sorted group keys", () => {
+    const userRelation = makeSnapshotRelation<RawUserRow, EventContext>([])
+    const eventRelation = makeRelation<RawPresenceRow, EventContext>()
+    const { client } = makeClient(userRelation.handle, eventRelation.handle)
+    const rows = rowAtomFamily<typeof FullModule>(client)
+    const tables = tableAtomFamily<typeof FullModule>(client)
+    const groupClient = StdbTesting.ClientWs.make({
+      module: GroupModule,
+      connection: {
+        db: {
+          groupUser: makeRelation<RawGroupUserRow, EventContext>().handle,
+          groupFriend: makeRelation<RawGroupFriendRow, EventContext>().handle,
+        },
+        subscriptionBuilder: () => ({
+          onApplied: () => {
+            throw new Error("unexpected atom-family subscription")
+          },
+          onError: () => {
+            throw new Error("unexpected atom-family subscription")
+          },
+          subscribe: () => {
+            throw new Error("unexpected atom-family subscription")
+          },
+        }),
+      },
+    })
+    const groups = tableGroupAtomFamily<typeof GroupModule>(groupClient)
+
+    expect(rows("user", new Uint8Array([1, 2, 3]))).toBe(
+      rows("user", new Uint8Array([1, 2, 3])),
+    )
+    expect(tables("user")).toBe(
+      tableAtomFamily<typeof FullModule>(client)("user"),
+    )
+    expect(groups(["groupFriend", "groupUser"] as const)).toBe(
+      tableGroupAtomFamily<typeof GroupModule>(groupClient)([
+        "groupUser",
+        "groupFriend",
+        "groupUser",
+      ] as const),
+    )
+  })
+  it.effect("row atoms preserve identity when a sibling row changes", () =>
+    Effect.gen(function* () {
+      const userRelation = makeSnapshotRelation<RawUserRow, EventContext>([])
+      const eventRelation = makeRelation<RawPresenceRow, EventContext>()
+      const { client, applySubscription, subscribeCalls } = makeClient(
+        userRelation.handle,
+        eventRelation.handle,
+      )
+      const registry = AtomRegistry.make()
+      yield* Effect.addFinalizer(() => Effect.succeed(registry.dispose()))
+      const rows = rowAtomFamily<typeof FullModule>(client)
+      const rowAValues: Array<RowRefValue<UserRow>> = []
+      const rowBValues: Array<RowRefValue<UserRow>> = []
+      const unsubscribeA = registry.subscribe(
+        rows("user", "user-1"),
+        (value) => {
+          rowAValues.push(value)
+        },
+        { immediate: true },
+      )
+      yield* Effect.addFinalizer(() => Effect.succeed(unsubscribeA()))
+      const unsubscribeB = registry.subscribe(
+        rows("user", "user-2"),
+        (value) => {
+          rowBValues.push(value)
+        },
+        { immediate: true },
+      )
+      yield* Effect.addFinalizer(() => Effect.succeed(unsubscribeB()))
+
+      yield* waitForPredicate(
+        () => subscribeCalls() === 1,
+        "row atom subscriptions did not share the table atom",
+      )
+      userRelation.replaceRows([
+        rawUserRow("user-1", "Ada"),
+        rawUserRow("user-2", "Grace"),
+      ])
+      applySubscription()
+      yield* waitForPredicate(
+        () => rowBValues.some((value) => AsyncResult.isSuccess(value)),
+        "row B atom did not receive the initial success",
+      )
+      const rowBSuccess = rowBValues.find((value) =>
+        AsyncResult.isSuccess(value),
+      )
+
+      userRelation.replaceRows([
+        rawUserRow("user-1", "Ada Updated"),
+        rawUserRow("user-2", "Grace"),
+      ])
+      userRelation.emitUpdate(
+        reducerContext("userUpsert"),
+        rawUserRow("user-1", "Ada"),
+        rawUserRow("user-1", "Ada Updated"),
+      )
+      yield* waitForPredicate(
+        () =>
+          rowAValues.some(
+            (value) =>
+              AsyncResult.isSuccess(value) &&
+              Option.getOrUndefined(value.value)?.name === "Ada Updated",
+          ),
+        "row A atom did not receive the sibling update",
+      )
+
+      expect(rowBValues.at(-1)).toBe(rowBSuccess)
+    }).pipe(Effect.scoped),
   )
   it.effect(
     "streamRows emits one snapshot for a synchronous callback burst",

@@ -120,6 +120,7 @@ describe("error codec", (it) => {
       )
 
       expect(decoded).toBeInstanceOf(NamespacedErrors.UserMissing)
+      expect(NamespacedErrors.UserMissing.is(decoded)).toBe(true)
       expect(decoded).toMatchObject({
         _tag: "NamespacedUserMissing",
         userId: "user_1",

@@ -16,8 +16,13 @@ The library package lives in `packages/effect-spacetimedb`.
   entrypoint used from module `src/index.ts` files.
 - `effect-spacetimedb/server-polyfills` is a side-effect import for native
   SpaceTimeDB module bundles.
+- `effect-spacetimedb/dev-server` starts a temporary local SpaceTimeDB runtime
+  and publishes a prebuilt bundle for tests and tools.
+- `effect-spacetimedb/testing` and `effect-spacetimedb/testing/spacetime-sys`
+  contain regression-test helpers and the off-host `spacetime:sys` stub.
 
-See `packages/effect-spacetimedb/README.md` for library usage details.
+See `packages/effect-spacetimedb/README.md` for library usage details and
+https://effect-spacetimedb.dev for the public docs site.
 
 ## Contributions and Releases
 

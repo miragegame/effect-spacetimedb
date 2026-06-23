@@ -5,6 +5,7 @@ import * as SchemaAST from "effect/SchemaAST"
 import type {} from "effect/unstable/httpapi/HttpApiSchema"
 import * as ParseResult from "../compat/parse-result.ts"
 import { StdbDecodeError } from "../decode-error.ts"
+import { errorTypeId, hasErrorTypeId } from "../error-identity.ts"
 import { typedFromEntries } from "../utils.ts"
 import type { AnyValueType } from "./type.ts"
 import * as Type from "./type.ts"
@@ -47,6 +48,7 @@ type GeneratedErrorClass<
   readonly _tag: Tag
   readonly httpStatus: Status
   readonly identifier: string
+  readonly is: (error: unknown) => error is GeneratedError<Tag, Fields>
   new (args: ErrorPayload<Fields>): GeneratedError<Tag, Fields>
 }
 
@@ -363,6 +365,7 @@ const makeGeneratedErrorClass = <
     schemaFields as never,
     annotations,
   ) as unknown as GeneratedErrorClass<Tag, Fields, Status>
+  const TypeId = errorTypeId(`declared/${tag}`)
 
   Object.defineProperty(Tagged, "_tag", {
     configurable: true,
@@ -373,6 +376,16 @@ const makeGeneratedErrorClass = <
     configurable: true,
     enumerable: true,
     value: status,
+  })
+  Object.defineProperty(Tagged, "is", {
+    configurable: true,
+    enumerable: true,
+    value: hasErrorTypeId<GeneratedError<Tag, Fields>>(TypeId),
+  })
+  Object.defineProperty(Tagged.prototype, TypeId, {
+    configurable: true,
+    enumerable: false,
+    value: TypeId,
   })
 
   return Tagged

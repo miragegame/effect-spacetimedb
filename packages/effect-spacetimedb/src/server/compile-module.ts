@@ -1,27 +1,33 @@
 // lint-ignore: unused-files - used through the package server-compiler export map entrypoint.
 // lint-ignore: prefer-match-for-literal-union-branching,use-exhaustive-discriminant-chain - current branch logic stays local and exhaustive refactor is outside the restack fix.
 import * as RootSpacetimeDB from "spacetimedb"
+import type {
+  ModuleExport,
+  CaseConversionPolicy as ServerCaseConversionPolicy,
+  isRowTypedQuery as ServerIsRowTypedQuery,
+  schema as ServerSchemaFn,
+} from "spacetimedb/server"
 import * as SpacetimeServer from "spacetimedb/server"
 import { procedureResponseType } from "../callable-protocol.ts"
-import { addDecodeContext, StdbDecodeError } from "../decode-error.ts"
-import { fieldOptions } from "../contract/field.ts"
 import { snakeCaseName } from "../contract/canonical-name.ts"
+import { fieldOptions } from "../contract/field.ts"
 import {
-  HttpRouterExportKey,
   type HttpHandlerMethod,
+  HttpRouterExportKey,
 } from "../contract/http-handler.ts"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import {
   StdbValidationError,
   validateServerHandlers,
 } from "../contract/module-validation.ts"
+import {
+  decodeHostValue,
+  encodeHostValue,
+} from "../contract/type/host-codec.ts"
 import * as Type from "../contract/type.ts"
+import { addDecodeContext, StdbDecodeError } from "../decode-error.ts"
 import { buildQueryRelation, isQueryRelation } from "../query/types.ts"
 import type { Handlers, LifecycleKeys, ServerInstance } from "./bind.ts"
-import {
-  materializeParamsObject,
-  materializeTables,
-} from "./table-materialize.ts"
 import {
   asCompilerSchemaBridge,
   defineCompilerHostAnonymousView,
@@ -45,17 +51,11 @@ import {
   assertOwnedHandlerBundle,
   ServerOwnerSymbol,
 } from "./handler-ownership.ts"
-import {
-  decodeHostValue,
-  encodeHostValue,
-} from "../contract/type/host-codec.ts"
-import type {
-  CaseConversionPolicy as ServerCaseConversionPolicy,
-  isRowTypedQuery as ServerIsRowTypedQuery,
-  ModuleExport,
-  schema as ServerSchemaFn,
-} from "spacetimedb/server"
 import type { ViewKeys } from "./handler-types.ts"
+import {
+  materializeParamsObject,
+  materializeTables,
+} from "./table-materialize.ts"
 
 const {
   isRowTypedQuery,
@@ -119,7 +119,7 @@ const wrapCallableDecode = <A>(
   try {
     return run()
   } catch (cause) {
-    throw cause instanceof StdbDecodeError
+    throw StdbDecodeError.is(cause)
       ? addDecodeContext(cause, { callable: key, op })
       : new StdbDecodeError({
           phase,
