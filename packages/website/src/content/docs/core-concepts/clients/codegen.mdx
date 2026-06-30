@@ -1,0 +1,45 @@
+---
+draft: false
+title: Codegen
+description: Build the module first, then generate the native TypeScript client.
+sidebar:
+  order: 1
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/clients/codegen" target="_blank" rel="noopener noreferrer">SpacetimeDB: Codegen ↗</a>
+
+effect-spacetimedb does not replace SpacetimeDB client generation. Build the
+module with the native CLI, then run `spacetime generate` against the built
+bundle.
+
+```json
+{
+  "scripts": {
+    "build": "spacetime build --module-path .",
+    "generate-client": "spacetime generate --lang typescript --js-path ./dist/bundle.js --out-dir ./src/generated --yes"
+  }
+}
+```
+
+Generated native bindings are used by `effect-spacetimedb/client` for WebSocket
+sessions:
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+import * as StdbClient from "effect-spacetimedb/client"
+
+declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
+  Stdb.AnyModuleSpec,
+  unknown
+>
+
+const adapter = StdbClient.GeneratedWs.adapter({
+  DbConnection,
+  uri: "ws://localhost:3000",
+  databaseName: "example",
+})
+```
+
+The Effect client projection is derived from
+`Stdb.project(Module.spec)`, but the WebSocket transport still needs the native
+generated `DbConnection`.

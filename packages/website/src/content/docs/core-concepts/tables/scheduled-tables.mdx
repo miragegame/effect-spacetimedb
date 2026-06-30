@@ -1,0 +1,101 @@
+---
+draft: false
+title: Scheduled Tables
+description: Use scheduled tables and scheduled reducers or procedures.
+sidebar:
+  order: 3
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/schedule-tables" target="_blank" rel="noopener noreferrer">SpacetimeDB: Scheduled Tables ↗</a>
+
+Scheduled tables are private by default and reserve `scheduledId` and
+`scheduledAt`. A scheduled endpoint receives `{ data: table.row }`.
+
+`Stdb.scheduledTable(name, options)` auto-injects two columns before user
+columns:
+
+- `scheduledId`: a `u64().primaryKey().autoInc()` column with native column name
+  `scheduled_id`.
+- `scheduledAt`: a `ScheduleAt` column with native column name `scheduled_at`.
+
+Authors cannot also declare `scheduledId`, `scheduledAt`, `scheduled_id`, or
+`scheduled_at`; the constructor rejects those reserved names. A custom
+`scheduledId` value type may be supplied through `options.scheduledId`, but it
+must still be a `u64` value type and is still marked primary-key and auto-inc.
+
+Scheduled tables default to `public: false`, the same local default as
+`Stdb.table(...)`, and they honor an explicit `public: true`. User columns are
+spread directly into the table shape after the injected scheduler columns; there
+is no `{ data }` wrapper in the table row shape.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const reminderSchedule = Stdb.scheduledTable("reminderSchedule", {
+  columns: {
+    note: Stdb.string(),
+  },
+})
+
+const Reminders = Stdb.StdbGroup.make("Reminders").add(
+  Stdb.StdbFn.scheduledProcedure("reminderFire", {
+    table: reminderSchedule,
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app")
+  .addTables(reminderSchedule)
+  .add(Reminders)
+
+const RemindersLive = Stdb.StdbBuilder.group(Module, "Reminders", {
+  reminderFire: Effect.fn(function* ({ data }) {
+    yield* Effect.log(`reminder: ${data.note}`)
+  }),
+})
+```
+
+To seed schedule rows inside a reducer or transaction body, use the generated
+`.schedule(...)` helper. It fills the auto-increment sentinel for you.
+
+```ts
+yield* db.reminderSchedule.schedule({
+  scheduledAt: Stdb.ScheduleAt.interval("5 minutes"),
+  note: "wake up",
+})
+```
+
+| Schedule form | Host behavior |
+| --- | --- |
+| `Stdb.ScheduleAt.at(...)` or `after(...)` | One-shot row. Reducers consume it after execution; procedures consume it before execution. |
+| `Stdb.ScheduleAt.interval(...)` | Row persists and re-fires until deleted. |
+
+For fixed wall-clock or tick alignment, prefer self-rescheduling one-shot rows:
+handle a `Time` row, insert the next `Time` row, then return. Use `Interval`
+when simple persistent re-fire spacing is enough.
+
+`Stdb.scheduledTable(...)` creates the reserved
+`scheduled_id`/`scheduled_at` columns and `StdbFn.scheduledReducer(...)` or
+`StdbFn.scheduledProcedure(...)` binds exactly one typed handler to the table.
+
+## Validation Boundaries
+
+The TypeScript DSL rejects raw schemas in SATS positions at compile time by
+requiring opaque value types. Cross-object module invariants are validated by
+`validateModule` / `Stdb.validate`:
+
+| Invariant | Compile-time | Runtime validation diagnostic |
+| --- | ---: | --- |
+| Raw Effect schema in a SATS position | Yes | `UnsupportedTypeDescriptor` remains as a malformed-spec fallback |
+| Duplicate table/view relation names | No | `DuplicateRelationName` |
+| Duplicate reducer/procedure/HTTP/view/lifecycle export names | No | `DuplicateCallableName` |
+| Reserved `__http_router__` export name | No | `DuplicateCallableName` |
+| Non-canonical declared names under canonical naming policy | No | `NonCanonicalDeclaredName` |
+| Reserved declared error tags | No | `ReservedDeclaredErrorTag` |
+| Duplicate declared error tags | No | `DuplicateDeclaredErrorTag` |
+| String literal authored/generated-client tag collisions | No | `LiteralTagCollision` |
+
+Broad cross-group uniqueness checks stay in runtime validation because lifting
+large cross-object comparisons into the type system can hit TypeScript
+instantiation-depth limits. Smaller bounded checks, such as reserved names and
+casing policy, are better candidates for future compile-time feedback.

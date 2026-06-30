@@ -1,0 +1,42 @@
+---
+interface Props {
+  size?: number
+}
+
+const { size = 20 } = Astro.props
+---
+
+<span class="logo" style={`font-size:${size}px`}>
+  <span class="logo__effect">Effect</span>
+  <span class="logo__spacetimedb"><span class="logo__spacetime">Spacetime</span><span class="logo__db">DB</span></span>
+</span>
+
+<style>
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.34em;
+    color: var(--site-text-strong);
+    font-family: var(--site-font-sans);
+    letter-spacing: 0;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .logo__effect {
+    color: var(--site-n1);
+    font-weight: 760;
+  }
+  .logo__spacetime {
+    color: var(--site-n1);
+    font-weight: 700;
+  }
+  .logo__db {
+    color: var(--site-n2);
+    font-weight: 400;
+  }
+  @media (max-width: 420px) {
+    .logo {
+      font-size: 17px !important;
+    }
+  }
+</style>

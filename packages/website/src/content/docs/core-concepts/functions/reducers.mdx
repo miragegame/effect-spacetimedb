@@ -1,0 +1,139 @@
+---
+draft: false
+title: Reducers
+description: Declare reducers in callable groups and implement them with Effect handlers.
+sidebar:
+  order: 1
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions/reducers" target="_blank" rel="noopener noreferrer">SpacetimeDB: Reducers ↗</a>
+
+The authoring surface follows one shape: endpoints become groups, groups become
+a module, handlers implement those groups, and the completed module is built.
+
+## Keep Contracts And Implementations Separate
+
+Contracts are imported by the module. Implementations import the assembled
+module so they can use its typed accessors. Keeping those directions separate
+avoids runtime import cycles.
+
+```text
+schema.ts             shared Effect schemas and value types
+tables/users.ts       table declarations
+users/contract.ts     StdbGroup.make().add(...)
+module.ts             StdbModule.make(...).addTables(...).add(...)
+users/live.ts         StdbBuilder.group(Module, "Users", ...)
+index.ts              build(Module, [...])
+```
+
+## Assemble The Module Once
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const user = Stdb.table("user", {
+  public: true,
+  columns: { id: Stdb.string().primaryKey() },
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("user_upsert", {
+    params: Stdb.struct({ id: Stdb.string(), name: Stdb.string() }),
+  }),
+)
+
+export const Module = Stdb.StdbModule.make("app")
+  .addTables(user)
+  .add(Users)
+
+export const { Db, Tx, ReadonlyDb, From, ReducerCtx, ProcedureCtx, ViewCtx } = Module
+```
+
+Destructure accessors from the assembled module and use those exact accessors in
+handlers. They are typed against the module's tables and scopes.
+
+## Implement Groups By Name
+
+`StdbBuilder.group(Module, "GroupName", handlers)` takes a record whose keys
+match endpoint names in the group. The builder checks that every endpoint is
+implemented exactly once.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const user = Stdb.table("user", {
+  public: true,
+  columns: { id: Stdb.string().primaryKey(), name: Stdb.string() },
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("user_upsert", {
+    params: Stdb.struct({ id: Stdb.string(), name: Stdb.string() }),
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const { Db } = Module
+
+const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
+  user_upsert: Effect.fn(function* (args) {
+    const db = yield* Db
+    yield* db.user.id.replace(args)
+  }),
+})
+```
+
+Reducers are declared as data with `StdbFn.reducer(...)` and
+implemented later with Effect handlers. Reducer handlers may yield `Db`,
+`ReducerCtx`, and `MutationCtx`; transaction boundaries remain the host reducer
+call.
+
+:::caution
+
+Reducers are deterministic synchronous host calls. Promises, `async`, timers,
+microtasks, global `Math.random`, and wall-clock reads such as `Date.now()` or
+no-argument `new Date()` throw typed runtime errors. Use `Random.*` from
+`effect/Random`, `ctx.random`, and the call timestamp instead. See
+[Randomness & Determinism](/the-effect-layer/randomness-and-determinism).
+
+:::
+
+Lifecycle hooks use `StdbBuilder.lifecycle(Module, handlers)`. HTTP route groups
+use the same `StdbBuilder.group` shape as callable groups.
+
+## Build The Native Export
+
+```ts
+import { build } from "effect-spacetimedb/server-compiler"
+import "effect-spacetimedb/server-polyfills"
+
+export const compiled = build(Module, [UsersLive])
+export const ModuleExports = compiled.exportGroup()
+export default compiled.schema
+```
+
+:::note
+
+If handlers require custom services, pass a runtime layer to
+`build`. Built-in SpaceTimeDB capabilities are supplied by the runtime.
+
+:::
+
+```ts
+import * as Context from "effect/Context"
+import * as Layer from "effect/Layer"
+import { build } from "effect-spacetimedb/server-compiler"
+
+// A custom capability your handlers need — here, injected config.
+class AppConfig extends Context.Tag("AppConfig")<
+  AppConfig,
+  { readonly welcomeMessage: string }
+>() {}
+
+// Handlers read it with `const config = yield* AppConfig`. Because a handler
+// requires AppConfig, build now asks for its runtime layer.
+const AppConfigLive = Layer.succeed(AppConfig, { welcomeMessage: "welcome" })
+
+export const compiled = build(Module, [UsersLive], { runtime: AppConfigLive })
+```

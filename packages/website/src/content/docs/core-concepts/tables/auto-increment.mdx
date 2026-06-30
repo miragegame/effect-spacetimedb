@@ -1,0 +1,40 @@
+---
+draft: false
+title: Auto-Increment
+description: Use auto-increment primary keys and generated schedule ids.
+sidebar:
+  order: 4
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/auto-increment" target="_blank" rel="noopener noreferrer">SpacetimeDB: Auto-Increment ↗</a>
+
+Auto-increment is column metadata on a primary key. Chain `.primaryKey()` before
+`.autoInc()` so the declaration satisfies SpacetimeDB's host rules.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const issue = Stdb.table("issue", {
+  public: true,
+  columns: {
+    id: Stdb.u64().primaryKey().autoInc(),
+    title: Stdb.string(),
+  },
+})
+```
+
+Scheduled tables derive their auto-increment schedule id for you:
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const reminderSchedule = Stdb.scheduledTable("reminder_schedule", {
+  columns: {
+    note: Stdb.string(),
+  },
+})
+```
+
+effect-spacetimedb validates auto-increment at declaration time:
+`.autoInc()` without `.primaryKey()` throws, and defaults cannot be combined with
+primary keys or auto-increment columns.

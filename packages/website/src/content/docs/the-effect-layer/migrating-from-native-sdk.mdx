@@ -1,0 +1,105 @@
+---
+draft: false
+title: Migrating From Native SDK Shape
+description: Move from native SpaceTimeDB module code to effect-spacetimedb contracts incrementally.
+sidebar:
+  order: 8
+---
+
+import { TabItem, Tabs } from "@astrojs/starlight/components";
+
+:::tip
+
+You do not need to rewrite a whole module at once. Start by modeling the module
+contract, then move handlers behind the typed builder group by group.
+
+:::
+
+## The Same Module, Both Ways
+
+The native module and the equivalent effect-spacetimedb contract — declare the
+shape, then implement handlers behind the typed group:
+
+<Tabs syncKey="impl">
+  <TabItem label="Native SDK">
+
+```ts
+import { schema, table, t } from "spacetimedb/server"
+
+const spacetime = schema({
+  user: table(
+    { public: true },
+    { id: t.string().primaryKey(), name: t.string() },
+  ),
+})
+
+export const user_upsert = spacetime.reducer(
+  "user_upsert",
+  { id: t.string(), name: t.string() },
+  (ctx, { id, name }) => {
+    ctx.db.user.insert({ id, name })
+  },
+)
+
+export default spacetime
+```
+
+  </TabItem>
+  <TabItem label="effect-spacetimedb">
+
+```ts
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+// 1. declare the contract
+const user = Stdb.table("user", {
+  public: true,
+  columns: {
+    id: Stdb.string().primaryKey(),
+    name: Stdb.string(),
+  },
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("user_upsert", {
+    params: Stdb.struct({ id: Stdb.string(), name: Stdb.string() }),
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const { Db } = Module
+
+// 2. implement handlers behind the typed group
+const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
+  user_upsert: (args) =>
+    Effect.gen(function* () {
+      const db = yield* Db
+      yield* db.user.insert(args)
+    }),
+})
+```
+
+  </TabItem>
+</Tabs>
+
+## Native Shape To Contract Shape
+
+| Native concept | effect-spacetimedb concept |
+| --- | --- |
+| reducer function export | `StdbFn.reducer(...)` in a callable group |
+| procedure function export | `StdbFn.procedure(...)` in a callable group |
+| table builder | `Stdb.table(...)` bound to a variable |
+| scheduled table callback | `StdbFn.scheduledReducer(...)` or `scheduledProcedure(...)` |
+| HTTP handler export | `StdbHttpGroup` plus `StdbBuilder.group(...)` |
+
+## Suggested Order
+
+1. Move schemas and table declarations into leaf files.
+2. Declare groups without changing runtime behavior.
+3. Assemble a module and destructure the typed accessors.
+4. Port handlers one group at a time.
+5. Generate the client and replace ad hoc call sites with projected clients.
+
+Keep the runtime constraints in mind: module handlers must remain synchronous,
+deterministic, and transactional. Network calls, timers, and secrets belong
+outside reducers and are passed in as arguments or handled by external services.

@@ -1,0 +1,48 @@
+---
+draft: false
+title: Lifecycle
+description: Declare init, clientConnected, and clientDisconnected hooks.
+sidebar:
+  order: 3
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions/reducers/lifecycle" target="_blank" rel="noopener noreferrer">SpacetimeDB: Lifecycle ↗</a>
+
+Lifecycle hooks can be declared in the module config and implemented with
+`StdbBuilder.lifecycle(...)`.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const Lifecycle = {
+  init: Stdb.StdbFn.init().spec,
+  clientConnected: Stdb.StdbFn.clientConnected().spec,
+  clientDisconnected: Stdb.StdbFn.clientDisconnected().spec,
+}
+
+const Module = Stdb.StdbModule.make("app", {
+  lifecycle: Lifecycle,
+})
+const { ReducerCtx } = Module
+
+const LifecycleLive = Stdb.StdbBuilder.lifecycle(Module, {
+  // Runs once when the module is first published.
+  init: () => Effect.log("module initialized"),
+  // clientConnected / clientDisconnected run as the joining or leaving client,
+  // so ReducerCtx identifies who it was.
+  clientConnected: Effect.fn(function* () {
+    const ctx = yield* ReducerCtx
+    yield* Effect.log(`client connected: ${ctx.connectionId}`)
+  }),
+  clientDisconnected: Effect.fn(function* () {
+    const ctx = yield* ReducerCtx
+    yield* Effect.log(`client disconnected: ${ctx.connectionId}`)
+  }),
+})
+```
+
+Lifecycle hooks are first-class module declarations, not loose
+exports. At most one `init`, `clientConnected`, and `clientDisconnected` hook
+can be present in a built module, and handlers are checked against the module's
+Effect capability scope.

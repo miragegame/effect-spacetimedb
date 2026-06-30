@@ -1,0 +1,16 @@
+node_modules/
+.cache/
+dist/
+dist-types/
+packages/*/node_modules/
+coverage/
+packages/*/coverage/
+/.stryker-tmp/
+/reports/mutation/
+packages/*/.stryker-tmp/
+packages/*/reports/mutation/
+packages/*/dist/
+packages/*/dist-types/
+examples/*/node_modules/
+examples/*/dist/
+examples/*/dist-types/

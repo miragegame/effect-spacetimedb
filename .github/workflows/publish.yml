@@ -1,0 +1,39 @@
+name: Publish
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
+      - name: Pack and validate
+        working-directory: packages/effect-spacetimedb
+        run: |
+          set -euo pipefail
+          mkdir -p .npm-pack
+          npm pack --pack-destination .npm-pack
+          tarballs=(.npm-pack/effect-spacetimedb-*.tgz)
+          test "${#tarballs[@]}" -eq 1
+          printf '%s\n' "${tarballs[0]}" > .npm-pack-tarball
+          bunx attw "${tarballs[0]}" --profile esm-only
+      - name: Publish
+        working-directory: packages/effect-spacetimedb
+        run: |
+          set -euo pipefail
+          IFS= read -r tarball < .npm-pack-tarball
+          test -f "$tarball"
+          npm publish "$tarball" --provenance --access public

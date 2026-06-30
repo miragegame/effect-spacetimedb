@@ -1,0 +1,128 @@
+---
+draft: false
+title: Reference
+description: Entrypoints, capability scopes, value-type helpers, and declared-error rules.
+sidebar:
+  order: 99
+---
+
+This is a curated reference for the public surface. It is intentionally
+hand-written; there is no generated API reference.
+
+## Entrypoints
+
+| Entrypoint | Use |
+| --- | --- |
+| `effect-spacetimedb` | Contract builders, value types, tables, declared errors, module assembly, builder APIs, and client projection. |
+| `effect-spacetimedb/client` | WebSocket generated-client adapters and client transport helpers. |
+| `effect-spacetimedb/server` | Advanced server primitives for integrations that bypass normal builder flow. |
+| `effect-spacetimedb/server-compiler` | Host-only compiler entrypoint for module entries; import `build` from here. |
+| `effect-spacetimedb/server-polyfills` | Side-effect import for module entries so bundled host code keeps deterministic compatibility backstops. |
+| `effect-spacetimedb/dev-server` | Programmatic local `spacetimedb-standalone` orchestration for tests and tools that publish a prebuilt bundle. |
+| `effect-spacetimedb/testing` | Test-oriented helpers, package-local fixtures, and the `spacetimeSysAlias` preset for off-host server imports. |
+| `effect-spacetimedb/testing/spacetime-sys` | Direct `spacetime:sys` host-surface stub for off-host module imports. |
+
+Normal module authors usually need only `effect-spacetimedb` and, for WebSocket
+sessions, `effect-spacetimedb/client`.
+
+## Capability Scoping
+
+| Scope | Allowed accessors |
+| --- | --- |
+| reducer, lifecycle | `Db`, `ReducerCtx`, `MutationCtx` |
+| procedure outside a transaction | platform `Http`, `Tx`, `ProcedureCtx` |
+| `Tx.run(...)` or `HttpTx.run(...)` body | `Db`, `MutationCtx`, transaction context |
+| HTTP handler | `HttpTx`, `HttpHandlerCtx` |
+| sender view | `ReadonlyDb`, `From`, `ViewCtx` |
+| anonymous view | `ReadonlyDb`, `From`, `AnonymousViewCtx` |
+
+Use `MutationCtx` for helpers that must run in both reducers and transaction
+bodies. Do not yield accessors from another module.
+
+## Value-Type Cheat Sheet
+
+| Helper | Meaning |
+| --- | --- |
+| `Stdb.string(schema?)` | SATS string with optional Effect schema branding or checks. |
+| `Stdb.u8` / `u16` / `u32` / `u64` | Unsigned integer widths with constructor-owned bounds. |
+| `Stdb.u128` / `u256` | Wide unsigned integer widths backed by `bigint`. |
+| `Stdb.i8` / `i16` / `i32` / `i64` | Signed integer widths. |
+| `Stdb.i128` / `i256` | Wide signed integer widths backed by `bigint`. |
+| `Stdb.f32()` / `f64()` | Floating-point value types. |
+| `Stdb.bigint()` | `bigint` authored value lowered to a SATS string for JSON-safe large numbers. |
+| `Stdb.bool()` | Boolean value. |
+| `Stdb.bytes()` | `Uint8Array` byte array. |
+| `Stdb.identity()` / `connectionId()` | Native SpacetimeDB identity and connection id values. |
+| `Stdb.timestamp()` / `timeDuration()` / `uuid()` | Native timestamp, duration, and UUID values. |
+| `Stdb.scheduleAt()` | Scheduled-table `scheduledAt` column value type. |
+| `Stdb.option(T)` | Nullable value type, decoded as `T` or `undefined`. |
+| `Stdb.optional(T)` | Optional struct field annotation. |
+| `T.optional()` | Optional table column annotation. |
+| `Stdb.array(T)` | SATS array/list. |
+| `Stdb.struct({...})` | Named object shape for params, rows, returns, and errors. |
+| `Stdb.sum({...})` | Tagged union with payload variants. |
+| `Stdb.enum("A", "B")` / `enumType(...)` | Unit-variant SATS enum; prefer namespace form because `enum` cannot be named-imported. |
+| `Stdb.unit()` | Unit value for empty scheduled procedure returns, result branches, and sum payloads. |
+| `Stdb.literal(...)` | String, number, or boolean literal values; string literals lower to enums. |
+| `Stdb.result(Ok, Err)` | Result envelope value type. |
+| `Stdb.dbCodec(T)` / `httpCodec(T)` / `wsCodec(T)` | Transport codecs for DB/host, HTTP JSON, and generated WebSocket client shapes. |
+| `Stdb.lazy(() => T)` | Recursive value type reference. |
+| `Stdb.custom(schema, { type })` | Custom schema with explicit SpaceTimeDB type lowering. |
+
+See [Value Types](/the-effect-layer/value-types) for the canonical catalog with
+TypeScript values, SATS lowering, bounds, and transport encoding notes.
+
+## Authoring API
+
+| Surface | Use |
+| --- | --- |
+| `Stdb.table(...)` / `scheduledTable(...)` | Declare persistent, event, and scheduled tables. |
+| `Stdb.index(...)` / `unique(...)` | Declare table indexes and uniqueness constraints. |
+| `Stdb.StdbFn.reducer(...)` / `procedure(...)` / `scheduledReducer(...)` / `scheduledProcedure(...)` / `view(...)` / `anonymousView(...)` | Declare callable and view endpoints. |
+| `Stdb.StdbGroup.make(...)` / `Stdb.StdbHttpGroup.make(...)` | Group reducers/procedures/views and HTTP routes. |
+| `Stdb.StdbHttp.*` | Declare typed and raw HTTP handlers. |
+| `Stdb.StdbModule.make(...)` | Assemble tables, callable groups, HTTP groups, lifecycle, and settings. |
+| `Stdb.StdbBuilder.group(...)` / `lifecycle(...)` | Attach Effect implementations to an assembled module. |
+| `Stdb.project(Module.spec)` | Build client projections, targets, and generated-client adapters. |
+| `Stdb.toHttpApi(Module.spec)` / `httpApiBaseUrl(...)` | Project typed HTTP routes into Effect `HttpApi`. |
+| `Stdb.ScheduleAt.*` | Build scheduled table `scheduledAt` values. |
+| `Stdb.validate(...)` / `assertValid(...)` / `formatModuleDiagnostics(...)` | Run module validation manually. |
+| `Stdb.prefixId(...)` | Create package-prefixed Effect service ids. |
+
+## Declared Error Catalog
+
+Declared errors are created with a namespace:
+
+```ts
+const AppErrors = Stdb.errors.namespace("App")({
+  UserMissing: Stdb.error({ userId: Stdb.string(UserId) }, { status: 404 }),
+})
+```
+
+The catalog value supplies:
+
+| Surface | Purpose |
+| --- | --- |
+| generated classes | Fail directly from handlers with typed payloads. |
+| `.schema` | Decode and encode the declared error envelope. |
+| `.tags` | Known wire tags for client and route projection. |
+| `.pick(...)` | Narrow a catalog to selected declared errors. |
+
+:::caution
+
+Only Effect failures are encoded as declared errors. Defects remain defects.
+
+:::
+
+## Runtime And Client Error Types
+
+| Type | Source |
+| --- | --- |
+| `ReducerAsyncNotAllowedError` | Async, promises, timers, microtasks, or `Effect.sleep` in synchronous server handlers. |
+| `ReducerGlobalRandomNotAllowedError` | Global `Math.random` use in guarded server runtime. |
+| `ReducerWallClockNotAllowedError` | Ambient `Date.now()` or no-argument `new Date()` in guarded server runtime. |
+| `StdbHostCallError` | Generic host ABI call failure. |
+| `StdbUniqueAlreadyExistsError` / `StdbNoSuchRowError` / `StdbAutoIncOverflowError` / `StdbScheduleDelayTooLongError` | Typed native host failures. |
+| `StdbDecodeError` | Contract decode failure. |
+| `CallFailure<E>` / `RawCallFailure<E>` | Projected client call failure unions. |
+| `RemoteRejectedError` / `TransportError` / `DomainCallError<E>` | Projected client remote, transport, and raw declared-error failures. |

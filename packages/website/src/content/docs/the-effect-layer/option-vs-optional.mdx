@@ -1,0 +1,28 @@
+---
+draft: false
+title: Stdb.option vs Stdb.optional
+description: Choose value nullability or field optionality intentionally.
+sidebar:
+  order: 6
+---
+
+`Stdb.option(T)` is a nullable value type. Its decoded TypeScript value is
+`T | undefined`, and its SATS wire type is `option<T>`. Use it anywhere a value
+type is allowed: arguments, array elements, table columns, nested types, and
+struct fields. In a struct field, the key is still required.
+
+`Stdb.optional(T)` and `.optional()` are field or column optionality annotations.
+They mean the struct field or table column itself may be omitted. In struct and
+callable param fields they lower to the same SATS `option<T>` wire type as
+`Stdb.option(T)`.
+
+Rule of thumb:
+
+- Use `Stdb.option` for standalone nullable values and fields that are always
+  present but may be none.
+- Use `Stdb.optional` or `.optional()` when the property or column may be
+  omitted.
+
+The wire shape is the same for struct fields; the TypeScript shape differs:
+`Stdb.optional(T)` gives `x?: T`, while `Stdb.option(T)` gives
+`x: T | undefined`.

@@ -1,0 +1,34 @@
+---
+draft: false
+title: Access Permissions
+description: Public table visibility, and the unsupported RLS surface.
+sidebar:
+  order: 8
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/access-permissions" target="_blank" rel="noopener noreferrer">SpacetimeDB: Access Permissions ↗</a>
+
+effect-spacetimedb supports table-level public visibility:
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const publicUser = Stdb.table("public_user", {
+  public: true,
+  columns: {
+    id: Stdb.string().primaryKey(),
+  },
+})
+
+const privateAudit = Stdb.table("private_audit", {
+  public: false,
+  columns: {
+    id: Stdb.u64().primaryKey().autoInc(),
+    note: Stdb.string(),
+  },
+})
+```
+
+Row-level security / `clientVisibilityFilter` is not supported. Use private
+tables plus reducers, procedures, views, or HTTP handlers to expose scoped data
+intentionally.

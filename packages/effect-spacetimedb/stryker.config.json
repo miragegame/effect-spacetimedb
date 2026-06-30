@@ -1,0 +1,37 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.mutation.config.ts"
+  },
+  "checkers": [],
+  "coverageAnalysis": "perTest",
+  "mutate": [
+    "src/contract/type/codec.ts",
+    "src/contract/type/host-codec.ts",
+    "src/contract/type/name.ts",
+    "src/contract/type-wire-schema.ts",
+    "src/contract/type-builder-lowering.ts",
+    "src/contract/module-validation-*.ts",
+    "src/contract/canonical-name.ts",
+    "src/contract/type-fingerprint.ts"
+  ],
+  "reporters": ["html", "clear-text", "progress"],
+  "htmlReporter": {
+    "fileName": "reports/mutation/contract.html"
+  },
+  "clearTextReporter": {
+    "reportTests": false,
+    "reportMutants": false,
+    "reportScoreTable": true
+  },
+  "incremental": true,
+  "incrementalFile": ".stryker-tmp/incremental.json",
+  "thresholds": {
+    "high": 85,
+    "low": 70,
+    "break": 64
+  },
+  "timeoutMS": 60000,
+  "concurrency": 4
+}

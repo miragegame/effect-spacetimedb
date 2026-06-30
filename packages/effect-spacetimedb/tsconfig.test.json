@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "declarationDir": "node_modules/.tmp/test-dist-types",
+    "outDir": "node_modules/.tmp/test-dist-types",
+    "tsBuildInfoFile": "node_modules/.tmp/tsconfig.test.tsbuildinfo",
+    "incremental": true,
+    "noEmit": false,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnostics": true,
+        "diagnosticSeverity": {
+          "anyUnknownInErrorContext": "error",
+          "missingEffectServiceDependency": "error",
+          "leakingRequirements": "error",
+          "unsafeEffectTypeAssertion": "error",
+          "unnecessaryEffectGen": "error",
+          "unnecessaryPipe": "error",
+          "unnecessaryPipeChain": "error",
+          "unnecessaryFailYieldableError": "error",
+          "effectFnOpportunity": "error",
+          "effectMapVoid": "error",
+          "effectSucceedWithVoid": "error",
+          "catchAllToMapError": "error",
+          "catchToOrElseSucceed": "error",
+          "redundantSchemaTagIdentifier": "error",
+          "schemaStructWithTag": "error",
+          "returnEffectInGen": "error",
+          "runEffectInsideEffect": "error",
+          "tryCatchInEffectGen": "error",
+          "multipleCatchTag": "error",
+          "redundantMapError": "error",
+          "redundantOrDie": "error",
+          "effectMapFlatten": "error",
+          "catchUnfailableEffect": "error",
+          "lazyEffect": "error",
+          "newSchemaClass": "error",
+          "missedPipeableOpportunity": "error",
+          "instanceOfSchema": "error",
+          "unnecessaryArrowBlock": "error",
+          "nestedEffectGenYield": "error",
+          "serviceNotAsClass": "error",
+          "effectDoNotation": "error",
+          "schemaUnionOfLiterals": "error",
+          "deterministicKeys": "error",
+          "schemaNumber": "error",
+          "strictEffectProvide": "off",
+          "unnecessaryTypeofType": "error",
+          "strictBooleanExpressions": "error"
+        },
+        "includeSuggestionsInTsc": false,
+        "ignoreEffectWarningsInTscExitCode": false,
+        "ignoreEffectErrorsInTscExitCode": false
+      }
+    ]
+  },
+  "include": [
+    "src/**/*.ts",
+    "examples/migration-fixture/**/*.ts",
+    "examples/publishable-module/generated/**/*.ts",
+    "examples/publishable-module/src/**/*.ts",
+    "scripts/**/*.ts",
+    "test/**/*.ts",
+    "test/**/*.tsx",
+    "vitest*.ts"
+  ],
+  "exclude": [
+    "dist-types",
+    "node_modules/.tmp/test-dist-types",
+    "**/dist-types"
+  ]
+}

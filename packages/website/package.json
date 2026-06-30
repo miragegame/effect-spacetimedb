@@ -1,0 +1,43 @@
+{
+  "name": "effect-spacetimedb-website",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "build:llms": "bun scripts/generate-llms-txt.ts",
+    "build": "bun run build:llms && NODE_OPTIONS=--max-old-space-size=4096 astro build",
+    "typecheck": "astro check",
+    "dev": "astro dev",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/mdx": "^5.0.3",
+    "@astrojs/react": "^5.0.3",
+    "@astrojs/sitemap": "^3.5.0",
+    "@astrojs/starlight": "^0.34.3",
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/source-code-pro": "^5.2.7",
+    "@tailwindcss/vite": "^4.1.14",
+    "astro": "^5.12.8",
+    "effect": "4.0.0-beta.68",
+    "expressive-code-twoslash": "^0.6.1",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "tailwindcss": "^4.1.14"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@astrojs/starlight-tailwind": "^4.0.1",
+    "@types/node": "22.10.1",
+    "@types/react": "19.1.10",
+    "@types/react-dom": "19.1.7",
+    "astro-broken-links-checker": "^1.1.0",
+    "effect-spacetimedb": "workspace:*",
+    "typescript": "5.9.3"
+  }
+}

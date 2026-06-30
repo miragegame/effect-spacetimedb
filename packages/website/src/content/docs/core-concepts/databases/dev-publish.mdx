@@ -1,0 +1,72 @@
+---
+draft: false
+title: Dev & Publish
+description: Use the native SpacetimeDB CLI build, dev, and publish flow.
+sidebar:
+  order: 2
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/databases/developing" target="_blank" rel="noopener noreferrer">SpacetimeDB: Dev & Publish ↗</a>
+
+Build with the native SpacetimeDB CLI. The module entry imports the host-only
+compiler, imports server polyfills as a side effect, and exports the compiled
+schema.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+import { build } from "effect-spacetimedb/server-compiler"
+import "effect-spacetimedb/server-polyfills"
+
+const Module = Stdb.StdbModule.make("app")
+
+export const compiled = build(Module, [])
+export const ModuleExports = compiled.exportGroup()
+export default compiled.schema
+```
+
+Publish a built bundle with the native SpacetimeDB CLI rather than a placeholder
+module-path publish command:
+
+```sh
+spacetime build --module-path <moduleDir>
+spacetime publish --js-path <moduleDir>/dist/bundle.js --server <url> <dbName>
+```
+
+The upstream `spacetime dev` command needs the full module path, server,
+database, identity, and publish settings for your local environment; see the
+[SpacetimeDB CLI docs](https://spacetimedb.com/docs/databases/developing) for the
+dev and publish flags.
+
+## Programmatic Dev Servers
+
+`effect-spacetimedb/dev-server` is for tests and tools that need a temporary
+local `spacetimedb-standalone` plus a published prebuilt bundle. It does not
+build the module or generate clients.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import { makeDevServer } from "effect-spacetimedb/dev-server"
+
+const program = Effect.gen(function* () {
+  const runtime = yield* makeDevServer({
+    bundlePath: "dist/bundle.js",
+    dbNamePrefix: "example",
+  })
+
+  yield* Effect.logInfo(
+    `published ${runtime.databaseName} at ${runtime.baseUrl}`,
+  )
+
+  return runtime
+})
+```
+
+The generated server bundle must include
+`import "effect-spacetimedb/server-polyfills"` next to
+`effect-spacetimedb/server-compiler`; native `spacetime build` preserves that
+side-effect import. Off-host tests that import server modules also need the
+`spacetime:sys` stub from `effect-spacetimedb/testing/spacetime-sys`.
+
+effect-spacetimedb controls the authored TypeScript contract and compiled
+module exports; SpacetimeDB still controls local dev, publish, runtime storage,
+and generated clients.

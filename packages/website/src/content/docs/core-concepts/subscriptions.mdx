@@ -1,0 +1,105 @@
+---
+draft: false
+title: Subscriptions
+description: Use scoped WebSocket sessions, table targets, and event-table streams safely.
+sidebar:
+  order: 7
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/clients/subscriptions/semantics" target="_blank" rel="noopener noreferrer">SpacetimeDB: Subscriptions ↗</a>
+
+Subscriptions are scoped native resources. A session can subscribe to public
+tables and event tables, then release each subscription when the scope exits or
+the handle is unsubscribed.
+
+```ts
+const program = Effect.gen(function* () {
+  const session = yield* Example.client.ws.Session
+
+  yield* session.subscribe(Example.targets.allPublicTables())
+  yield* session.streamEventTable("presenceEvent").pipe(Stream.runDrain)
+})
+```
+
+Each subscribe call opens its own native SpacetimeDB query set on the session
+connection. `allPublicTables()` remains one native multi-query subscription.
+
+The wrapper intentionally follows the native TypeScript SDK model:
+
+- `session.subscribe(target)` opens one native subscription for that target.
+- `tableGroup(keys).subscribe` opens one native subscription per table key.
+- `streamTable`, `streamRows`, `streamTableWithContext`,
+  `streamTableEvents`, and `streamEventTable` each open the subscription needed
+  for that stream.
+- `allPublicTables()` remains one native multi-query subscription.
+
+If two consumers subscribe to the same table or event table, they own two native
+query sets. The wrapper does not add query-key APIs or client-side
+deduplication on top of the native SDK.
+
+## Streams
+
+Persistent-table streams use bounded callback queues by default and should be
+treated as invalidation signals: re-read the authoritative session cache when a
+change arrives. Event-table streams are raw event feeds and are unbounded unless
+you opt into a bounded buffer and accept lossy overflow behavior.
+
+The session stream helper family covers the common shapes:
+
+| Helper | Use |
+| --- | --- |
+| `streamTable(key, options?)` | Persistent-table insert/update/delete signals. |
+| `streamRows(key)` | Initial snapshot followed by cache snapshots after table changes. |
+| `tableGroup(keys, options?)` | Multi-table snapshot group with `subscribe`, `readSnapshot`, and `changes`. |
+| `streamTableEvents(key, options?)` | Persistent-table changes with decoded `StdbEventContext`. |
+| `streamEventTable(key, options?)` | Event-table insert feed. |
+| `streamTarget(target, options?)` | Stream a projected subscription target. |
+
+Persistent-table streams accept `{ buffer: { bufferSize, strategy } }`, where
+`strategy` is `"sliding"` or `"dropping"`. The default is a bounded sliding
+queue sized for cache invalidation signals. Event-table streams accept
+`{ buffer: { bufferSize } }`; overflowing that buffer fails the stream with
+`EventTableStreamOverflowError` rather than silently dropping events.
+
+Event tables use native delivery semantics. Every live native query set that
+covers an event can deliver that event, so subscribe once at an app state
+boundary and fan out from that stream when a domain needs one event-processing
+path.
+
+Persistent table subscriptions populate the native connection cache. The cache
+merges row coverage across live query sets, so snapshot reads through generated
+client caches, `streamRows(key)`, and `tableGroup(keys).readSnapshot` always
+read the connection-owned table state rather than a wrapper-local copy. A
+transaction applies atomically before callbacks fire, so snapshot reads taken
+from callbacks observe the post-transaction cache.
+
+`tableGroup(keys).changes` emits an initial snapshot and then burst-coalesced
+snapshots by re-reading the generated client's authoritative cache. Native SDK
+callbacks for one server message are dispatched synchronously, so a transaction
+burst normally lands in one drain batch and produces one snapshot. If the
+consumer falls behind, several bursts can coalesce into one later snapshot; the
+emission still re-reads the post-apply cache and converges to current state.
+
+## Event Context
+
+`streamTableEvents` decodes native generated-client event metadata into
+`StdbEventContext`. Use `decodeStdbEventContext` from
+`effect-spacetimedb/client` when you are working with lower-level generated
+callbacks yourself.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as StdbClient from "effect-spacetimedb/client"
+
+declare const rawContext: unknown
+
+const decoded = StdbClient.decodeStdbEventContext(rawContext).pipe(
+  Effect.map((context): StdbClient.StdbEventContextType => context),
+)
+```
+
+## Failure Propagation
+
+Subscription setup failures are routed into the stream queue explicitly so
+rejected subscriptions, invalidated connections, and transport errors do not
+turn into streams that simply never emit.

@@ -1,0 +1,16 @@
+---
+draft: false
+title: Migrations
+description: Link to SpacetimeDB migrations; effect-spacetimedb adds no migration layer.
+sidebar:
+  order: 3
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/databases/automatic-migrations" target="_blank" rel="noopener noreferrer">SpacetimeDB: Migrations ↗</a>
+
+Migrations are a SpacetimeDB runtime concern. effect-spacetimedb does not add a
+separate migration DSL or change the host migration model.
+
+Use `Stdb.table(...)`, `Stdb.scheduledTable(...)`, and the callable builders to
+declare the next module schema, then follow SpacetimeDB's migration guidance for
+publishing and upgrading databases.

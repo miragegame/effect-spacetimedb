@@ -1,0 +1,29 @@
+---
+draft: false
+title: Default Values
+description: Attach native SpaceTimeDB column defaults to value types.
+sidebar:
+  order: 5
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/default-values" target="_blank" rel="noopener noreferrer">SpacetimeDB: Default Values ↗</a>
+
+Column defaults are declared with `.default(value)` on a value type.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const profile = Stdb.table("profile", {
+  public: true,
+  columns: {
+    id: Stdb.u64().primaryKey().autoInc(),
+    displayName: Stdb.string().default("anonymous"),
+    score: Stdb.u32().default(0),
+    subscribed: Stdb.bool().default(false),
+  },
+})
+```
+
+Defaults use the authored TypeScript value for the wrapped
+`Stdb.*` value type. The library rejects defaults on primary keys,
+auto-increment columns, unique columns, and unsupported native metadata shapes.

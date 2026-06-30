@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  actionlint:
+    name: Lint Workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        env:
+          ACTIONLINT_ARCHIVE: actionlint_1.7.9_linux_amd64.tar.gz
+          ACTIONLINT_BASE_URL: https://github.com/rhysd/actionlint/releases/download/v1.7.9
+          ACTIONLINT_SHA256: 233b280d05e100837f4af1433c7b40a5dcb306e3aa68fb4f17f8a7f45a7df7b4
+        run: |
+          set -euo pipefail
+          curl -fsSLo "$ACTIONLINT_ARCHIVE" "$ACTIONLINT_BASE_URL/$ACTIONLINT_ARCHIVE"
+          printf '%s  %s\n' "$ACTIONLINT_SHA256" "$ACTIONLINT_ARCHIVE" | sha256sum --check -
+          mkdir -p "$RUNNER_TEMP/actionlint"
+          tar -xzf "$ACTIONLINT_ARCHIVE" -C "$RUNNER_TEMP/actionlint"
+          echo "$RUNNER_TEMP/actionlint" >> "$GITHUB_PATH"
+      - run: actionlint -color .github/workflows/*.yml
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: bun install
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run test:coverage
+      - run: bun run check:exports

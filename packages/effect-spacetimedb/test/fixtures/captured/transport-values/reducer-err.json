@@ -1,0 +1,5 @@
+{
+  "$capturedType": "Error",
+  "name": "SenderError",
+  "message": "{\"_effectSpacetimeDb\":\"DeclaredError\",\"version\":1,\"tag\":\"EffectSpacetimeDbExampleUserMissingError\",\"error\":{\"_tag\":\"EffectSpacetimeDbExampleUserMissingError\",\"userId\":\"capture-missing-user\"}}"
+}

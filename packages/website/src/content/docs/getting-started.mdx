@@ -1,0 +1,218 @@
+---
+draft: false
+title: Getting Started
+description: Install effect-spacetimedb, write a minimal module, build it, and generate a client.
+sidebar:
+  order: 1
+---
+
+import { TabItem, Tabs } from "@astrojs/starlight/components";
+
+`effect-spacetimedb` is an Effect-first authoring layer for SpaceTimeDB modules.
+You describe the module once, implement handlers with scoped Effect services,
+then build native module exports and generated clients from the same contract.
+
+## Install
+
+<Tabs syncKey="package-manager">
+  <TabItem label="npm">
+
+    ```sh
+    npm install effect-spacetimedb effect@4.0.0-beta.68 spacetimedb@2.5.0
+    ```
+
+  </TabItem>
+  <TabItem label="pnpm">
+
+    ```sh
+    pnpm add effect-spacetimedb effect@4.0.0-beta.68 spacetimedb@2.5.0
+    ```
+
+  </TabItem>
+  <TabItem label="bun">
+
+    ```sh
+    bun add effect-spacetimedb effect@4.0.0-beta.68 spacetimedb@2.5.0
+    ```
+
+  </TabItem>
+</Tabs>
+
+:::caution[Version match]
+
+The SpaceTimeDB CLI version must match the `spacetimedb` package version your
+project depends on — `spacetime build` and `spacetime generate` read a
+version-specific module format:
+
+```sh
+spacetime --version   # must match your installed `spacetimedb` package
+```
+
+If several CLI versions are installed, make sure the matching `spacetime` is the
+one on your `PATH`, or invoke it by full path in your build scripts.
+
+:::
+
+## Minimal Module
+
+The same module — a `user` table and a `user_upsert` reducer — in
+effect-spacetimedb and in the native SpaceTimeDB SDK:
+
+<Tabs syncKey="impl">
+  <TabItem label="effect-spacetimedb">
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+import * as Stdb from "effect-spacetimedb"
+import { build } from "effect-spacetimedb/server-compiler"
+import "effect-spacetimedb/server-polyfills"
+
+// Branded + validated id. In the native SDK this column is just `string`.
+const UserId = Schema.String.pipe(
+  Schema.minLength(1),
+  Schema.maxLength(64),
+  Schema.brand("UserId"),
+)
+
+const user = Stdb.table("user", {
+  public: true,
+  columns: {
+    // The Effect schema IS the column's value type, so the brand and the
+    // length validation flow through to handlers and generated clients.
+    id: Stdb.string(UserId).primaryKey(),
+    name: Stdb.string(),
+  },
+})
+
+// camelCase names lower to snake_case on the wire (userUpsert -> user_upsert).
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("userUpsert", {
+    // Params are validated by the same schema; the native SDK accepts any string.
+    params: Stdb.struct({
+      id: Stdb.string(UserId),
+      name: Stdb.string(),
+    }),
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const { Db } = Module
+
+const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
+  userUpsert: (args) =>
+    Effect.gen(function* () {
+      const db = yield* Db
+      yield* db.user.insert(args)
+    }),
+})
+
+export const compiled = build(Module, [UsersLive])
+export const ModuleExports = compiled.exportGroup()
+export default compiled.schema
+```
+
+  </TabItem>
+  <TabItem label="Native SDK">
+
+```ts
+import { schema, table, t } from "spacetimedb/server"
+
+const spacetime = schema({
+  user: table(
+    { public: true },
+    { id: t.string().primaryKey(), name: t.string() },
+  ),
+})
+
+export const user_upsert = spacetime.reducer(
+  "user_upsert",
+  { id: t.string(), name: t.string() },
+  (ctx, { id, name }) => {
+    ctx.db.user.insert({ id, name })
+  },
+)
+
+export default spacetime
+```
+
+  </TabItem>
+</Tabs>
+
+The authoring flow is:
+
+1. Declare value types, tables, and endpoint groups.
+2. Assemble a module with `StdbModule.make(...).addTables(...).add(...)`.
+3. Implement each group with `StdbBuilder.group(...)`.
+4. Import `server-polyfills` once and build the native module export with
+   `build(...)` from `effect-spacetimedb/server-compiler`.
+
+## Dev Loop
+
+Build modules with the native SpaceTimeDB CLI. Put the build and client
+generation commands behind package scripts:
+
+```json
+{
+  "scripts": {
+    "build": "spacetime build --module-path .",
+    "generate-client": "spacetime generate --lang typescript --js-path ./dist/bundle.js --out-dir ./src/generated --yes"
+  }
+}
+```
+
+Then run the scripts from the module package:
+
+```sh
+bun run build
+bun run generate-client
+```
+
+:::tip
+
+Use `build` before publishing a module and `generate-client` after changing the
+module contract.
+
+:::
+
+:::note
+
+If generated clients are committed, expect the CLI version header to include a
+build commit hash that can differ by platform. Many repos normalize that header
+and add `// @ts-nocheck` to generated TypeScript before checking drift; those
+normalization steps belong in your repo tooling, not in the published package.
+
+:::
+
+## Testing your module off-host
+
+A module entry statically imports the host-only compiler (`build` from
+`effect-spacetimedb/server-compiler`). To import that entry in Vitest without a
+real SpaceTimeDB host, alias the host syscalls to the shipped stub and inline the
+`spacetimedb` package:
+
+```ts
+// vitest.config.ts
+import { defineConfig } from "vitest/config"
+import { spacetimeSysAlias } from "effect-spacetimedb/testing"
+
+export default defineConfig({
+  test: {
+    server: { deps: { inline: ["spacetimedb"] } },
+  },
+  resolve: {
+    alias: { ...spacetimeSysAlias },
+  },
+})
+```
+
+The stub keeps `console` and the deterministic backstops usable off-host, so
+importing or building a module entry in tests does not require a running host.
+
+## Next Pages
+
+- [Reducers](/core-concepts/functions/reducers)
+- [Tables / Column Types](/core-concepts/tables/column-types)
+- [Runtime model](/the-effect-layer/runtime-model)
+- [SpacetimeDB coverage map](/spacetimedb-coverage)
+- [Reference](/reference)

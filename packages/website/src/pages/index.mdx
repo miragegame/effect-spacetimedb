@@ -1,0 +1,258 @@
+---
+layout: ../layouts/Marketing.astro
+title: "Effect SpacetimeDB - SpacetimeDB for Effect users"
+description: "Keep SpacetimeDB modules inside Effect with schemas, tagged errors, Layers, HttpApi clients, and scoped WebSocket sessions."
+---
+
+import Button from "../components/marketing/Button.astro";
+import CodeBlock from "../components/marketing/CodeBlock.astro";
+import Eyebrow from "../components/marketing/Eyebrow.astro";
+import Section from "../components/marketing/Section.astro";
+
+export const HERO_SRC = `import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+import * as Stdb from "effect-spacetimedb"
+
+const UserId = Schema.String.pipe(Schema.brand("App/UserId"))
+
+const user = Stdb.table("user", {
+  public: true,
+  columns: {
+    id: Stdb.string(UserId).primaryKey(),
+    name: Stdb.string(),
+  },
+})
+
+const AppErrors = Stdb.errors.namespace("App")({
+  UserMissing: Stdb.error({ userId: Stdb.string(UserId) }),
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.procedure("user_get", {
+    params: Stdb.struct({ userId: Stdb.string(UserId) }),
+    returns: Stdb.option(user.row),
+    errors: AppErrors,
+  }),
+)`;
+
+export const WITHOUT_NATIVE_SRC = `import { SenderError } from "spacetimedb"
+import { DbConnection } from "./module_bindings"
+
+declare const conn: DbConnection
+declare const userId: string
+
+export async function ensureUser() {
+  try {
+    await conn.reducers.userRequire({ userId })
+    return "ok" as const
+  } catch (error) {
+    if (error instanceof SenderError) {
+      // untyped string - parse and match by hand
+      const failure = JSON.parse(error.message) as {
+        tag?: string
+        error?: { userId?: string }
+      }
+
+      if (failure.tag === "AppUserMissing") {
+        return \`missing:\${failure.error?.userId}\` as const
+      }
+    }
+
+    throw error
+  }
+}`;
+
+export const WITH_EFFECT_SRC = `import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+import { Module } from "./module"
+
+declare const userId: string
+
+const Example = Stdb.project(Module.spec)
+
+export const ensureUser = Effect.gen(function* () {
+  const client = yield* Example.client.http.Tag
+
+  return yield* client.reducers.userRequire({ userId }).pipe(
+    Effect.as("ok" as const),
+    // typed tagged error - error.userId is a string
+    Effect.catchTag("AppUserMissing", (error) =>
+      Effect.succeed(\`missing:\${error.userId}\` as const),
+    ),
+  )
+})`;
+
+export const SCHEMA_SRC = `const UserId = Schema.String.pipe(Schema.brand("App/UserId"))
+const UserName = Schema.String.pipe(Schema.minLength(1))
+
+const user = Stdb.table("user", {
+  public: true,
+  columns: {
+    id: Stdb.string(UserId).primaryKey(),
+    name: Stdb.string(UserName),
+  },
+})
+
+const CreateUser = Stdb.struct({
+  userId: Stdb.string(UserId),
+  name: Stdb.string(UserName),
+})`;
+
+export const CLIENT_SRC = `import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+
+const Example = Stdb.project(Module.spec)
+const api = Stdb.toHttpApi(Module.spec)
+
+const httpClient = yield* HttpApiClient.make(api, {
+  baseUrl: Stdb.httpApiBaseUrl({ uri, databaseName }),
+  transformClient: HttpClient.mapRequest(
+    HttpClientRequest.bearerToken(token),
+  ),
+})
+
+yield* httpClient.Users.get({ path: { userId } })
+
+const group = session.tableGroup(["user"] as const)
+yield* group.changes.pipe(Stream.runForEach(renderUsers))`;
+
+<Section padding="92px 24px 66px" maxWidth={1240}>
+  <div class="hero-grid">
+    <div>
+      <h1 class="hero-title">
+        SpacetimeDB that stays in <span class="accent-italic">Effect</span>.
+      </h1>
+      <p class="hero-copy">
+        Your whole realtime backend as one Effect contract — tables, reducers,
+        HTTP, and clients, typed from the database to the UI.
+      </p>
+      <ul class="effect-checklist" aria-label="Effect SpacetimeDB benefits">
+        <li>Typed errors travel from reducer to client — recover with <code>catchTag</code>.</li>
+        <li>One Effect Schema defines tables, params, HTTP bodies, and domain types.</li>
+        <li>Handlers and clients compose with <code>Effect.fn</code>, Layers, and HttpApi.</li>
+      </ul>
+      <div class="button-row">
+        <Button href="/getting-started">start building</Button>
+        <Button href="/core-concepts/functions/error-handling" variant="secondary">typed errors</Button>
+        <Button href="https://github.com/miragegame/effect-spacetimedb" variant="ghost">github</Button>
+      </div>
+    </div>
+    <CodeBlock filename="contract.ts" code={HERO_SRC} caption="One contract drives the server, the generated client, and your typed errors." />
+  </div>
+</Section>
+
+<Section class="landing-section landing-section--alt" padding="78px 24px" maxWidth={1220}>
+  <div class="section-heading">
+    <Eyebrow>native sdk . effect-spacetimedb</Eyebrow>
+    <h2>Same call. Typed recovery.</h2>
+    <p>
+      Both call the same reducer and recover the same <code>AppUserMissing</code>
+      failure. Native parses it out of a string; Effect SpacetimeDB hands you a
+      typed error.
+    </p>
+  </div>
+  <div class="comparison-grid">
+    <div class="comparison-pane">
+      <div class="comparison-label">Without effect-spacetimedb <span>native TS SDK</span></div>
+      <CodeBlock filename="native-sdk.ts" code={WITHOUT_NATIVE_SRC} compact />
+    </div>
+    <div class="comparison-pane comparison-pane--with">
+      <div class="comparison-label">With effect-spacetimedb <span>Effect contract</span></div>
+      <CodeBlock filename="effect-spacetimedb.ts" code={WITH_EFFECT_SRC} compact />
+    </div>
+  </div>
+</Section>
+
+<Section class="landing-section" padding="78px 24px" maxWidth={1180}>
+  <div class="section-heading">
+    <Eyebrow>effect-native value</Eyebrow>
+    <h2>What Effect brings to SpacetimeDB.</h2>
+    <p>
+      The parts you get because it is built on Effect — not a list of generic
+      SpacetimeDB features.
+    </p>
+  </div>
+  <div class="benefit-grid">
+    <article class="benefit-card">
+      <h3>Typed errors, end to end</h3>
+      <p>
+        Declare tagged errors once. Fail with them on the server; recover with
+        <code>catchTag</code> on the client.
+      </p>
+      <a class="learn-more" href="/core-concepts/functions/error-handling">Error handling &rarr;</a>
+    </article>
+    <article class="benefit-card">
+      <h3>One Schema, everywhere</h3>
+      <p>
+        One branded Schema becomes your table columns, params, HTTP bodies,
+        return values, and error fields.
+      </p>
+      <a class="learn-more" href="/the-effect-layer/value-type-design">Value type design &rarr;</a>
+    </article>
+    <article class="benefit-card">
+      <h3>Compose with Layers</h3>
+      <p>
+        Handlers are Effects: yield <code>Db</code> and <code>Tx</code>, use
+        <code>Effect.fn</code>, and inject services through one runtime Layer.
+      </p>
+      <a class="learn-more" href="/core-concepts/functions/reducers">Reducers &rarr;</a>
+    </article>
+    <article class="benefit-card">
+      <h3>Scoped subscriptions</h3>
+      <p>
+        Sessions share connection state, and <code>tableGroup(keys).changes</code>
+        coalesces update bursts into cached snapshots.
+      </p>
+      <a class="learn-more" href="/core-concepts/subscriptions">Subscriptions &rarr;</a>
+    </article>
+    <article class="benefit-card">
+      <h3>Canonical Effect HTTP clients</h3>
+      <p>
+        <code>toHttpApi</code> projects your routes into a stock Effect
+        <code>HttpApi</code> — call them from existing <code>HttpApiClient</code>
+        code.
+      </p>
+      <a class="learn-more" href="/core-concepts/clients/connection">Client connection &rarr;</a>
+    </article>
+    <article class="benefit-card">
+      <h3>Generated typed clients</h3>
+      <p>
+        Generated bindings stay in sync with the contract, so every reducer,
+        route, and subscription call is typed end to end.
+      </p>
+      <a class="learn-more" href="/getting-started">Generate clients &rarr;</a>
+    </article>
+  </div>
+</Section>
+
+<Section class="landing-section landing-section--alt" padding="78px 24px" maxWidth={1180}>
+  <div class="section-heading">
+    <Eyebrow>schema . clients . subscriptions</Eyebrow>
+    <h2>Stay in the same Effect vocabulary.</h2>
+    <p>
+      Effect Schema for data, services for dependencies, HttpApi for routes,
+      streams for subscriptions — no new DSL to learn.
+    </p>
+  </div>
+  <div class="showcase-grid">
+    <CodeBlock filename="schema.ts" code={SCHEMA_SRC} compact />
+    <CodeBlock filename="client.ts" code={CLIENT_SRC} compact />
+  </div>
+</Section>
+
+<Section class="landing-section" padding="82px 24px 94px" maxWidth={980}>
+  <div class="outro">
+    <Eyebrow>docs . llms.txt . source</Eyebrow>
+    <h2>Use the docs as your implementation contract.</h2>
+    <p>
+      Quickstart, guides, migration notes, and a generated <code>llms.txt</code>
+      — plus the full source.
+    </p>
+    <div class="outro-actions">
+      <Button href="/getting-started">read getting started</Button>
+      <Button href="/llms.txt" variant="secondary">open llms.txt</Button>
+      <Button href="https://github.com/miragegame/effect-spacetimedb" variant="ghost">view source</Button>
+    </div>
+  </div>
+</Section>

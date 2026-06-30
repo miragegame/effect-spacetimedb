@@ -1,0 +1,86 @@
+---
+draft: false
+title: Value Types
+description: Canonical value-type helper catalog for authored TypeScript values, SATS lowering, and transport codecs.
+sidebar:
+  order: 3
+---
+
+Value types wrap Effect schemas with the SpaceTimeDB type information needed for
+tables, call params, returns, declared errors, HTTP routes, and generated
+clients.
+
+```typescript twoslash
+import * as Schema from "effect/Schema"
+import * as Stdb from "effect-spacetimedb"
+
+const UserId = Schema.String.pipe(Schema.brand("UserId"))
+
+const user = Stdb.table("user", {
+  columns: {
+    id: Stdb.string(UserId).primaryKey(),
+    level: Stdb.u32(),
+    credits: Stdb.bigint(),
+    createdAt: Stdb.timestamp(),
+  },
+})
+```
+
+Use namespace form for helpers, including `Stdb.enum(...)`; `enum` cannot be a
+named import in JavaScript.
+
+## Scalar Helpers
+
+| Helper | Authored TypeScript value | SATS lowering | Bounds / encoding |
+| --- | --- | --- | --- |
+| `Stdb.string(schema?)` | `string` or branded string | `string` | Optional schema refines the authored value. |
+| `Stdb.bool(schema?)` | `boolean` or branded boolean | `bool` | Optional schema refines the authored value. |
+| `Stdb.u8()` / `u16()` / `u32()` | `number` | unsigned integer width | Constructor checks `0..2^8-1`, `0..2^16-1`, or `0..2^32-1`. |
+| `Stdb.i8()` / `i16()` / `i32()` | `number` | signed integer width | Constructor checks `-(2^(n-1))..2^(n-1)-1`. |
+| `Stdb.u64()` / `u128()` / `u256()` | `bigint` | unsigned integer width | Constructor checks `0..2^n-1`; DB and generated-client transports keep `bigint`. |
+| `Stdb.i64()` / `i128()` / `i256()` | `bigint` | signed integer width | Constructor checks `-(2^(n-1))..2^(n-1)-1`; DB and generated-client transports keep `bigint`. |
+| `Stdb.f32()` / `f64()` | `number` | `f32` / `f64` | DB and WebSocket profiles preserve `NaN`/`Infinity`; HTTP JSON rejects non-finite numbers. |
+| `Stdb.bigint()` | `bigint` | `string` | JSON-safe arbitrary-size integer encoded through `Schema.BigIntFromString`. |
+| `Stdb.bytes()` | `Uint8Array` | byte array | Host and generated-client values are byte arrays. |
+| `Stdb.identity()` | `spacetimedb.Identity` | identity | Native identity object. |
+| `Stdb.connectionId()` | `spacetimedb.ConnectionId` | connection id | Native connection id object. |
+| `Stdb.timestamp()` | `spacetimedb.Timestamp` | timestamp | Native timestamp object, microseconds since Unix epoch. |
+| `Stdb.timeDuration()` | `spacetimedb.TimeDuration` | time duration | Native duration object, microseconds. |
+| `Stdb.scheduleAt()` | `spacetimedb.ScheduleAt` | schedule-at | Scheduled-table `scheduledAt` value type. |
+| `Stdb.uuid()` | `spacetimedb.Uuid` | UUID | Native UUID object. |
+| `Stdb.unit()` | `void` / `undefined` | unit | Empty payload marker for sums, results, and scheduled procedure returns. |
+
+`Stdb.bigint()` is not the same as the fixed-width integer helpers. Use
+`Stdb.bigint()` when the database column should be a SATS string carrying a
+JSON-safe arbitrary integer. Use `i64`/`u64`/`i128`/`u128`/`i256`/`u256` when the
+database column should be a native integer width and the authored value should
+stay a `bigint`.
+
+## Composite Helpers
+
+| Helper | Authored TypeScript value | SATS lowering | Notes |
+| --- | --- | --- | --- |
+| `Stdb.array(T)` | `ReadonlyArray<TypeOf<T>>` | array/list | Recurses through the inner value type. |
+| `Stdb.option(T)` | `TypeOf<T>` or `undefined` | `option<T>` | Present field whose value can be absent. |
+| `Stdb.optional(T)` | optional struct field | `option<T>` in structs | Produces an optional TypeScript property. |
+| `T.optional()` | optional table column | `option<T>` column | Column may be omitted on inserts. |
+| `Stdb.struct({ ... })` | object | content-addressed SATS struct | Use for rows, params, returns, and declared-error payloads. |
+| `Stdb.sum({ Tag: Payload })` | `{ tag, value? }` | content-addressed SATS enum/sum | Unit payloads omit `value`; payload variants require `value`. |
+| `Stdb.enum("A", "B")` / `enumType(...)` | tagged unit variants | SATS enum | Unit-variant sums; prefer namespace form because `enum` cannot be named-imported. |
+| `Stdb.literal(...)` | string, number, or boolean literal | string literals -> enum; numbers -> `f64`; booleans -> `bool` | String literal generated-client tags use SpaceTimeDB PascalCase. Numeric literals reject non-finite values and unsafe integers. |
+| `Stdb.result(Ok, Err)` | Effect-style result envelope | SATS result | Normalizes host `{ ok }` / `{ err }` envelopes. |
+| `Stdb.lazy(() => T)` | recursive value | lazy SATS type | Use for recursive structs or sums. |
+| `Stdb.custom(schema, { type })` | schema-authored value | lowering of `type` | Keep the SpaceTimeDB lowering explicit when wrapping custom schemas. |
+
+## Codecs
+
+| Helper | Profile | When to use |
+| --- | --- | --- |
+| `Stdb.dbCodec(T)` | SpaceTimeDB host / DB shape | Low-level host interop, table rows, reducer args, and generated server values. |
+| `Stdb.httpCodec(T)` | HTTP JSON shape | Typed HTTP request and response bodies. Rejects non-finite floating-point numbers because JSON cannot carry them. |
+| `Stdb.wsCodec(T)` | Generated WebSocket client shape | Client cache rows, subscription events, and callable payloads. Sum and string-literal tags are rewritten to the generated client's PascalCase convention. |
+
+The public docs use this page as the helper catalog. See
+[Value Representations](/the-effect-layer/value-representations) for the
+transport profiles and [Column Types](/core-concepts/tables/column-types) for
+table-specific usage.

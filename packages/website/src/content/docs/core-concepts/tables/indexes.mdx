@@ -1,0 +1,36 @@
+---
+draft: false
+title: Indexes
+description: Declare btree, hash, and direct indexes from table columns.
+sidebar:
+  order: 3
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/indexes" target="_blank" rel="noopener noreferrer">SpacetimeDB: Indexes ↗</a>
+
+Single-column indexes can live on the column. Composite indexes live in the
+table's `indexes` callback.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const playerScore = Stdb.table("player_score", {
+  public: true,
+  columns: {
+    id: Stdb.u64().primaryKey().autoInc(),
+    playerId: Stdb.string().index("hash"),
+    score: Stdb.u32().index("direct"),
+    season: Stdb.string(),
+  },
+  indexes: (columns) => [
+    Stdb.index("player_score_season_score_idx", [
+      columns.season,
+      columns.score,
+    ], { algorithm: "btree" }),
+  ],
+})
+```
+
+effect-spacetimedb accepts the native algorithms
+`"btree"`, `"hash"`, and `"direct"` at both declaration sites. `hash` indexes
+are point-only; `direct` indexes are range-capable.

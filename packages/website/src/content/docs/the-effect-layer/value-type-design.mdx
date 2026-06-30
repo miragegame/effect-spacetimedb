@@ -1,0 +1,133 @@
+---
+draft: false
+title: Value-Type Design
+description: Why Stdb value types are opaque wrappers around Effect schemas.
+sidebar:
+  order: 2
+---
+
+An `Stdb.*` value type wraps an Effect schema rather than being a plain schema.
+That design is deliberate: SpaceTimeDB declaration sites must reject raw Effect
+schemas at compile time, while application code still needs ordinary schemas for
+decode, encode, HTTP bodies, and domain logic.
+
+## The Two Jobs
+
+A value type must:
+
+1. Reuse an Effect schema for TypeScript values and JSON codecs.
+2. Carry SpaceTimeDB SATS information so tables, params, returns, and errors
+   lower to native types.
+
+Effect annotations preserve runtime metadata, but TypeScript cannot see whether
+a schema has a particular annotation. Phantom type markers on schemas are also
+fragile because Effect transforms rebuild schema types and strip the marker.
+
+## Why Annotations Are Not Enough
+
+Two Effect behaviors constrain the design:
+
+- **Annotations are runtime-only at the type level.** `effect-spacetimedb`
+  stores the real SATS information as schema annotations, and those annotations
+  survive transforms. But a schema with an annotation and a schema without one
+  have the same TypeScript type, so annotations alone cannot make raw schemas in
+  SATS positions a compile-time error.
+- **Schema transforms rebuild schema types.** `.pipe`, `.check`, `.brand`, and
+  `.annotate` return the canonical schema type and drop any phantom property
+  added by a cast. That is sound: the transform creates a new schema object that
+  does not carry the cast-on property at runtime.
+
+## The Trilemma
+
+Enforcing SATS positions at compile time, keeping value types as plain Effect
+schemas, and staying robust under composition are mutually exclusive:
+
+| Approach | Compile-time rejection of raw schemas | Value type is a plain Effect schema | Robust under transforms |
+| --- | --- | --- | --- |
+| Phantom marker on schema type | Yes | Yes | No; transforms strip the marker. |
+| Opaque wrapper | Yes | No; use `.schema` to unwrap. | Yes |
+| Annotations only | No; validate at module build time. | Yes | Yes |
+
+`effect-spacetimedb` chooses the opaque wrapper. The wrapper is not itself a
+schema; unwrap with `.schema` when ordinary Effect schema interop is required.
+
+This keeps one important guarantee: raw schemas are rejected in SATS positions at
+compile time. It also avoids "tag must be last" bugs where a refinement or brand
+accidentally strips a marker.
+
+## Accepted Tradeoffs
+
+- **`.schema` unwraps a value type to its Effect schema** for decode/encode,
+  `Schema.*` combinators, and HTTP request/response bodies.
+- **All refinement happens inside the constructor.** Each scalar takes either no
+  schema or one Effect schema. Branding is just `Schema.brand(...)` on the
+  passed schema, not a privileged argument.
+- **Numeric width belongs to the constructor.** `Stdb.u16()` always enforces the
+  `[0, 65535]` range because Effect range checks do not narrow the TypeScript
+  type enough for SATS width proof at the call site.
+
+## Recommended Pattern
+
+For branded domain values, keep the raw Effect schema as the source of truth and
+wrap it inline at SpaceTimeDB boundaries:
+
+```ts
+const UserId = Schema.String.pipe(Schema.brand("UserId"))
+
+Stdb.string(UserId) // table fields, params, returns, error fields
+```
+
+Avoid keeping parallel aliases such as a raw `UserId` schema and a separate
+`UserIdT` value-type wrapper for the same domain id. Wrap the domain schema at
+declaration sites. Generic, non-branded SATS scalars reused across many fields
+may be kept as value-type aliases.
+
+For generic SATS values reused across many fields, keep a value-type alias:
+
+```ts
+const ShortString = Stdb.string(Schema.String.pipe(Schema.minLength(1)))
+```
+
+Composites and rows are the value types you usually keep. A row's `.schema`
+decodes the whole row.
+
+## Literal Unions
+
+If a union exists for SpaceTimeDB use, declare it with `Stdb.literal(...)`. It
+lowers to a SATS enum on the wire and decodes to the literal TypeScript union.
+
+String literal enum tags preserve authored strings verbatim on DB/host and HTTP
+paths when the authored value is a valid SpaceTimeDB identifier. Non-identifier
+values use a generated-client-safe PascalCase tag in the SATS schema while still
+decoding to the authored value. Official generated clients expose schema
+variants through SpaceTimeDB's PascalCase convention, so
+`Stdb.literal("pending_review")` encodes as `{ tag: "pending_review" }` for DB
+and HTTP and as `{ tag: "PendingReview" }` for generated-client WebSocket calls.
+
+HTTP JSON tools should send the schema SATS tag. Existing modules with persisted
+enum columns may need a reset or hand-written migration when republished because
+changing SATS variant names changes the column type identity.
+
+Numeric `Stdb.literal(...)` values lower to `f64`; non-finite numbers and unsafe
+integers beyond `Number.MAX_SAFE_INTEGER` are rejected.
+
+If the union is a core shared domain schema also consumed by HTTP DTOs, keep
+`Stdb.custom(CoreSchema, { type: <string scalar> })` so the values have one
+source of truth. A lint rule enforces that custom inline literals do not replace
+`Stdb.literal(...)` for local SATS-only unions.
+
+## Optional Fields
+
+`Stdb.optional(...)`, table-column `.optional()`, and `Stdb.option(...)` all
+lower to SATS `option<T>` when a struct is materialized. They differ in the
+TypeScript surface: field-level optionality gives `key?: T`, while
+`Stdb.option(...)` gives a required `key: T | undefined` value. Prefer
+`Stdb.option(...)` for fields constructed from computed possibly-undefined
+values.
+
+## Alternative Design
+
+If compile-time rejection were not required, annotations-only value types would
+be simpler and more Effect-native: the value type would be a plain schema, with
+raw schemas in SATS positions caught by module validation instead of typecheck.
+This package chooses the compile-time guarantee over that simpler interop model.

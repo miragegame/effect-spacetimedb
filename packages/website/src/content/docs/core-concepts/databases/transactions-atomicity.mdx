@@ -1,0 +1,106 @@
+---
+draft: false
+title: Transactions & Atomicity
+description: Reducer transactions, explicit procedure transactions, and retry-safe bodies.
+sidebar:
+  order: 1
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/databases/transactions-atomicity" target="_blank" rel="noopener noreferrer">SpacetimeDB: Transactions & Atomicity ↗</a>
+
+Reducers run inside the host reducer transaction and may yield `Db` directly.
+Procedures and HTTP handlers open explicit transactions with `Tx` or `HttpTx`.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const counter = Stdb.table("counter", {
+  columns: {
+    id: Stdb.string().primaryKey(),
+    value: Stdb.u32().default(0),
+  },
+})
+
+const Counters = Stdb.StdbGroup.make("Counters")
+  .add(Stdb.StdbFn.reducer("counter_inc", { params: Stdb.struct({ id: Stdb.string() }) }))
+  .add(Stdb.StdbFn.procedure("counter_read", {
+    params: Stdb.struct({ id: Stdb.string() }),
+    returns: Stdb.option(counter.row),
+  }))
+
+const Module = Stdb.StdbModule.make("app").addTables(counter).add(Counters)
+const { Db, Tx } = Module
+
+const CountersLive = Stdb.StdbBuilder.group(Module, "Counters", {
+  counter_inc: Effect.fn(function* ({ id }) {
+    const db = yield* Db
+    const current = yield* db.counter.id.find(id)
+    yield* db.counter.id.replace({ id, value: (current?.value ?? 0) + 1 })
+  }),
+  counter_read: Effect.fn(function* ({ id }) {
+    const tx = yield* Tx
+    return yield* tx.run(
+      Effect.gen(function* () {
+        const db = yield* Db
+        return yield* db.counter.id.find(id)
+      }),
+    )
+  }),
+})
+```
+
+Effect capability scopes make transaction boundaries visible in
+the type system. Keep `Tx.run(...)` and `HttpTx.run(...)` bodies idempotent and
+database-only; put external side effects outside the transaction body.
+
+SpaceTimeDB owns transaction commit, abort, rollback, and optimistic-commit
+retry behavior. effect-spacetimedb delegates to the native host `withTx` call; it
+does not add retry logic of its own. An Effect failure inside the body aborts the
+transaction. Native host abort outcomes surface as typed errors such as
+`StdbUniqueAlreadyExistsError`, `StdbNoSuchRowError`, and
+`StdbAutoIncOverflowError`.
+
+HTTP handlers use `HttpTx` for the same explicit transaction boundary:
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+import * as Stdb from "effect-spacetimedb"
+
+const counter = Stdb.table("counter", {
+  columns: {
+    id: Stdb.string().primaryKey(),
+    value: Stdb.u32().default(0),
+  },
+})
+
+const Routes = Stdb.StdbHttpGroup.make("Routes").add(
+  Stdb.StdbHttp.post("counter_inc", "/counter/inc", {
+    request: Schema.Struct({ id: Schema.String }),
+    response: Schema.Void,
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").addTables(counter).add(Routes)
+const { Db, HttpTx } = Module
+
+const RoutesLive = Stdb.StdbBuilder.group(Module, "Routes", {
+  counter_inc: Effect.fn(function* ({ id }) {
+    const tx = yield* HttpTx
+    yield* tx.run(
+      Effect.gen(function* () {
+        const db = yield* Db
+        const current = yield* db.counter.id.find(id)
+        yield* db.counter.id.replace({
+          id,
+          value: (current?.value ?? 0) + 1,
+        })
+      }),
+    )
+  }),
+})
+```
+
+See [Runtime Model](/the-effect-layer/runtime-model) for the server Effect
+constraints.

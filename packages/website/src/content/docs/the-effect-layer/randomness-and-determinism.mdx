@@ -1,0 +1,103 @@
+---
+draft: false
+title: Randomness And Determinism
+description: Deterministic randomness for reducers, and why it is not secret.
+sidebar:
+  order: 5
+---
+
+Reducers must be deterministic. Every replica needs to reproduce the same result
+from the same logged inputs, so module code should use host-provided time and
+randomness rather than ambient JavaScript globals.
+
+## Reducer Randomness
+
+Inside Effect-based reducers, use `Random.*` from `effect/Random`. The constrained server
+runtime wires Effect randomness to the call context's deterministic random
+stream.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Random from "effect/Random"
+
+const roll = Effect.gen(function* () {
+  const die = yield* Random.nextIntBetween(1, 6)
+  const fraction = yield* Random.next
+  return { die, fraction }
+})
+```
+
+:::caution
+
+Do not call global `Math.random` in reducers, procedures, views, or HTTP handler
+effects. Development guards replace it with a throwing stub so accidental use
+fails early.
+
+:::
+
+## Wall Clock
+
+Use the call timestamp supplied by the current context instead of ambient clock
+globals. In guarded development runs, `Date.now()` and no-argument `new Date()`
+throw `ReducerWallClockNotAllowedError`; `Math.random` throws
+`ReducerGlobalRandomNotAllowedError`; suspended Effects, promises, timers, and
+microtasks throw `ReducerAsyncNotAllowedError`.
+
+The Effect clock is wired to the same transaction timestamp, so `Effect.Clock`
+and `DateTime.now` are deterministic inside server handlers.
+
+## UUID Helpers
+
+Reducer, transaction, and HTTP handler contexts expose deterministic UUID
+helpers. Use `ctx.newUuidV4()` and `ctx.newUuidV7()` when a row needs a stable
+identifier produced inside server module code.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+declare const Module: Stdb.AnyStdbModule
+
+const { ReducerCtx } = Module
+
+const ids = Effect.gen(function* () {
+  const ctx = yield* ReducerCtx
+  return {
+    randomId: ctx.newUuidV4(),
+    timeSortableId: ctx.newUuidV7(),
+  }
+})
+```
+
+## Runtime Wiring
+
+The constrained server runtime wires `Random.*` from `effect/Random` to the
+current SpaceTimeDB call context through `ctx.random`, so helpers such as
+`Random.next`, `Random.nextIntBetween`, and `Random.shuffle` consume the same
+deterministic stream exposed by the host.
+
+SpaceTimeDB replaces `Math.random` in module runtimes. In guarded development
+runs, `effect-spacetimedb` also replaces it with a throwing guard so accidental
+callers fail loudly in tests and CI. The runtime still installs a deterministic
+fallback as a non-semantic backstop for stray library paths, but application
+logic should not depend on it.
+
+The host random stream is deterministic and replica-reproducible. Supplying a
+developer-chosen seed makes results more reproducible, not more secret.
+
+## Strength
+
+Reducer randomness is useful for gameplay-grade choices: shuffles, loot rolls,
+procedural content, and reproducible simulations. It is not appropriate for
+secrets, tokens, authentication, anti-cheat, or any security-sensitive value.
+
+If a value must be unpredictable, generate it outside the deterministic reducer
+with a trusted source of entropy and pass it in as an argument.
+
+## Rules
+
+- Use `Random.*` from `effect/Random` inside server handlers.
+- Use context randomness only at low-level interop boundaries.
+- Never use `Math.random` for server semantics.
+- Never use ambient wall-clock reads for committed server semantics.
+- Treat reducer randomness as deterministic and non-cryptographic.

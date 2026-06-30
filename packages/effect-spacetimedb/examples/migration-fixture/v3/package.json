@@ -1,0 +1,11 @@
+{
+  "name": "effect-spacetimedb-migration-fixture-v3",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "dependencies": {
+    "effect": "4.0.0-beta.68",
+    "effect-spacetimedb": "workspace:*",
+    "spacetimedb": "2.5.0"
+  }
+}
