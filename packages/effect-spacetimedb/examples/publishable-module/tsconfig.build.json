@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "declarationDir": "../../dist-types/examples/publishable-module",
+    "outDir": "../../dist-types/examples/publishable-module",
+    "tsBuildInfoFile": "../../dist-types/examples/publishable-module/tsconfig.tsbuildinfo",
+    "incremental": true,
+    "noEmit": false
+  },
+  "references": [
+    {
+      "path": "../../tsconfig.build.json"
+    }
+  ],
+  "exclude": ["../../dist-types", "**/dist-types"]
+}

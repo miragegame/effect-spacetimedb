@@ -1,0 +1,177 @@
+---
+draft: false
+title: SDK API
+description: Use the projected Effect HTTP client, WebSocket session, targets, and HttpApi projection.
+sidebar:
+  order: 3
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/clients/api" target="_blank" rel="noopener noreferrer">SpacetimeDB: SDK API ↗</a>
+
+`Stdb.project(Module)` is the Effect-native SDK companion for a module.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("user_upsert", {
+    params: Stdb.struct({ userId: Stdb.string(), name: Stdb.string() }),
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").add(Users)
+const Example = Stdb.project(Module)
+const HttpLive = Example.client.http.layer({ uri, databaseName, token })
+
+const program = Effect.gen(function* () {
+  const client = yield* Example.client.http.Tag
+  yield* client.Users.reducers.user_upsert({ userId: "u1", name: "Ada" })
+}).pipe(Effect.provide(HttpLive))
+```
+
+The projection contains:
+
+- `client.http`: typed Effect service, direct `make`, and layer constructors.
+- `client.ws`: scoped/layered WebSocket sessions over generated native bindings.
+- `targets`: public persistent-table, event-table, and all-public-table targets.
+- `module`, `tables`, `reducers`, `procedures`, `httpHandlers`, and `lifecycle`
+  metadata for tooling.
+- `Stdb.toHttpApi(Module)`: an Effect `HttpApi` projection for typed HTTP
+  routes.
+
+effect-spacetimedb's client surface uses Effect services and
+typed errors. It does not replace the native generated WebSocket cache; it wraps
+it with scoped resources, projected callables, and subscription helpers.
+
+## Group-Scoped HTTP Clients
+
+The HTTP client keeps its flat `reducers`, `procedures`, and `httpHandlers`
+records and also projects every authored group as a namespace:
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("user_upsert", {
+    params: Stdb.struct({ userId: Stdb.string(), name: Stdb.string() }),
+  }),
+  Stdb.StdbFn.procedure("user_get", {
+    params: Stdb.struct({ userId: Stdb.string() }),
+    returns: Stdb.option(Stdb.struct({ userId: Stdb.string(), name: Stdb.string() })),
+  }),
+)
+const Module = Stdb.StdbModule.make("app").add(Users)
+const Example = Stdb.project(Module)
+const client = Example.client.http.make({ uri, databaseName, token })
+const users = Example.client.http.group("Users", { uri, databaseName, token })
+
+const write = client.Users.reducers.user_upsert({ userId: "u1", name: "Ada" })
+const read = client.Users.procedures.user_get({ userId: "u1" })
+const scopedWrite = users.reducers.user_upsert({ userId: "u1", name: "Ada" })
+```
+
+For a narrower type at a consumer boundary, construct only one group view:
+`Example.client.http.group("Users", { uri, databaseName, token })`. The result
+contains only that group's `reducers`, `procedures`, and `httpHandlers`.
+
+Grouped functions—including their `.raw` functions—are the exact same objects
+as the flat members, so grouping has no behavioral or wire-level cost. Group
+views are lazy and currently HTTP-only; WebSocket sessions remain flat.
+
+Group ids are client property keys. Module validation rejects ids that are not
+JavaScript identifiers or collide with framework/session keys (`reducers`,
+`procedures`, `subscribe`, and similar) or inherited-object names such as
+`constructor`.
+
+## Raw Calls And Failures
+
+Reducer and procedure functions expose a typed call and a `.raw` variant. The
+typed call decodes declared domain errors into the error channel directly. The
+raw variant preserves a `DomainCallError` wrapper so callers can distinguish a
+remote declared error from transport, rejection, or decode failures.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+import * as StdbClient from "effect-spacetimedb/client"
+
+const AppErrors = Stdb.errors.namespace("App")({
+  UserMissing: Stdb.error({ userId: Stdb.string() }, { status: 404 }),
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.procedure("user_get", {
+    params: Stdb.struct({ userId: Stdb.string() }),
+    returns: Stdb.option(Stdb.struct({ userId: Stdb.string(), name: Stdb.string() })),
+    errors: AppErrors,
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").add(Users)
+const Example = Stdb.project(Module)
+
+const program = Effect.gen(function* () {
+  const client = yield* Example.client.http.Tag
+  return yield* client.procedures.user_get.raw({ userId: "u1" })
+}).pipe(
+  Effect.catchTag("DomainCallError", (failure: StdbClient.DomainCallError<unknown>) =>
+    Effect.fail(failure.error),
+  ),
+)
+```
+
+The exported failure model is:
+
+| Type | Meaning |
+| --- | --- |
+| `CallFailure<E>` | Typed call error union: declared errors, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
+| `RawCallFailure<E>` | Raw call error union: `DomainCallError<E>`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
+| `DomainCallError<E>` | Declared error preserved as a wrapper by `.raw`. |
+| `RemoteRejectedError` | The remote side rejected the call without a decodable declared error. |
+| `TransportError` | The HTTP or WebSocket transport failed before a typed response arrived. |
+| `StdbDecodeError` | A response, row, event, or payload could not be decoded with the module contract. |
+
+The lower-level `catchRawTags` helper is exported from
+`effect-spacetimedb/testing` for fixture and protocol-level assertions. Public
+application clients should usually handle the exported failure classes directly
+or use the typed call form.
+
+## HTTP API Base URL
+
+Use `Stdb.httpApiBaseUrl` with `Stdb.toHttpApi(Module)` when you want a
+stock Effect `HttpApiClient` over typed `post`, `put`, or `patch` routes.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient"
+import * as Stdb from "effect-spacetimedb"
+
+declare const Module: Stdb.AnyStdbModule
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const api = Stdb.toHttpApi(Module)
+
+const program = Effect.gen(function* () {
+  const client = yield* HttpApiClient.make(api, {
+    baseUrl: Stdb.httpApiBaseUrl({ uri, databaseName }),
+    transformClient: HttpClient.mapRequest(
+      HttpClientRequest.bearerToken(token),
+    ),
+  })
+
+  return client
+})
+```

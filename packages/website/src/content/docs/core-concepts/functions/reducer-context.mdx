@@ -1,0 +1,63 @@
+---
+draft: false
+title: Reducer Context
+description: Read sender, timestamp, deterministic randomness, and scoped mutation context.
+sidebar:
+  order: 2
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions/reducers/reducer-context" target="_blank" rel="noopener noreferrer">SpacetimeDB: Reducer Context ↗</a>
+
+Reducer context is an Effect service yielded from the assembled module.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const audit = Stdb.table("audit", {
+  columns: {
+    id: Stdb.u64().primaryKey().autoInc(),
+    sender: Stdb.identity(),
+    message: Stdb.string(),
+  },
+})
+
+const Audit = Stdb.StdbGroup.make("Audit").add(
+  Stdb.StdbFn.reducer("audit_write", {
+    params: Stdb.struct({ message: Stdb.string() }),
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").addTables(audit).add(Audit)
+const { Db, ReducerCtx } = Module
+
+const AuditLive = Stdb.StdbBuilder.group(Module, "Audit", {
+  audit_write: Effect.fn(function* ({ message }) {
+    const ctx = yield* ReducerCtx
+    const db = yield* Db
+    yield* db.audit.insert({
+      id: 0n,
+      sender: ctx.sender,
+      message,
+    })
+  }),
+})
+```
+
+`ReducerCtx` exposes the sender identity, authenticated sender metadata,
+timestamp, connection id, deterministic random stream, UUID helpers, and the
+same writable `db` view available through `Db`.
+
+effect-spacetimedb exposes context as scoped services rather than a positional
+argument: `ReducerCtx` for reducers, `TxCtx` inside explicit transaction bodies,
+and `MutationCtx` for helpers that must work in both scopes.
+
+:::caution
+
+Reducers are deterministic synchronous host calls. `async`/Promises, timers,
+microtasks, global `Math.random`, and wall-clock reads such as `Date.now()` or
+no-argument `new Date()` throw typed errors. Use `Random.*` from
+`effect/Random`, context randomness, and the call timestamp instead. See
+[Randomness & Determinism](/the-effect-layer/randomness-and-determinism).
+
+:::

@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "root": true,
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "lineWidth": 80
+  },
+  "files": {
+    "includes": ["**", "!examples/publishable-module/generated-client"]
+  },
+  "linter": {
+    "enabled": true
+  },
+  "javascript": {
+    "linter": {
+      "enabled": false
+    },
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "asNeeded"
+    }
+  }
+}

@@ -1,0 +1,130 @@
+---
+draft: false
+title: Runtime Model
+description: How Effect programs run inside SpaceTimeDB's synchronous, deterministic module host.
+sidebar:
+  order: 1
+---
+
+SpaceTimeDB runs module code inside a strict host contract: each reducer,
+procedure, view, HTTP handler, and lifecycle handler is synchronous,
+run-to-completion, single-transaction where applicable, and deterministic.
+`effect-spacetimedb` runs Effect programs inside that contract rather than
+pretending the module runtime is a normal JavaScript environment.
+
+## Synchronous Effects Only
+
+:::caution
+
+Handler effects must complete in one synchronous pass. Do not use promises,
+`async` functions, timers, `queueMicrotask`, or `Effect.sleep` in server module
+handlers. Development guards make these operations fail loudly so code that
+would suspend the module host is caught early.
+
+:::
+
+Finalizers from scoped Effects still run synchronously before the host commits or
+rolls back, so `Effect.acquireRelease` is safe when the acquired resource is
+bounded to the current call.
+
+At the host boundary, each reducer, procedure, view, HTTP handler, and lifecycle
+handler is executed with the sync runner and `Scheduler.PreventSchedulerYield`.
+Anything that suspends the fiber surfaces as `ReducerAsyncNotAllowedError`.
+`Effect.sleep` fails with the same error in all modes. Guarded development runs
+also replace timer and microtask globals with throwing stubs so accidental use
+fails before a module is published.
+
+## Determinism
+
+Every replica must replay the same input log to the same state. Use
+`Random.*` from `effect/Random` for deterministic randomness and use the call
+timestamp for time. Do not call `Math.random`, `Date.now`, or
+`performance.now` for server semantics. See
+[Randomness & Determinism](/the-effect-layer/randomness-and-determinism) for
+the full guard and UUID-helper contract.
+
+Determinism is reproducibility, not secrecy. Generate tokens, secrets, and
+cryptographically unpredictable values outside the reducer and pass them in.
+
+The server runtime wires `Random.*` from `effect/Random` to `ctx.random`. It also
+provides the Effect clock from `ctx.timestamp`, so `Effect.Clock` and
+`DateTime.now` reflect the transaction timestamp. In guarded development runs,
+`Math.random`, `Date.now()`, and no-argument `new Date()` throw deterministic
+runtime errors; explicit conversions such as `new Date(123)`, `Date.parse`, and
+`Date.UTC` remain available.
+
+## Transactions
+
+Reducers run inside one ambient writable transaction and may yield `Db`
+directly. Procedures and HTTP handlers open transactions explicitly with `Tx` or
+`HttpTx`. Transaction bodies may be retried after optimistic commit conflicts,
+so keep them pure database work and put external side effects outside them.
+
+Only mutable transactions exist in the JavaScript host. SpaceTimeDB exposes no
+read-only transaction for procedures; a read-only transaction would be a
+type-level convention, not a host feature. A procedure that opens several
+transactions has no automatic rollback across them, so multi-step workflows need
+their own status rows and cleanup process.
+
+## Host Call Failures
+
+Host ABI calls can fail before user code gets a normal return value. Generic or
+unrecognized host failures surface as `StdbHostCallError` with the operation
+label and original cause. Four native SpaceTimeDB host errors are split out so
+handlers can branch without string-sniffing causes:
+
+- `StdbUniqueAlreadyExistsError`
+- `StdbAutoIncOverflowError`
+- `StdbNoSuchRowError`
+- `StdbScheduleDelayTooLongError`
+
+Each carries `{ op, cause }`, matching `StdbHostCallError`. Branch on a specific
+tag only when a handler has a real recovery path, such as translating a unique
+constraint collision into a declared domain error. Otherwise let the error
+propagate so the host-boundary throw keeps the operation label and original
+cause.
+
+The classifier uses native error class names rather than `instanceof`, because
+ordinary server runtime files cannot value-import `spacetimedb/server` without
+loading the host-only syscall surface. Dependency bumps should re-check the
+native server error-name surface.
+
+## Observability
+
+Tracing is disabled on the server. Effect spans are not exported from a reducer,
+and the default tracer would allocate span ids from ambient randomness, so
+server effects run with tracing off. `Effect.fn` still works; it produces a noop
+span.
+
+`Effect.log*` bridges to the host console through the runtime logger. Logs
+emitted while a reducer, procedure, HTTP handler, view, or lifecycle handler runs
+carry the module, handler, and kind. Caller-scoped handlers also annotate the
+sender identity; anonymous views and HTTP handlers omit sender.
+
+## Polyfills And Guarded Mode
+
+SpaceTimeDB's module runtime is a minimal JavaScript environment. The server
+compat layer installs small shims only when they are missing:
+
+- a deterministic `Math.random` fallback, used only as a library backstop,
+- immediate-execution timer shims and no-op clear functions.
+
+Module entrypoints import `effect-spacetimedb/server-compiler`, which installs
+the server compatibility polyfills before exposing `build`. Native
+`spacetime build` preserves that side-effectful compiler entrypoint.
+
+The constrained runtime has a production mode and a guarded development mode.
+Guarded mode is selected automatically under tests and temporarily swaps
+forbidden globals for throwing stubs for the duration of each call, restoring
+them afterward. Code that passes guarded mode behaves deterministically in the
+host.
+
+## Quick Rules
+
+- Keep handler bodies synchronous.
+- Use `Random.*` from `effect/Random`, not `Math.random`.
+- Use call timestamps, not ambient clocks.
+- Write directly in reducers; use `tx.run(...)` in procedures and HTTP handlers.
+- Keep transaction bodies idempotent and database-only.
+- Import `effect-spacetimedb/server-compiler` in module entrypoints; it installs
+  the server polyfills without a separate bundle prelude injection.

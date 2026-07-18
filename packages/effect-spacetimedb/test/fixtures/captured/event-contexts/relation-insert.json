@@ -1,0 +1,79 @@
+{
+  "event": {
+    "id": "6cc105bd2dbb1b1cee844221285e275f:2",
+    "tag": "Reducer",
+    "value": {
+      "timestamp": {
+        "$capturedType": "Timestamp",
+        "micros": "0"
+      },
+      "outcome": {
+        "tag": "Ok",
+        "value": {
+          "retValue": {
+            "$capturedType": "Uint8Array",
+            "bytes": []
+          },
+          "transactionUpdate": {
+            "querySets": [
+              {
+                "querySetId": {
+                  "id": 0
+                },
+                "tables": [
+                  {
+                    "tableName": "thing",
+                    "rows": [
+                      {
+                        "tag": "PersistentTable",
+                        "value": {
+                          "inserts": {
+                            "sizeHint": {
+                              "tag": "FixedSize",
+                              "value": 54
+                            },
+                            "rowsData": {
+                              "$capturedType": "Uint8Array",
+                              "bytes": [
+                                22, 0, 0, 0, 99, 97, 112, 116, 117, 114, 101,
+                                45, 114, 101, 108, 97, 116, 105, 111, 110, 45,
+                                116, 104, 105, 110, 103, 16, 0, 0, 0, 82, 101,
+                                108, 97, 116, 105, 111, 110, 32, 70, 105, 120,
+                                116, 117, 114, 101, 2, 0, 0, 0, 0, 0, 0, 0
+                              ]
+                            }
+                          },
+                          "deletes": {
+                            "sizeHint": {
+                              "tag": "RowOffsets",
+                              "value": []
+                            },
+                            "rowsData": {
+                              "$capturedType": "Uint8Array",
+                              "bytes": []
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "reducer": {
+        "name": "thing_set",
+        "args": {
+          "thingId": "capture-relation-thing",
+          "label": "Relation Fixture",
+          "count": {
+            "$capturedType": "BigInt",
+            "value": "2"
+          }
+        }
+      }
+    }
+  }
+}

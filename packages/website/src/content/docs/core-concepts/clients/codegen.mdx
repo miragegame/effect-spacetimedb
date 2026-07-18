@@ -1,0 +1,108 @@
+---
+draft: false
+title: Codegen
+description: Use native generation directly, or quarantine generated source behind a spec-typed facade.
+sidebar:
+  order: 1
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/clients/codegen" target="_blank" rel="noopener noreferrer">SpacetimeDB: Codegen ↗</a>
+
+SpacetimeDB remains the source of truth for native client generation. Build the
+module, then run `spacetime generate` against the built bundle:
+
+```json
+{
+  "scripts": {
+    "build": "spacetime build --module-path .",
+    "generate-client": "spacetime generate --lang typescript --js-path ./dist/bundle.js --out-dir ./src/generated --yes"
+  }
+}
+```
+
+This is the default path. In an ordinary strict TypeScript project, import the
+generated `DbConnection` and pass it directly to the Effect client:
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+import * as StdbClient from "effect-spacetimedb/client"
+
+declare const Module: Stdb.AnyStdbModule
+declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
+  typeof Module.spec,
+  unknown
+>
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const Example = Stdb.project(Module)
+
+const WsLive = Example.client.ws.layerGenerated({
+  DbConnection,
+  uri,
+  databaseName,
+  token,
+})
+```
+
+## Quarantined bindings for stricter projects
+
+Some projects enable additional compiler settings that make third-party
+generated source undesirable in their type graph. The published
+`effect-spacetimedb/codegen` API preserves upstream runtime behavior while
+quarantining that source. It accepts a prebuilt module bundle, runs the native
+generator into staging, and emits only `index.js` plus a small erased
+`index.d.ts`.
+
+```ts
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as Effect from "effect/Effect"
+import {
+  checkArtifact,
+  generateArtifact,
+} from "effect-spacetimedb/codegen"
+
+const target = {
+  moduleBundlePath: "dist/bundle.js",
+  stagingDir: "node_modules/.tmp/effect-spacetimedb-codegen/staging",
+  artifactDir: "src/generated-client",
+  spacetimeCommand: ["spacetime"],
+}
+
+const program = process.argv.includes("--check")
+  ? checkArtifact(target)
+  : generateArtifact(target)
+
+await Effect.runPromise(program.pipe(Effect.provide(NodeServices.layer)))
+```
+
+Run this script without `--check` to emit the artifact. Use `--check` in CI to
+regenerate in staging and compare without rewriting the committed artifact.
+
+The codegen export runs under plain Node 20 or newer. Install `esbuild@^0.25` as
+an optional peer and provide the platform layer at your executable boundary;
+the example uses `@effect/platform-node`'s `NodeServices.layer`. The pipeline
+asserts the supported SpaceTimeDB CLI version before generation.
+
+The artifact declaration is deliberately erased. Restore type identity in one
+hand-written facade tied to the same module contract used by the server:
+
+```ts
+import {
+  generatedConnection,
+  type GeneratedConnectionOf,
+} from "effect-spacetimedb/client"
+import { DbConnection as GeneratedDbConnection } from "./generated-client/index.js"
+import { Module } from "./module"
+
+export const DbConnection: GeneratedConnectionOf<typeof Module.spec> =
+  generatedConnection(Module.spec, GeneratedDbConnection)
+```
+
+Import the facade everywhere else. `generatedConnection(...)` is an identity at
+runtime; the generated JavaScript still comes entirely from
+`spacetime generate`, so upstream retains SDK and wire compatibility. Generated
+sessions also validate that every public table and public event table in the
+contract exists on the built connection and fail with
+`GeneratedArtifactShapeError` when the artifact is stale.

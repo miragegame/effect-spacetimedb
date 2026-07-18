@@ -1,0 +1,572 @@
+# Patch notes for spacetimedb@2.6.1:
+# - Upstream still serializes Result.err with variants[0]; use variants[1].
+# - Upstream Prettify still maps primitives; preserve primitive types directly.
+# - Upstream TableCache still compares object-backed range operands with raw
+#   JavaScript ordering; normalize every supported native scalar first.
+# - All three dispositions were re-verified against the published 2.6.1
+#   tarball. Bun patches apply only to workspace installs; a published npm
+#   consumer does not receive these fixes automatically.
+
+diff --git a/dist/angular/index.cjs b/dist/angular/index.cjs
+--- a/dist/angular/index.cjs
++++ b/dist/angular/index.cjs
+@@ -1226,7 +1226,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/angular/index.mjs b/dist/angular/index.mjs
+--- a/dist/angular/index.mjs
++++ b/dist/angular/index.mjs
+@@ -1224,7 +1224,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/browser/angular/index.mjs b/dist/browser/angular/index.mjs
+--- a/dist/browser/angular/index.mjs
++++ b/dist/browser/angular/index.mjs
+@@ -1224,7 +1224,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/browser/react/index.mjs b/dist/browser/react/index.mjs
+--- a/dist/browser/react/index.mjs
++++ b/dist/browser/react/index.mjs
+@@ -1216,7 +1216,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/browser/solid/index.mjs b/dist/browser/solid/index.mjs
+--- a/dist/browser/solid/index.mjs
++++ b/dist/browser/solid/index.mjs
+@@ -1216,7 +1216,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/browser/svelte/index.mjs b/dist/browser/svelte/index.mjs
+--- a/dist/browser/svelte/index.mjs
++++ b/dist/browser/svelte/index.mjs
+@@ -1218,7 +1218,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/browser/vue/index.mjs b/dist/browser/vue/index.mjs
+--- a/dist/browser/vue/index.mjs
++++ b/dist/browser/vue/index.mjs
+@@ -1217,7 +1217,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/index.browser.mjs b/dist/index.browser.mjs
+--- a/dist/index.browser.mjs
++++ b/dist/index.browser.mjs
+@@ -1292,7 +1292,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/index.cjs b/dist/index.cjs
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -1294,7 +1294,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/index.mjs b/dist/index.mjs
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1292,7 +1292,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/lib/type_util.d.ts b/dist/lib/type_util.d.ts
+--- a/dist/lib/type_util.d.ts
++++ b/dist/lib/type_util.d.ts
+@@ -7,7 +7,7 @@
+ /**
+  * Utility to make TS show cleaner types by flattening intersections.
+  */
+-export type Prettify<T> = T extends DoNotPrettify ? T : {
++export type Prettify<T> = T extends DoNotPrettify ? T : T extends string | number | boolean | bigint | symbol | null | undefined ? T : {
+     [K in keyof T]: T[K];
+ } & {};
+ /**
+diff --git a/dist/react/index.cjs b/dist/react/index.cjs
+--- a/dist/react/index.cjs
++++ b/dist/react/index.cjs
+@@ -1237,7 +1237,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/react/index.mjs b/dist/react/index.mjs
+--- a/dist/react/index.mjs
++++ b/dist/react/index.mjs
+@@ -1216,7 +1216,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/sdk/index.browser.mjs b/dist/sdk/index.browser.mjs
+--- a/dist/sdk/index.browser.mjs
++++ b/dist/sdk/index.browser.mjs
+@@ -1246,7 +1246,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/sdk/index.cjs b/dist/sdk/index.cjs
+--- a/dist/sdk/index.cjs
++++ b/dist/sdk/index.cjs
+@@ -1248,7 +1248,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/sdk/index.mjs b/dist/sdk/index.mjs
+--- a/dist/sdk/index.mjs
++++ b/dist/sdk/index.mjs
+@@ -1246,7 +1246,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/server/index.mjs b/dist/server/index.mjs
+--- a/dist/server/index.mjs
++++ b/dist/server/index.mjs
+@@ -2175,7 +2175,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/solid/index.cjs b/dist/solid/index.cjs
+--- a/dist/solid/index.cjs
++++ b/dist/solid/index.cjs
+@@ -1218,7 +1218,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/solid/index.mjs b/dist/solid/index.mjs
+--- a/dist/solid/index.mjs
++++ b/dist/solid/index.mjs
+@@ -1216,7 +1216,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/svelte/index.cjs b/dist/svelte/index.cjs
+--- a/dist/svelte/index.cjs
++++ b/dist/svelte/index.cjs
+@@ -1220,7 +1220,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/svelte/index.mjs b/dist/svelte/index.mjs
+--- a/dist/svelte/index.mjs
++++ b/dist/svelte/index.mjs
+@@ -1218,7 +1218,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/tanstack/index.cjs b/dist/tanstack/index.cjs
+--- a/dist/tanstack/index.cjs
++++ b/dist/tanstack/index.cjs
+@@ -1238,7 +1238,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/tanstack/index.mjs b/dist/tanstack/index.mjs
+--- a/dist/tanstack/index.mjs
++++ b/dist/tanstack/index.mjs
+@@ -1217,7 +1217,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/vue/index.cjs b/dist/vue/index.cjs
+--- a/dist/vue/index.cjs
++++ b/dist/vue/index.cjs
+@@ -1219,7 +1219,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/dist/vue/index.mjs b/dist/vue/index.mjs
+--- a/dist/vue/index.mjs
++++ b/dist/vue/index.mjs
+@@ -1217,7 +1217,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+       return (writer, value) => {
+diff --git a/src/lib/algebraic_type.ts b/src/lib/algebraic_type.ts
+--- a/src/lib/algebraic_type.ts
++++ b/src/lib/algebraic_type.ts
+@@ -657,7 +657,7 @@
+         typespace
+       );
+       const serializeErr = AlgebraicType.makeSerializer(
+-        ty.variants[0].algebraicType,
++        ty.variants[1].algebraicType,
+         typespace
+       );
+ 
+diff --git a/src/lib/type_util.ts b/src/lib/type_util.ts
+--- a/src/lib/type_util.ts
++++ b/src/lib/type_util.ts
+@@ -16,6 +16,15 @@
+  */
+ export type Prettify<T> = T extends DoNotPrettify
+   ? T
++  : T extends
++        | string
++        | number
++        | boolean
++        | bigint
++        | symbol
++        | null
++        | undefined
++    ? T
+   : { [K in keyof T]: T[K] } & {};
+ 
+ /**
+diff --git a/dist/index.browser.mjs b/dist/index.browser.mjs
+--- a/dist/index.browser.mjs
++++ b/dist/index.browser.mjs
+@@ -4468,4 +4468,26 @@
++var tableCacheComparableBigIntKeys = [
++  "__connection_id__",
++  "__identity__",
++  "__time_duration_micros__",
++  "__timestamp_micros_since_unix_epoch__",
++  "__uuid__"
++];
++var toTableCacheComparableValue = (value) => {
++  if (value instanceof Uint8Array) {
++    return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
++  }
++  if (value && typeof value === "object") {
++    for (const key of tableCacheComparableBigIntKeys) {
++      const candidate = value[key];
++      if (typeof candidate === "bigint") return candidate;
++    }
++    if (typeof value.toHexString === "function") return value.toHexString();
++  }
++  return value;
++};
+ var scalarCompare = (x, y) => {
+-  if (x === y) return 0;
+-  return x < y ? -1 : 1;
++  const comparableX = toTableCacheComparableValue(x);
++  const comparableY = toTableCacheComparableValue(y);
++  if (comparableX === comparableY) return 0;
++  return comparableX < comparableY ? -1 : 1;
+ };
+diff --git a/dist/index.cjs b/dist/index.cjs
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -4470,4 +4470,26 @@
++var tableCacheComparableBigIntKeys = [
++  "__connection_id__",
++  "__identity__",
++  "__time_duration_micros__",
++  "__timestamp_micros_since_unix_epoch__",
++  "__uuid__"
++];
++var toTableCacheComparableValue = (value) => {
++  if (value instanceof Uint8Array) {
++    return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
++  }
++  if (value && typeof value === "object") {
++    for (const key of tableCacheComparableBigIntKeys) {
++      const candidate = value[key];
++      if (typeof candidate === "bigint") return candidate;
++    }
++    if (typeof value.toHexString === "function") return value.toHexString();
++  }
++  return value;
++};
+ var scalarCompare = (x, y) => {
+-  if (x === y) return 0;
+-  return x < y ? -1 : 1;
++  const comparableX = toTableCacheComparableValue(x);
++  const comparableY = toTableCacheComparableValue(y);
++  if (comparableX === comparableY) return 0;
++  return comparableX < comparableY ? -1 : 1;
+ };
+diff --git a/dist/index.mjs b/dist/index.mjs
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -4468,4 +4468,26 @@
++var tableCacheComparableBigIntKeys = [
++  "__connection_id__",
++  "__identity__",
++  "__time_duration_micros__",
++  "__timestamp_micros_since_unix_epoch__",
++  "__uuid__"
++];
++var toTableCacheComparableValue = (value) => {
++  if (value instanceof Uint8Array) {
++    return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
++  }
++  if (value && typeof value === "object") {
++    for (const key of tableCacheComparableBigIntKeys) {
++      const candidate = value[key];
++      if (typeof candidate === "bigint") return candidate;
++    }
++    if (typeof value.toHexString === "function") return value.toHexString();
++  }
++  return value;
++};
+ var scalarCompare = (x, y) => {
+-  if (x === y) return 0;
+-  return x < y ? -1 : 1;
++  const comparableX = toTableCacheComparableValue(x);
++  const comparableY = toTableCacheComparableValue(y);
++  if (comparableX === comparableY) return 0;
++  return comparableX < comparableY ? -1 : 1;
+ };
+diff --git a/dist/sdk/index.browser.mjs b/dist/sdk/index.browser.mjs
+--- a/dist/sdk/index.browser.mjs
++++ b/dist/sdk/index.browser.mjs
+@@ -4333,4 +4333,26 @@
++var tableCacheComparableBigIntKeys = [
++  "__connection_id__",
++  "__identity__",
++  "__time_duration_micros__",
++  "__timestamp_micros_since_unix_epoch__",
++  "__uuid__"
++];
++var toTableCacheComparableValue = (value) => {
++  if (value instanceof Uint8Array) {
++    return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
++  }
++  if (value && typeof value === "object") {
++    for (const key of tableCacheComparableBigIntKeys) {
++      const candidate = value[key];
++      if (typeof candidate === "bigint") return candidate;
++    }
++    if (typeof value.toHexString === "function") return value.toHexString();
++  }
++  return value;
++};
+ var scalarCompare = (x, y) => {
+-  if (x === y) return 0;
+-  return x < y ? -1 : 1;
++  const comparableX = toTableCacheComparableValue(x);
++  const comparableY = toTableCacheComparableValue(y);
++  if (comparableX === comparableY) return 0;
++  return comparableX < comparableY ? -1 : 1;
+ };
+diff --git a/dist/sdk/index.cjs b/dist/sdk/index.cjs
+--- a/dist/sdk/index.cjs
++++ b/dist/sdk/index.cjs
+@@ -4335,4 +4335,26 @@
++var tableCacheComparableBigIntKeys = [
++  "__connection_id__",
++  "__identity__",
++  "__time_duration_micros__",
++  "__timestamp_micros_since_unix_epoch__",
++  "__uuid__"
++];
++var toTableCacheComparableValue = (value) => {
++  if (value instanceof Uint8Array) {
++    return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
++  }
++  if (value && typeof value === "object") {
++    for (const key of tableCacheComparableBigIntKeys) {
++      const candidate = value[key];
++      if (typeof candidate === "bigint") return candidate;
++    }
++    if (typeof value.toHexString === "function") return value.toHexString();
++  }
++  return value;
++};
+ var scalarCompare = (x, y) => {
+-  if (x === y) return 0;
+-  return x < y ? -1 : 1;
++  const comparableX = toTableCacheComparableValue(x);
++  const comparableY = toTableCacheComparableValue(y);
++  if (comparableX === comparableY) return 0;
++  return comparableX < comparableY ? -1 : 1;
+ };
+diff --git a/dist/sdk/index.mjs b/dist/sdk/index.mjs
+--- a/dist/sdk/index.mjs
++++ b/dist/sdk/index.mjs
+@@ -4333,4 +4333,26 @@
++var tableCacheComparableBigIntKeys = [
++  "__connection_id__",
++  "__identity__",
++  "__time_duration_micros__",
++  "__timestamp_micros_since_unix_epoch__",
++  "__uuid__"
++];
++var toTableCacheComparableValue = (value) => {
++  if (value instanceof Uint8Array) {
++    return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
++  }
++  if (value && typeof value === "object") {
++    for (const key of tableCacheComparableBigIntKeys) {
++      const candidate = value[key];
++      if (typeof candidate === "bigint") return candidate;
++    }
++    if (typeof value.toHexString === "function") return value.toHexString();
++  }
++  return value;
++};
+ var scalarCompare = (x, y) => {
+-  if (x === y) return 0;
+-  return x < y ? -1 : 1;
++  const comparableX = toTableCacheComparableValue(x);
++  const comparableY = toTableCacheComparableValue(y);
++  if (comparableX === comparableY) return 0;
++  return comparableX < comparableY ? -1 : 1;
+ };
+diff --git a/src/sdk/table_cache.ts b/src/sdk/table_cache.ts
+--- a/src/sdk/table_cache.ts
++++ b/src/sdk/table_cache.ts
+@@ -38,8 +38,34 @@
+ };
+
+ // Strict scalar compare for index term values.
++const tableCacheComparableBigIntKeys = [
++  '__connection_id__',
++  '__identity__',
++  '__time_duration_micros__',
++  '__timestamp_micros_since_unix_epoch__',
++  '__uuid__',
++] as const;
++
++const toTableCacheComparableValue = (value: any): any => {
++  if (value instanceof Uint8Array) {
++    return Array.from(value, byte =>
++      byte.toString(16).padStart(2, '0')
++    ).join('');
++  }
++  if (value && typeof value === 'object') {
++    for (const key of tableCacheComparableBigIntKeys) {
++      const candidate = value[key];
++      if (typeof candidate === 'bigint') return candidate;
++    }
++    if (typeof value.toHexString === 'function') return value.toHexString();
++  }
++  return value;
++};
++
+ const scalarCompare = (x: any, y: any): number => {
+-  if (x === y) return 0;
++  const comparableX = toTableCacheComparableValue(x);
++  const comparableY = toTableCacheComparableValue(y);
++  if (comparableX === comparableY) return 0;
+   // Compare booleans/numbers/bigints/strings with JS ordering.
+-  return x < y ? -1 : 1;
++  return comparableX < comparableY ? -1 : 1;
+ };

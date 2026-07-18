@@ -1,0 +1,27 @@
+export {
+  decodeString,
+  encodeString,
+  error,
+  errors,
+  isReservedDeclaredErrorTag,
+  matchEffect,
+  merge,
+  namespace,
+  normalizeErrorsInput,
+  peekStringEnvelopeTag,
+  statusOf,
+  tagOf,
+} from "../../contract/error.ts"
+export type {
+  AnyErrorDefinition,
+  DefinitionOfInput,
+  DefinitionOfInputOrUndefined,
+  ErrorDefinition,
+  ErrorInstances,
+  ErrorSpec,
+  ErrorsInput,
+  ErrorTags,
+  NamespacedErrorDefinition,
+  ProcedureDeclaredErrorCarrier,
+  TaggedErrorClass,
+} from "../../contract/error.ts"

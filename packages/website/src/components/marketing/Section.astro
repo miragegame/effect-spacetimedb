@@ -1,0 +1,31 @@
+---
+interface Props {
+  maxWidth?: number
+  padding?: string
+  class?: string
+  id?: string
+}
+
+const {
+  maxWidth = 1120,
+  padding = "84px 24px",
+  class: className,
+  id,
+} = Astro.props
+---
+
+<section class:list={["section", className]} style={`padding:${padding};`} id={id}>
+  <div class="section__inner" style={`max-width:${maxWidth}px;`}>
+    <slot />
+  </div>
+</section>
+
+<style>
+  .section {
+    overflow-x: clip;
+  }
+  .section__inner {
+    margin: 0 auto;
+    min-width: 0;
+  }
+</style>

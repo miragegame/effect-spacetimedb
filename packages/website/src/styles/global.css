@@ -1,0 +1,757 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/source-code-pro";
+
+@layer base, starlight, theme, components, utilities;
+
+@import "@astrojs/starlight-tailwind";
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --site-green: #4cf490;
+  --site-green-75: #4cf490bf;
+  --site-green-50: #4cf49080;
+  --site-green-25: #4cf49040;
+  --site-green-10: #4cf4901a;
+  --site-green-dark: #2ef27d;
+  --site-green-darker: #1ff174;
+  --site-green-darkest: #0dd35d;
+  --site-green-light: #6af6a3;
+  --site-green-lighter: #79f7ac;
+  --site-yellow: #fbdc8e;
+  --site-purple: #a880ff;
+  --site-blue: #02befa;
+  --site-pink: #ff80fb;
+  --site-teal: #00ccb4;
+  --site-red: #ff4c4c;
+
+  --site-shade-1: #162d38;
+  --site-shade-2: #122530;
+  --site-shade-3: #122129;
+  --site-shade-4: #121e24;
+  --site-shade-5: #0f191f;
+  --site-shade-6: #0e161a;
+  --site-shade-7: #0b1114;
+  --site-shade-8: #0b0e12;
+
+  --site-n1: #e6e9f0;
+  --site-n2: #ced3e0;
+  --site-n3: #b6c0cf;
+  --site-n4: #6f7987;
+  --site-n5: #363840;
+  --site-n6: #202126;
+
+  --site-bg: var(--site-shade-7);
+  --site-surface: var(--site-shade-6);
+  --site-surface-soft: var(--site-shade-5);
+  --site-surface-strong: var(--site-shade-8);
+  --site-text-strong: var(--site-n1);
+  --site-text: var(--site-n3);
+  --site-text-muted: var(--site-n4);
+  --site-text-faint: color-mix(in srgb, var(--site-n4) 74%, transparent);
+  --site-border: var(--site-shade-4);
+  --site-border-strong: var(--site-shade-2);
+  --site-accent: var(--site-green);
+  --site-accent-strong: var(--site-green-light);
+  --site-accent-soft: var(--site-green-10);
+  --site-code-bg: var(--site-shade-5);
+  --site-code-surface: var(--site-shade-6);
+  --site-font-sans:
+    "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --site-font-mono:
+    "Source Code Pro Variable", "Source Code Pro", ui-monospace, SFMono-Regular,
+    Menlo, Monaco, Consolas, monospace;
+  --site-shadow: 0 22px 88px rgba(0, 0, 0, 0.34);
+  --site-toc-width: 20.625rem;
+
+  --sl-font: var(--site-font-sans);
+  --sl-font-mono: var(--site-font-mono);
+  --sl-nav-height: 3.0625rem;
+  --sl-nav-pad-x: 1.5rem;
+  --sl-nav-pad-y: 0;
+  --sl-sidebar-width: 20rem;
+  --sl-color-bg: var(--site-bg);
+  --sl-color-bg-nav: var(--site-bg);
+  --sl-color-bg-sidebar: var(--site-bg);
+  --sl-color-bg-inline-code: var(--site-code-surface);
+  --sl-color-bg-accent: var(--site-accent-soft);
+  --sl-color-text: var(--site-text);
+  --sl-color-white: var(--site-text-strong);
+  --sl-color-gray-1: var(--site-n1);
+  --sl-color-gray-2: var(--site-n2);
+  --sl-color-gray-3: var(--site-n3);
+  --sl-color-gray-4: var(--site-n4);
+  --sl-color-gray-5: var(--site-n5);
+  --sl-color-gray-6: var(--site-n6);
+  --sl-color-black: var(--site-bg);
+  --sl-color-text-accent: var(--site-accent);
+  --sl-color-accent: var(--site-accent);
+  --sl-color-accent-high: var(--site-green-lighter);
+  --sl-color-accent-low: var(--site-accent-soft);
+  --sl-color-hairline: var(--site-border);
+  --sl-color-hairline-light: var(--site-border);
+  --sl-color-hairline-shade: var(--site-border);
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--site-bg);
+  color: var(--site-text);
+  font-family: var(--site-font-sans);
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+html {
+  background:
+    linear-gradient(180deg, rgba(76, 244, 144, 0.045), transparent 520px),
+    var(--site-bg);
+}
+
+body {
+  min-height: 100vh;
+}
+
+::selection {
+  background: var(--site-green-25);
+  color: var(--site-text-strong);
+}
+
+/* Link colors apply to real text links only. Button-styled anchors (.button)
+   own their full per-state colors, so the link-green must not hijack their
+   text on hover — otherwise a green button's label turns green-on-green. */
+a:not(.button) {
+  color: var(--site-accent);
+}
+
+a:not(.button):hover {
+  color: var(--site-green-lighter);
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--site-accent);
+  outline-offset: 3px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--site-shade-5) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--site-shade-7);
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--site-shade-5);
+  border: 2px solid var(--site-shade-7);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--site-shade-4);
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--site-shade-7);
+}
+
+strong {
+  color: var(--site-n2);
+}
+
+code,
+kbd {
+  font-family: var(--site-font-mono);
+}
+
+starlight-theme-select {
+  display: none;
+}
+
+.sl-markdown-content {
+  color: var(--site-text);
+  font-size: 0.875rem;
+  letter-spacing: -0.01em;
+  line-height: 1.5;
+}
+
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6),
+h1#_top {
+  color: var(--site-n2);
+  font-family: var(--site-font-sans);
+  letter-spacing: -0.04em;
+  font-weight: 400;
+  text-transform: none;
+}
+
+.sl-markdown-content h1,
+h1#_top {
+  font-size: 2.625rem;
+  line-height: 1.19;
+}
+
+.sl-markdown-content h1:not(:where(.sl-heading-wrapper *)),
+h1#_top {
+  margin-top: 1rem;
+  margin-bottom: 2.5rem;
+}
+
+.sl-markdown-content h2 {
+  font-size: 1.8125rem;
+  line-height: 1.2;
+}
+
+.sl-markdown-content h2:not(:where(.sl-heading-wrapper *)) {
+  margin-top: 2rem;
+  margin-bottom: 2rem;
+}
+
+.sl-markdown-content h3 {
+  font-size: 1.25rem;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.sl-markdown-content h3:not(:where(.sl-heading-wrapper *)) {
+  margin-top: 1.5rem;
+}
+
+.sl-markdown-content h4 {
+  font-size: 1.0625rem;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.sl-markdown-content h4:not(:where(.sl-heading-wrapper *)) {
+  margin-top: 1.25rem;
+}
+
+.sl-markdown-content h5,
+.sl-markdown-content h6 {
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.sl-markdown-content :is(h5, h6):not(:where(.sl-heading-wrapper *)) {
+  margin-top: 1.25rem;
+}
+
+.sl-markdown-content p,
+.sl-markdown-content li {
+  color: var(--site-text);
+}
+
+.sl-markdown-content :is(ul, ol) {
+  line-height: 1.5;
+}
+
+.sl-markdown-content .sl-heading-wrapper > :is(h1, h2, h3, h4, h5, h6) {
+  margin: 0;
+}
+
+.sl-markdown-content .sl-heading-wrapper.level-h1 {
+  margin-top: 1rem;
+  margin-bottom: 2.5rem;
+}
+
+.sl-markdown-content .sl-heading-wrapper.level-h2 {
+  margin-top: 2rem;
+  margin-bottom: 2rem;
+}
+
+.sl-markdown-content .sl-heading-wrapper.level-h3 {
+  margin-top: 1.5rem;
+}
+
+.sl-markdown-content .sl-heading-wrapper.level-h4,
+.sl-markdown-content .sl-heading-wrapper.level-h5,
+.sl-markdown-content .sl-heading-wrapper.level-h6 {
+  margin-top: 1.25rem;
+}
+
+.sl-markdown-content
+  a:not(.upstream-doc):not(.sl-anchor-link):not([role="tab"]):not(
+    :where(.pagination-links *, starlight-tabs *)
+  ) {
+  color: var(--site-n3);
+  font-weight: 400;
+  text-decoration: underline;
+  text-decoration-skip-ink: none;
+  text-underline-offset: auto;
+}
+
+.sl-markdown-content
+  a:not(.upstream-doc):not(.sl-anchor-link):not([role="tab"]):not(
+    :where(.pagination-links *, starlight-tabs *)
+  ):hover {
+  color: var(--site-n1);
+}
+
+.sl-markdown-content .sl-anchor-link {
+  text-decoration: none;
+}
+
+.sl-markdown-content table {
+  border: 1px solid var(--site-shade-4);
+  border-collapse: separate;
+  border-radius: 8px;
+  border-spacing: 0;
+  color: var(--site-text-strong);
+  display: block;
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+  line-height: 1.5rem;
+  margin: 40px 0;
+  max-width: 100%;
+  overflow: auto;
+  width: 100%;
+}
+
+.sl-markdown-content :is(th, td) {
+  border: none;
+  padding: 12px 24px;
+  text-align: left;
+  vertical-align: baseline;
+}
+
+.sl-markdown-content thead {
+  background: var(--site-shade-6);
+  color: var(--site-n4);
+}
+
+.sl-markdown-content th {
+  color: var(--site-n4);
+  font-weight: 400;
+}
+
+.sl-markdown-content tbody tr,
+.sl-markdown-content tbody td {
+  border-top: 1px solid var(--site-shade-4);
+}
+
+.sl-markdown-content tbody tr:nth-child(2n) {
+  background: var(--site-shade-6);
+}
+
+.sl-markdown-content :not(pre) > code {
+  border: 1px solid var(--site-border);
+  border-radius: 0.4rem;
+  background: var(--site-code-surface);
+  color: var(--site-yellow);
+  font-size: 0.9em;
+  padding: 0.125rem 0.3rem;
+}
+
+.sl-markdown-content pre,
+.expressive-code {
+  font-family: var(--site-font-mono);
+}
+
+.expressive-code .frame {
+  border-color: var(--site-border);
+  box-shadow: 0 18px 64px rgba(0, 0, 0, 0.28);
+}
+
+.expressive-code pre,
+.expressive-code code {
+  font-family: var(--site-font-mono);
+  font-size: 11.7px;
+  font-weight: 400;
+  letter-spacing: -0.05em;
+}
+
+.right-sidebar,
+.sidebar-pane {
+  border-color: var(--site-border);
+}
+
+.sidebar-content a,
+.sidebar-content summary .group-label > .large,
+.right-sidebar a {
+  color: var(--site-text-muted);
+  font-family: var(--site-font-sans);
+  font-size: 11.7px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  text-transform: none;
+}
+
+.site-nav__link,
+.sidebar-content .top-level > li > details > summary .group-label > .large,
+.right-sidebar h2,
+.sl-markdown-content starlight-tabs [role="tab"],
+.pagination-links a,
+.breadcrumbs a,
+.mobile-preferences label {
+  font-family: var(--site-font-mono);
+  font-size: 11.7px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sidebar-content summary {
+  color: var(--site-text-muted);
+}
+
+.sidebar-content .top-level > li + li {
+  margin-top: 0;
+}
+
+.sidebar-content .top-level > li > details > summary {
+  padding: 16px 8px 8px;
+}
+
+.sidebar-content .top-level > li:first-child > details > summary {
+  padding-top: 8px;
+}
+
+.sidebar-content details details > summary {
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.sidebar-content ul ul {
+  margin-top: 2px;
+}
+
+.sidebar-content ul ul li {
+  margin-inline-start: 0;
+  padding-inline-start: 8px;
+}
+
+.sidebar-content a {
+  padding: 8px;
+}
+
+.sidebar-content details:has(a[aria-current="page"]) > summary .caret,
+.sidebar-content details:has(a[aria-current="true"]) > summary .caret {
+  color: var(--site-accent);
+}
+
+.sidebar-content
+  details:not(:has(a[aria-current="page"], a[aria-current="true"]))
+  > summary:hover {
+  background: var(--site-shade-4);
+  border-radius: 4px;
+  color: var(--site-n1);
+}
+
+.sidebar-content
+  details:not(:has(a[aria-current="page"], a[aria-current="true"]))
+  > summary:hover
+  .caret {
+  color: var(--site-n1);
+}
+
+.sidebar-content
+  .top-level
+  > li
+  > details[data-static-sidebar-group]
+  > summary {
+  cursor: default;
+  pointer-events: none;
+}
+
+.sidebar-content
+  .top-level
+  > li
+  > details[data-static-sidebar-group]
+  > summary
+  .caret {
+  display: none;
+}
+
+/* Sidebar interactions mirror SpacetimeDB: hovering a non-active item tints the
+   row (subtle dark bg + brighter text); the active item and its section heading
+   are green with no background highlight. */
+.sidebar-content a:hover:not([aria-current="page"]):not([aria-current="true"]) {
+  background: var(--site-shade-4);
+  border-radius: 4px;
+  color: var(--site-n1);
+}
+
+.sidebar-content a[aria-current="page"],
+.sidebar-content a[aria-current="true"],
+.sidebar-content a[aria-current="page"]:hover,
+.sidebar-content a[aria-current="true"]:hover {
+  background: transparent;
+  color: var(--site-accent);
+}
+
+.sidebar-content details:has(> ul > li > a[aria-current="page"]) > summary,
+.sidebar-content details:has(> ul > li > a[aria-current="true"]) > summary {
+  color: var(--site-accent);
+}
+
+.sidebar-content
+  details
+  details:has(a[aria-current="page"])
+  > summary
+  .group-label
+  > .large,
+.sidebar-content
+  details
+  details:has(a[aria-current="true"])
+  > summary
+  .group-label
+  > .large {
+  color: var(--site-accent);
+}
+
+.sl-markdown-content starlight-tabs {
+  display: block;
+  margin: 1rem 0 1.25rem;
+}
+
+.sl-markdown-content starlight-tabs [role="tablist"] {
+  border-bottom-color: var(--site-border);
+}
+
+.sl-markdown-content starlight-tabs .tab > [role="tab"] {
+  color: var(--site-text-muted);
+  border-bottom-color: var(--site-border);
+  padding: 0.7rem 1rem;
+}
+
+.sl-markdown-content starlight-tabs .tab > [role="tab"][aria-selected="true"] {
+  color: var(--site-text-strong);
+  border-bottom-color: var(--site-accent);
+  font-weight: 400;
+}
+
+.sl-markdown-content .starlight-aside {
+  --site-aside-color: var(--site-n3);
+
+  background: var(--site-surface);
+  border: 1px solid var(--site-aside-color);
+  border-radius: 6px;
+  padding: 0.85rem 1.1rem;
+}
+
+.sl-markdown-content .starlight-aside__title {
+  font-family: var(--site-font-sans);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.sl-markdown-content .starlight-aside__content {
+  color: var(--site-text);
+}
+
+.sl-markdown-content .starlight-aside--note {
+  --site-aside-color: var(--site-blue);
+}
+
+.sl-markdown-content
+  .starlight-aside
+  :is(.starlight-aside__title, .starlight-aside__icon) {
+  color: var(--site-aside-color);
+}
+
+.sl-markdown-content .starlight-aside--tip {
+  --site-aside-color: var(--site-accent);
+}
+
+.sl-markdown-content .starlight-aside--caution {
+  --site-aside-color: #ff9e9e;
+}
+
+.sl-markdown-content .starlight-aside--danger {
+  --site-aside-color: var(--site-red);
+}
+
+/* Subtle upstream-doc reference link (top of each mirrored Core Concepts page). */
+.sl-markdown-content a.upstream-doc {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  margin: -0.15rem 0 1.25rem;
+  font-family: var(--site-font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0;
+  color: var(--site-text-muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.sl-markdown-content a.upstream-doc:hover {
+  color: var(--site-accent);
+}
+
+/* Pagination (prev/next) — match SpacetimeDB: small bordered surface cards with
+   a tiny muted direction label and a small uppercase green page title. */
+.pagination-links a {
+  background: var(--site-surface);
+  border-color: var(--site-border);
+  border-radius: 4px;
+}
+
+.pagination-links a:hover {
+  background: var(--site-surface-soft);
+  border-color: var(--site-border-strong);
+}
+
+/* the "Previous" / "Next" direction label */
+.pagination-links a > span {
+  font-size: 9.75px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--site-text-muted);
+  text-transform: none;
+}
+
+/* the page title */
+.pagination-links a .link-title {
+  font-size: 11.7px;
+  line-height: 1.2;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: var(--site-accent);
+  text-transform: uppercase;
+}
+
+/* SpacetimeDB's pagination has no arrow icon */
+.pagination-links a svg {
+  display: none;
+}
+
+.right-sidebar {
+  border-color: var(--site-border);
+  scrollbar-width: thin;
+  width: var(--site-toc-width);
+}
+
+.right-sidebar-panel {
+  padding: 16px 8px 16px 16px;
+}
+
+.right-sidebar-panel .sl-container {
+  max-width: none;
+  width: calc(var(--site-toc-width) - 1.5rem);
+}
+
+.right-sidebar starlight-toc ul {
+  border-left: none;
+  margin: 0;
+  padding: 0;
+}
+
+.right-sidebar starlight-toc ul ul {
+  padding-left: 8px;
+}
+
+.right-sidebar starlight-toc li {
+  margin: 0;
+  padding: 0;
+}
+
+.right-sidebar starlight-toc a {
+  border-radius: 4px;
+  color: var(--site-n4);
+  display: block;
+  font-family: var(--site-font-sans);
+  font-size: 11.7px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 18px;
+  overflow-wrap: break-word;
+  padding: 6px 12px;
+  text-decoration: none;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+  word-break: break-word;
+}
+
+.right-sidebar starlight-toc a:hover:not([aria-current="true"]) {
+  background: var(--site-shade-4);
+  color: var(--site-n1);
+}
+
+.right-sidebar starlight-toc a[aria-current="true"],
+.right-sidebar starlight-toc a[aria-current="true"] code {
+  color: var(--site-accent);
+}
+
+.right-sidebar starlight-toc a code {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  padding: 0;
+}
+
+@media (min-width: 72rem) {
+  .right-sidebar-container {
+    width: var(--site-toc-width);
+  }
+
+  [data-has-sidebar][data-has-toc] .main-pane {
+    flex: 0 1 calc(100% - var(--site-toc-width));
+    max-width: 63.875rem;
+    width: calc(100% - var(--site-toc-width));
+  }
+
+  [data-has-sidebar][data-has-toc] .main-pane .content-panel {
+    padding-inline: 3rem;
+  }
+
+  [data-has-sidebar][data-has-toc] .main-pane .content-panel > .sl-container {
+    margin-inline: 0;
+    max-width: none;
+    width: 100%;
+  }
+}
+
+.sl-markdown-content blockquote {
+  border-color: var(--site-shade-4);
+  color: var(--site-n4);
+}
+
+.sl-markdown-content hr {
+  border-bottom-color: var(--site-shade-4);
+}
+
+@media (max-width: 640px) {
+  .sl-markdown-content h1 {
+    font-size: 2.25rem;
+  }
+
+  .sl-markdown-content h1:not(:where(.sl-heading-wrapper *)) {
+    margin-bottom: 2rem;
+  }
+
+  .sl-markdown-content h2 {
+    font-size: 1.625rem;
+  }
+
+  .sl-markdown-content h2:not(:where(.sl-heading-wrapper *)) {
+    margin: 1.5rem 0;
+  }
+
+  .sl-markdown-content .sl-heading-wrapper.level-h1 {
+    margin-bottom: 2rem;
+  }
+
+  .sl-markdown-content .sl-heading-wrapper.level-h2 {
+    margin: 1.5rem 0;
+  }
+}

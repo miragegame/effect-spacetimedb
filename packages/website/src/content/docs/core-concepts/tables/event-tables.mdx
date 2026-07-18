@@ -1,0 +1,49 @@
+---
+draft: false
+title: Event Tables
+description: Declare event tables and subscribe to event-table streams safely.
+sidebar:
+  order: 7
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/event-tables" target="_blank" rel="noopener noreferrer">SpacetimeDB: Event Tables ↗</a>
+
+Event tables use the same `Stdb.table(...)` builder with `event: true`.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stream from "effect/Stream"
+import * as Stdb from "effect-spacetimedb"
+
+const presenceEvent = Stdb.table("presenceEvent", {
+  public: true,
+  event: true,
+  columns: {
+    userId: Stdb.string(),
+    kind: Stdb.literal("joined", "left"),
+  },
+})
+
+const Module = Stdb.StdbModule.make("presence", {}).addTables(presenceEvent)
+const Example = Stdb.project(Module)
+
+const program = Effect.gen(function* () {
+  const session = yield* Example.client.ws.Session
+  yield* session.streamEventTable("presenceEvent").pipe(
+    Stream.runForEach((event) =>
+      Effect.log(`presence ${event.row.userId} ${event.row.kind}`),
+    ),
+  )
+})
+```
+
+effect-spacetimedb separates public persistent table targets
+from public event-table targets in `Stdb.project(...).targets`. Use
+`Example.targets.eventTables.presenceEvent` for direct target subscriptions and
+`streamEventTable("presenceEvent")` for insert-only event streams.
+
+Event tables use native delivery semantics: an event is delivered once for each
+live native query set that covers it. If an application needs exactly one
+event-processing path, subscribe once at the app state boundary and fan out from
+that Effect stream or Atom rather than opening duplicate event-table streams in
+several consumers.

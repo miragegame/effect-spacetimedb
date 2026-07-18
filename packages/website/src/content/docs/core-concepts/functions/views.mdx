@@ -1,0 +1,48 @@
+---
+draft: false
+title: Views
+description: Declare sender and anonymous views with typed read-only access.
+sidebar:
+  order: 5
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions/views" target="_blank" rel="noopener noreferrer">SpacetimeDB: Views ↗</a>
+
+Views are callable group endpoints with return value types. Sender views use
+`StdbFn.view(...)`; anonymous views use `StdbFn.anonymousView(...)`.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const user = Stdb.table("user", {
+  public: true,
+  columns: {
+    id: Stdb.string().primaryKey(),
+    name: Stdb.string(),
+  },
+})
+
+const Users = Stdb.StdbGroup.make("Users")
+  .add(Stdb.StdbFn.view("self_user", { returns: Stdb.option(user.row) }))
+  .add(Stdb.StdbFn.anonymousView("all_users", { returns: Stdb.array(user.row) }))
+
+const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const { ReadonlyDb, ViewCtx } = Module
+
+const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
+  self_user: Effect.fn(function* () {
+    const ctx = yield* ViewCtx
+    const db = yield* ReadonlyDb
+    return yield* db.user.id.find(String(ctx.sender))
+  }),
+  all_users: Effect.fn(function* () {
+    const db = yield* ReadonlyDb
+    return yield* db.user.toArray()
+  }),
+})
+```
+
+Views are read-only Effect handlers. Sender views may yield
+`ViewCtx`; anonymous views may yield `AnonymousViewCtx`. Both may yield
+`ReadonlyDb` and `From`.

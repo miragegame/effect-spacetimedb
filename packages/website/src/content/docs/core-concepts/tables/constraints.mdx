@@ -1,0 +1,38 @@
+---
+draft: false
+title: Constraints
+description: Declare primary keys and unique constraints with value-type metadata.
+sidebar:
+  order: 2
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/constraints" target="_blank" rel="noopener noreferrer">SpacetimeDB: Constraints ↗</a>
+
+Primary keys and single-column unique constraints are declared on the column
+value type. Multi-column unique constraints are declared in the table's
+`constraints` callback so column names stay type-checked.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const membership = Stdb.table("membership", {
+  public: false,
+  columns: {
+    id: Stdb.u64().primaryKey().autoInc(),
+    tenantId: Stdb.string(),
+    email: Stdb.string(),
+    externalId: Stdb.string().unique(),
+  },
+  constraints: (columns) => [
+    Stdb.unique("membership_tenant_email_unique", [
+      columns.tenantId,
+      columns.email,
+    ]),
+  ],
+})
+```
+
+Column-level `.unique()` also creates the backing index when one
+is not already implied by a primary key or explicit index. A default value cannot
+be combined with a unique constraint because SpacetimeDB would materialize the
+same default for more than one row.

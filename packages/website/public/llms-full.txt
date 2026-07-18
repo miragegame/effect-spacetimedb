@@ -1,0 +1,3177 @@
+# effect-spacetimedb
+
+> Effect-native builders and client wrappers for typed SpaceTimeDB modules.
+
+This file indexes the documentation site at https://effect-stdb.dev. Each docs page is listed with a URL and summary so agents can choose the right source quickly. Raw markdown is also emitted at matching `.md` paths.
+
+# Source: /core-concepts/clients/codegen
+
+---
+draft: false
+title: Codegen
+description: Use native generation directly, or quarantine generated source behind a spec-typed facade.
+sidebar:
+  order: 1
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/clients/codegen" target="_blank" rel="noopener noreferrer">SpacetimeDB: Codegen ↗</a>
+
+SpacetimeDB remains the source of truth for native client generation. Build the
+module, then run `spacetime generate` against the built bundle:
+
+```json
+{
+  "scripts": {
+    "build": "spacetime build --module-path .",
+    "generate-client": "spacetime generate --lang typescript --js-path ./dist/bundle.js --out-dir ./src/generated --yes"
+  }
+}
+```
+
+This is the default path. In an ordinary strict TypeScript project, import the
+generated `DbConnection` and pass it directly to the Effect client:
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+import * as StdbClient from "effect-spacetimedb/client"
+
+declare const Module: Stdb.AnyStdbModule
+declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
+  typeof Module.spec,
+  unknown
+>
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const Example = Stdb.project(Module)
+
+const WsLive = Example.client.ws.layerGenerated({
+  DbConnection,
+  uri,
+  databaseName,
+  token,
+})
+```
+
+## Quarantined bindings for stricter projects
+
+Some projects enable additional compiler settings that make third-party
+generated source undesirable in their type graph. The published
+`effect-spacetimedb/codegen` API preserves upstream runtime behavior while
+quarantining that source. It accepts a prebuilt module bundle, runs the native
+generator into staging, and emits only `index.js` plus a small erased
+`index.d.ts`.
+
+```ts
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as Effect from "effect/Effect"
+import {
+  checkArtifact,
+  generateArtifact,
+} from "effect-spacetimedb/codegen"
+
+const target = {
+  moduleBundlePath: "dist/bundle.js",
+  stagingDir: "node_modules/.tmp/effect-spacetimedb-codegen/staging",
+  artifactDir: "src/generated-client",
+  spacetimeCommand: ["spacetime"],
+}
+
+const program = process.argv.includes("--check")
+  ? checkArtifact(target)
+  : generateArtifact(target)
+
+await Effect.runPromise(program.pipe(Effect.provide(NodeServices.layer)))
+```
+
+Run this script without `--check` to emit the artifact. Use `--check` in CI to
+regenerate in staging and compare without rewriting the committed artifact.
+
+The codegen export runs under plain Node 20 or newer. Install `esbuild@^0.25` as
+an optional peer and provide the platform layer at your executable boundary;
+the example uses `@effect/platform-node`'s `NodeServices.layer`. The pipeline
+asserts the supported SpaceTimeDB CLI version before generation.
+
+The artifact declaration is deliberately erased. Restore type identity in one
+hand-written facade tied to the same module contract used by the server:
+
+```ts
+import {
+  generatedConnection,
+  type GeneratedConnectionOf,
+} from "effect-spacetimedb/client"
+import { DbConnection as GeneratedDbConnection } from "./generated-client/index.js"
+import { Module } from "./module"
+
+export const DbConnection: GeneratedConnectionOf<typeof Module.spec> =
+  generatedConnection(Module.spec, GeneratedDbConnection)
+```
+
+Import the facade everywhere else. `generatedConnection(...)` is an identity at
+runtime; the generated JavaScript still comes entirely from
+`spacetime generate`, so upstream retains SDK and wire compatibility. Generated
+sessions also validate that every public table and public event table in the
+contract exists on the built connection and fail with
+`GeneratedArtifactShapeError` when the artifact is stale.
+
+
+---
+
+# Source: /core-concepts/clients/connection
+
+---
+draft: false
+title: Client Connection
+description: Project a module contract into typed HTTP and WebSocket clients.
+sidebar:
+  order: 6
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/clients/connection" target="_blank" rel="noopener noreferrer">SpacetimeDB: Client Connection ↗</a>
+
+`Stdb.project(Module)` produces a client-safe projection. It contains no
+server runtime; it is only the callable, route, table, and subscription shape
+needed by clients.
+
+## HTTP Client
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+declare const Module: Stdb.AnyStdbModule
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const Example = Stdb.project(Module)
+const HttpLive = Example.client.http.layer({ uri, databaseName, token })
+
+const program = Effect.gen(function* () {
+  const client = yield* Example.client.http.Tag
+  yield* client.reducers.user_upsert({ userId: "u1", name: "Ada" })
+}).pipe(Effect.provide(HttpLive))
+```
+
+Typed HTTP handlers are called with just their payload. Raw handlers take the
+payload and request options.
+
+## Effect HttpApi Projection
+
+Typed `post`, `put`, and `patch` routes can be projected into a stock Effect
+`HttpApi`:
+
+```ts
+const api = Stdb.toHttpApi(Module)
+```
+
+This is useful when callers already use `HttpApiClient.make(...)` and want
+status-based declared-error decoding.
+
+## WebSocket Client
+
+WebSocket sessions use generated native bindings through
+`effect-spacetimedb/client`.
+
+```typescript twoslash
+import * as StdbClient from "effect-spacetimedb/client"
+import * as Stdb from "effect-spacetimedb"
+
+declare const Module: Stdb.AnyStdbModule
+declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
+  typeof Module.spec,
+  unknown
+>
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const Example = Stdb.project(Module)
+
+const WsLive = Example.client.ws.layerGenerated({
+  DbConnection,
+  uri,
+  databaseName,
+  token,
+})
+```
+
+`layerGenerated` and `scopedGenerated` are the generated-client paths. The
+standalone generated config helper is reserved for the package testing
+entrypoint.
+
+Named tags let one process hold multiple sessions for the same module.
+
+```typescript twoslash
+import * as StdbClient from "effect-spacetimedb/client"
+import * as Stdb from "effect-spacetimedb"
+
+declare const Module: Stdb.AnyStdbModule
+declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
+  typeof Module.spec,
+  unknown
+>
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const Example = Stdb.project(Module)
+const MainSession = Example.client.ws.tag("main")
+const MainLive = Example.client.ws.layerGenerated(
+  { DbConnection, uri, databaseName, token },
+  { name: "main" },
+)
+```
+
+The native generated client still owns the actual WebSocket
+connection. effect-spacetimedb layers typed Effect services, scoped sessions,
+and projected HTTP clients over the module contract.
+
+
+---
+
+# Source: /core-concepts/clients/sdk-api
+
+---
+draft: false
+title: SDK API
+description: Use the projected Effect HTTP client, WebSocket session, targets, and HttpApi projection.
+sidebar:
+  order: 3
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/clients/api" target="_blank" rel="noopener noreferrer">SpacetimeDB: SDK API ↗</a>
+
+`Stdb.project(Module)` is the Effect-native SDK companion for a module.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("user_upsert", {
+    params: Stdb.struct({ userId: Stdb.string(), name: Stdb.string() }),
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").add(Users)
+const Example = Stdb.project(Module)
+const HttpLive = Example.client.http.layer({ uri, databaseName, token })
+
+const program = Effect.gen(function* () {
+  const client = yield* Example.client.http.Tag
+  yield* client.Users.reducers.user_upsert({ userId: "u1", name: "Ada" })
+}).pipe(Effect.provide(HttpLive))
+```
+
+The projection contains:
+
+- `client.http`: typed Effect service, direct `make`, and layer constructors.
+- `client.ws`: scoped/layered WebSocket sessions over generated native bindings.
+- `targets`: public persistent-table, event-table, and all-public-table targets.
+- `module`, `tables`, `reducers`, `procedures`, `httpHandlers`, and `lifecycle`
+  metadata for tooling.
+- `Stdb.toHttpApi(Module)`: an Effect `HttpApi` projection for typed HTTP
+  routes.
+
+effect-spacetimedb's client surface uses Effect services and
+typed errors. It does not replace the native generated WebSocket cache; it wraps
+it with scoped resources, projected callables, and subscription helpers.
+
+## Group-Scoped HTTP Clients
+
+The HTTP client keeps its flat `reducers`, `procedures`, and `httpHandlers`
+records and also projects every authored group as a namespace:
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("user_upsert", {
+    params: Stdb.struct({ userId: Stdb.string(), name: Stdb.string() }),
+  }),
+  Stdb.StdbFn.procedure("user_get", {
+    params: Stdb.struct({ userId: Stdb.string() }),
+    returns: Stdb.option(Stdb.struct({ userId: Stdb.string(), name: Stdb.string() })),
+  }),
+)
+const Module = Stdb.StdbModule.make("app").add(Users)
+const Example = Stdb.project(Module)
+const client = Example.client.http.make({ uri, databaseName, token })
+const users = Example.client.http.group("Users", { uri, databaseName, token })
+
+const write = client.Users.reducers.user_upsert({ userId: "u1", name: "Ada" })
+const read = client.Users.procedures.user_get({ userId: "u1" })
+const scopedWrite = users.reducers.user_upsert({ userId: "u1", name: "Ada" })
+```
+
+For a narrower type at a consumer boundary, construct only one group view:
+`Example.client.http.group("Users", { uri, databaseName, token })`. The result
+contains only that group's `reducers`, `procedures`, and `httpHandlers`.
+
+Grouped functions—including their `.raw` functions—are the exact same objects
+as the flat members, so grouping has no behavioral or wire-level cost. Group
+views are lazy and currently HTTP-only; WebSocket sessions remain flat.
+
+Group ids are client property keys. Module validation rejects ids that are not
+JavaScript identifiers or collide with framework/session keys (`reducers`,
+`procedures`, `subscribe`, and similar) or inherited-object names such as
+`constructor`.
+
+## Raw Calls And Failures
+
+Reducer and procedure functions expose a typed call and a `.raw` variant. The
+typed call decodes declared domain errors into the error channel directly. The
+raw variant preserves a `DomainCallError` wrapper so callers can distinguish a
+remote declared error from transport, rejection, or decode failures.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+import * as StdbClient from "effect-spacetimedb/client"
+
+const AppErrors = Stdb.errors.namespace("App")({
+  UserMissing: Stdb.error({ userId: Stdb.string() }, { status: 404 }),
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.procedure("user_get", {
+    params: Stdb.struct({ userId: Stdb.string() }),
+    returns: Stdb.option(Stdb.struct({ userId: Stdb.string(), name: Stdb.string() })),
+    errors: AppErrors,
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").add(Users)
+const Example = Stdb.project(Module)
+
+const program = Effect.gen(function* () {
+  const client = yield* Example.client.http.Tag
+  return yield* client.procedures.user_get.raw({ userId: "u1" })
+}).pipe(
+  Effect.catchTag("DomainCallError", (failure: StdbClient.DomainCallError<unknown>) =>
+    Effect.fail(failure.error),
+  ),
+)
+```
+
+The exported failure model is:
+
+| Type | Meaning |
+| --- | --- |
+| `CallFailure<E>` | Typed call error union: declared errors, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
+| `RawCallFailure<E>` | Raw call error union: `DomainCallError<E>`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
+| `DomainCallError<E>` | Declared error preserved as a wrapper by `.raw`. |
+| `RemoteRejectedError` | The remote side rejected the call without a decodable declared error. |
+| `TransportError` | The HTTP or WebSocket transport failed before a typed response arrived. |
+| `StdbDecodeError` | A response, row, event, or payload could not be decoded with the module contract. |
+
+The lower-level `catchRawTags` helper is exported from
+`effect-spacetimedb/testing` for fixture and protocol-level assertions. Public
+application clients should usually handle the exported failure classes directly
+or use the typed call form.
+
+## HTTP API Base URL
+
+Use `Stdb.httpApiBaseUrl` with `Stdb.toHttpApi(Module)` when you want a
+stock Effect `HttpApiClient` over typed `post`, `put`, or `patch` routes.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient"
+import * as Stdb from "effect-spacetimedb"
+
+declare const Module: Stdb.AnyStdbModule
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const api = Stdb.toHttpApi(Module)
+
+const program = Effect.gen(function* () {
+  const client = yield* HttpApiClient.make(api, {
+    baseUrl: Stdb.httpApiBaseUrl({ uri, databaseName }),
+    transformClient: HttpClient.mapRequest(
+      HttpClientRequest.bearerToken(token),
+    ),
+  })
+
+  return client
+})
+```
+
+
+---
+
+# Source: /core-concepts/databases/dev-publish
+
+---
+draft: false
+title: Dev & Publish
+description: Use the native SpacetimeDB CLI build, dev, and publish flow.
+sidebar:
+  order: 2
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/databases/developing" target="_blank" rel="noopener noreferrer">SpacetimeDB: Dev & Publish ↗</a>
+
+Build with the native SpacetimeDB CLI. The module entry imports the host-only
+compiler, imports server polyfills as a side effect, and exports the compiled
+schema.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+import { build } from "effect-spacetimedb/server-compiler"
+
+const Module = Stdb.StdbModule.make("app")
+
+export const compiled = build(Module, [])
+export const ModuleExports = compiled.exportGroup()
+export default compiled.schema
+```
+
+Publish a built bundle with the native SpacetimeDB CLI rather than a placeholder
+module-path publish command:
+
+```sh
+spacetime build --module-path <moduleDir>
+spacetime publish --js-path <moduleDir>/dist/bundle.js --server <url> <dbName>
+```
+
+The upstream `spacetime dev` command needs the full module path, server,
+database, identity, and publish settings for your local environment; see the
+[SpacetimeDB CLI docs](https://spacetimedb.com/docs/databases/developing) for the
+dev and publish flags.
+
+## Programmatic Dev Servers
+
+`effect-spacetimedb/dev-server` is for tests and tools that need a temporary
+local `spacetimedb-standalone` plus a published prebuilt bundle. It does not
+build the module or generate clients.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import { makeDevServer } from "effect-spacetimedb/dev-server"
+
+const program = Effect.gen(function* () {
+  const runtime = yield* makeDevServer({
+    bundlePath: "dist/bundle.js",
+    dbNamePrefix: "example",
+  })
+
+  yield* Effect.logInfo(
+    `published ${runtime.databaseName} at ${runtime.baseUrl}`,
+  )
+
+  return runtime
+})
+```
+
+The generated server bundle must include
+`effect-spacetimedb/server-compiler`; native `spacetime build` preserves its
+side-effectful server polyfill import. Off-host tests that import server modules
+also need the `spacetime:sys` stub from
+`effect-spacetimedb/testing/spacetime-sys`.
+
+effect-spacetimedb controls the authored TypeScript contract and compiled
+module exports; SpacetimeDB still controls local dev, publish, runtime storage,
+and the generated client runtime. The optional
+[quarantined codegen path](/core-concepts/clients/codegen) bundles native output
+without replacing the native generator.
+
+
+---
+
+# Source: /core-concepts/databases/migrations
+
+---
+draft: false
+title: Migrations
+description: Link to SpacetimeDB migrations; effect-spacetimedb adds no migration layer.
+sidebar:
+  order: 3
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/databases/automatic-migrations" target="_blank" rel="noopener noreferrer">SpacetimeDB: Migrations ↗</a>
+
+Migrations are a SpacetimeDB runtime concern. effect-spacetimedb does not add a
+separate migration DSL or change the host migration model.
+
+Use `Stdb.table(...)`, `Stdb.scheduledTable(...)`, and the callable builders to
+declare the next module schema, then follow SpacetimeDB's migration guidance for
+publishing and upgrading databases.
+
+
+---
+
+# Source: /core-concepts/databases/transactions-atomicity
+
+---
+draft: false
+title: Transactions & Atomicity
+description: Reducer transactions, explicit procedure transactions, and retry-safe bodies.
+sidebar:
+  order: 1
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/databases/transactions-atomicity" target="_blank" rel="noopener noreferrer">SpacetimeDB: Transactions & Atomicity ↗</a>
+
+Reducers run inside the host reducer transaction and may yield `Db` directly.
+Procedures and HTTP handlers open explicit transactions with `Tx` or `HttpTx`.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const counter = Stdb.table("counter", {
+  columns: {
+    id: Stdb.string().primaryKey(),
+    value: Stdb.u32().default(0),
+  },
+})
+
+const Counters = Stdb.StdbGroup.make("Counters")
+  .add(Stdb.StdbFn.reducer("counter_inc", { params: Stdb.struct({ id: Stdb.string() }) }))
+  .add(Stdb.StdbFn.procedure("counter_read", {
+    params: Stdb.struct({ id: Stdb.string() }),
+    returns: Stdb.option(counter.row),
+  }))
+
+const Module = Stdb.StdbModule.make("app").addTables(counter).add(Counters)
+const { Db, Tx } = Module
+
+const CountersLive = Stdb.StdbBuilder.group(Module, "Counters", {
+  counter_inc: Effect.fn(function* ({ id }) {
+    const db = yield* Db
+    const current = yield* db.counter.id.find(id)
+    yield* db.counter.id.replace({ id, value: (current?.value ?? 0) + 1 })
+  }),
+  counter_read: Effect.fn(function* ({ id }) {
+    const tx = yield* Tx
+    return yield* tx.run(
+      Effect.gen(function* () {
+        const db = yield* Db
+        return yield* db.counter.id.find(id)
+      }),
+    )
+  }),
+})
+```
+
+Effect capability scopes make transaction boundaries visible in
+the type system. Keep `Tx.run(...)` and `HttpTx.run(...)` bodies idempotent and
+database-only; put external side effects outside the transaction body.
+
+SpaceTimeDB owns transaction commit, abort, rollback, and optimistic-commit
+retry behavior. effect-spacetimedb delegates to the native host `withTx` call; it
+does not add retry logic of its own. An Effect failure inside the body aborts the
+transaction. Native host abort outcomes surface as typed errors such as
+`StdbUniqueAlreadyExistsError`, `StdbNoSuchRowError`, and
+`StdbAutoIncOverflowError`.
+
+HTTP handlers use `HttpTx` for the same explicit transaction boundary:
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+import * as Stdb from "effect-spacetimedb"
+
+const counter = Stdb.table("counter", {
+  columns: {
+    id: Stdb.string().primaryKey(),
+    value: Stdb.u32().default(0),
+  },
+})
+
+const Routes = Stdb.StdbHttpGroup.make("Routes").add(
+  Stdb.StdbHttp.post("counter_inc", "/counter/inc", {
+    request: Schema.Struct({ id: Schema.String }),
+    response: Schema.Void,
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").addTables(counter).add(Routes)
+const { Db, HttpTx } = Module
+
+const RoutesLive = Stdb.StdbBuilder.group(Module, "Routes", {
+  counter_inc: Effect.fn(function* ({ id }) {
+    const tx = yield* HttpTx
+    yield* tx.run(
+      Effect.gen(function* () {
+        const db = yield* Db
+        const current = yield* db.counter.id.find(id)
+        yield* db.counter.id.replace({
+          id,
+          value: (current?.value ?? 0) + 1,
+        })
+      }),
+    )
+  }),
+})
+```
+
+See [Runtime Model](/the-effect-layer/runtime-model) for the server Effect
+constraints.
+
+
+---
+
+# Source: /core-concepts/functions/error-handling
+
+---
+draft: false
+title: Error Handling
+description: Model domain failures as tagged errors that cross reducer, procedure, route, and client boundaries.
+sidebar:
+  order: 5
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions/reducers/error-handling" target="_blank" rel="noopener noreferrer">SpacetimeDB: Error Handling ↗</a>
+
+Declared errors are tagged errors with a namespace prefix. The namespace keeps
+wire tags globally unique within a module, while each field uses a normal
+`Stdb.*` value type.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const AppErrors = Stdb.errors.namespace("App")({
+  UserMissing: Stdb.error({ userId: Stdb.string() }),
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("user_require", {
+    params: Stdb.struct({ userId: Stdb.string() }),
+    errors: AppErrors,
+  }),
+  Stdb.StdbFn.procedure("user_get", {
+    params: Stdb.struct({ userId: Stdb.string() }),
+    returns: Stdb.option(Stdb.struct({ id: Stdb.string() })),
+    errors: AppErrors,
+  }),
+)
+
+const UserRoutes = Stdb.StdbHttpGroup.make("UserRoutes").add(
+  Stdb.StdbHttp.post("user_token_rotate", "/users/token/rotate", {
+    request: Stdb.struct({ userId: Stdb.string() }).schema,
+    response: Stdb.struct({ token: Stdb.string() }).schema,
+    errors: AppErrors,
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").add(Users).add(UserRoutes)
+
+const fail = (userId: string) =>
+  Effect.gen(function* () {
+    return yield* new AppErrors.UserMissing({ userId })
+  })
+```
+
+Attach the error catalog with `errors:` and fail with the generated classes
+directly. Declared errors are encoded on the wire with a versioned envelope, so
+plain host rejection strings are not confused with domain failures.
+
+An error can optionally declare an HTTP status with
+`Stdb.error(fields, { status })`. That status applies only when the error
+surfaces over an HTTP route; on the reducer and procedure (WebSocket) path there
+is no HTTP response, so it is ignored.
+
+Clients receive declared tagged errors directly from reducer and procedure
+calls, and typed HTTP routes deliver the same errors through the projected
+Effect `HttpApi` client:
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient"
+import * as Stdb from "effect-spacetimedb"
+
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+declare const userId: string
+
+const AppErrors = Stdb.errors.namespace("App")({
+  UserMissing: Stdb.error({ userId: Stdb.string() }),
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("user_require", {
+    params: Stdb.struct({ userId: Stdb.string() }),
+    errors: AppErrors,
+  }),
+  Stdb.StdbFn.procedure("user_get", {
+    params: Stdb.struct({ userId: Stdb.string() }),
+    returns: Stdb.option(Stdb.struct({ id: Stdb.string() })),
+    errors: AppErrors,
+  }),
+)
+
+const UserRoutes = Stdb.StdbHttpGroup.make("UserRoutes").add(
+  Stdb.StdbHttp.post("user_token_rotate", "/users/token/rotate", {
+    request: Stdb.struct({ userId: Stdb.string() }).schema,
+    response: Stdb.struct({ token: Stdb.string() }).schema,
+    errors: AppErrors,
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").add(Users).add(UserRoutes)
+const Example = Stdb.project(Module)
+const rpcClient = Example.client.http.make({ uri, databaseName, token })
+
+const requireUser = rpcClient.reducers.user_require({ userId }).pipe(
+  Effect.catchTag("AppUserMissing", (error) =>
+    Effect.log(`missing ${error.userId}`),
+  ),
+)
+
+const findUser = rpcClient.procedures.user_get({ userId }).pipe(
+  Effect.catchTag("AppUserMissing", () => Effect.succeed(undefined)),
+)
+
+const api = Stdb.toHttpApi(Module)
+
+const rotateToken = Effect.gen(function* () {
+  const client = yield* HttpApiClient.make(api, {
+    baseUrl: Stdb.httpApiBaseUrl({ uri, databaseName }),
+    transformClient: HttpClient.mapRequest(
+      HttpClientRequest.bearerToken(token),
+    ),
+  })
+
+  return yield* client.UserRoutes.user_token_rotate({
+    payload: { userId },
+  }).pipe(
+    Effect.map((response) => response.token),
+    Effect.catchTag("AppUserMissing", () => Effect.succeed(undefined)),
+  )
+})
+```
+
+Use `.raw(...)` only when you need remote rejection metadata in addition to the
+decoded declared error.
+
+Subscription and stream APIs report subscription, transport, invalidation, and
+row-decode failures. They do not carry declared domain errors because declared
+errors are emitted by reducer, procedure, and typed HTTP route calls.
+
+Declared errors are Effect failures. Defects remain defects, and
+plain host rejection strings are kept separate from decoded domain failures.
+
+
+---
+
+# Source: /core-concepts/functions/http-handlers
+
+---
+draft: false
+title: HTTP Handlers
+description: Add typed and raw server-to-server HTTP handlers to a module.
+sidebar:
+  order: 4
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions" target="_blank" rel="noopener noreferrer">SpacetimeDB: HTTP Handlers ↗</a>
+
+HTTP routes are server-to-server routes, not caller-authenticated reducers. Their
+context exposes the module database identity, timestamp, HTTP request data,
+randomness, UUID helpers, and transaction-scoped DB access. It does not expose a
+caller `sender`, caller identity, or connection id.
+
+Declare routes in an `StdbHttpGroup`. Typed routes provide `request` and
+`response` schemas; raw routes omit them and work directly with `Request` and
+`SyncResponse`.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const tokenRotation = Stdb.table("token_rotation", {
+  columns: {
+    userId: Stdb.string().primaryKey(),
+    token: Stdb.string(),
+  },
+})
+
+const RotateTokenInput = Stdb.struct({ userId: Stdb.string() }).schema
+const RotateTokenOutput = Stdb.struct({ token: Stdb.string() }).schema
+
+const Webhooks = Stdb.StdbHttpGroup.make("Webhooks")
+  .prefix("/webhooks")
+  .add(Stdb.StdbHttp.post("stripe_webhook", "/stripe"))
+  .add(
+    Stdb.StdbHttp.post("rotate_token", "/rotate", {
+      request: RotateTokenInput,
+      response: RotateTokenOutput,
+    }),
+  )
+
+const Module = Stdb.StdbModule.make("app")
+  .addTables(tokenRotation)
+  .add(Webhooks)
+const { HttpTx, Db } = Module
+
+const WebhooksLive = Stdb.StdbBuilder.group(Module, "Webhooks", {
+  stripe_webhook: (request) =>
+    Effect.succeed(new Stdb.SyncResponse(request.text(), { status: 202 })),
+  rotate_token: (args) =>
+    Effect.gen(function* () {
+      const tx = yield* HttpTx
+      return yield* tx.run(
+        Effect.gen(function* () {
+          const db = yield* Db
+          const row = yield* db.token_rotation.userId.replace({
+            userId: args.userId,
+            token: `token:${args.userId}`,
+          })
+          return { token: row.token }
+        }),
+      )
+    }),
+})
+```
+
+Use raw routes for GET or HEAD, query strings, custom auth headers, webhooks, and
+non-JSON bodies. Keep external side effects outside HTTP transaction bodies, just
+as you would for procedures.
+
+effect-spacetimedb uses `StdbHttpGroup` plus
+`StdbBuilder.group(...)` instead of exporting handler functions directly. Typed
+`post`, `put`, and `patch` routes can also be projected to an Effect `HttpApi`.
+
+## Project Typed Routes To HttpApi
+
+Typed `post`, `put`, and `patch` routes can also be projected into a canonical
+Effect `HttpApi`. The STDB HTTP group becomes the `HttpApiClient` property key,
+and the route name becomes the typed endpoint method.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient"
+import * as Stdb from "effect-spacetimedb"
+
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+declare const userId: string
+
+const RotateTokenInput = Stdb.struct({ userId: Stdb.string() }).schema
+const RotateTokenOutput = Stdb.struct({ token: Stdb.string() }).schema
+
+const Webhooks = Stdb.StdbHttpGroup.make("Webhooks").add(
+  Stdb.StdbHttp.post("rotate_token", "/rotate", {
+    request: RotateTokenInput,
+    response: RotateTokenOutput,
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").add(Webhooks)
+const api = Stdb.toHttpApi(Module)
+
+const program = Effect.gen(function* () {
+  const client = yield* HttpApiClient.make(api, {
+    baseUrl: Stdb.httpApiBaseUrl({ uri, databaseName }),
+    transformClient: HttpClient.mapRequest(
+      HttpClientRequest.bearerToken(token),
+    ),
+  })
+
+  const response = yield* client.Webhooks.rotate_token({
+    payload: { userId },
+  })
+
+  return response.token
+})
+```
+
+
+---
+
+# Source: /core-concepts/functions/lifecycle
+
+---
+draft: false
+title: Lifecycle
+description: Declare init, clientConnected, and clientDisconnected hooks.
+sidebar:
+  order: 3
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions/reducers/lifecycle" target="_blank" rel="noopener noreferrer">SpacetimeDB: Lifecycle ↗</a>
+
+Lifecycle hooks can be declared in the module config and implemented with
+`StdbBuilder.lifecycle(...)`.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const Lifecycle = {
+  init: Stdb.StdbFn.init(),
+  clientConnected: Stdb.StdbFn.clientConnected(),
+  clientDisconnected: Stdb.StdbFn.clientDisconnected(),
+}
+
+const Module = Stdb.StdbModule.make("app", {
+  lifecycle: Lifecycle,
+})
+const { ReducerCtx } = Module
+
+const LifecycleLive = Stdb.StdbBuilder.lifecycle(Module, {
+  // Runs once when the module is first published.
+  init: () => Effect.log("module initialized"),
+  // clientConnected / clientDisconnected run as the joining or leaving client,
+  // so ReducerCtx identifies who it was.
+  clientConnected: Effect.fn(function* () {
+    const ctx = yield* ReducerCtx
+    yield* Effect.log(`client connected: ${ctx.connectionId}`)
+  }),
+  clientDisconnected: Effect.fn(function* () {
+    const ctx = yield* ReducerCtx
+    yield* Effect.log(`client disconnected: ${ctx.connectionId}`)
+  }),
+})
+```
+
+Lifecycle hooks are first-class module declarations, not loose
+exports. At most one `init`, `clientConnected`, and `clientDisconnected` hook
+can be present in a built module, and handlers are checked against the module's
+Effect capability scope.
+
+
+---
+
+# Source: /core-concepts/functions/procedures
+
+---
+draft: false
+title: Procedures
+description: Declare read-returning callables and run mutations inside explicit transactions.
+sidebar:
+  order: 4
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions/procedures" target="_blank" rel="noopener noreferrer">SpacetimeDB: Procedures ↗</a>
+
+Procedures are declared in callable groups with params and a return value type.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const user = Stdb.table("user", {
+  public: true,
+  columns: {
+    id: Stdb.string().primaryKey(),
+    name: Stdb.string(),
+  },
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.procedure("user_get", {
+    params: Stdb.struct({ id: Stdb.string() }),
+    returns: Stdb.option(user.row),
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const { Db, Tx } = Module
+
+const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
+  user_get: Effect.fn(function* ({ id }) {
+    const tx = yield* Tx
+    return yield* tx.run(
+      Effect.gen(function* () {
+        const db = yield* Db
+        return yield* db.user.id.find(id)
+      }),
+    )
+  }),
+})
+```
+
+Procedure handlers cannot yield `Db` directly. Use the module's
+`Tx` runner and keep transaction bodies pure database work because the native
+runtime may retry them after optimistic commit conflicts.
+
+## Scheduling
+
+Scheduled reducers and procedures are declared with the callable group API and
+backed by a scheduled table. The scheduled endpoint receives
+`{ data: table.row }`; insert future work with the generated table
+`.schedule(row)` helper from a reducer or transaction body.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const reminderSchedule = Stdb.scheduledTable("reminderSchedule", {
+  columns: {
+    note: Stdb.string(),
+  },
+})
+
+const Reminders = Stdb.StdbGroup.make("Reminders").add(
+  Stdb.StdbFn.scheduledProcedure("reminderFire", {
+    table: reminderSchedule,
+    allowExternalCallers: false,
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app")
+  .addTables(reminderSchedule)
+  .add(Reminders)
+
+const { Db } = Module
+
+const RemindersLive = Stdb.StdbBuilder.group(Module, "Reminders", {
+  reminderFire: Effect.fn(function* ({ data }) {
+    yield* Effect.logInfo(`reminder: ${data.note}`)
+  }),
+})
+
+const enqueueReminder = Effect.gen(function* () {
+  const db = yield* Db
+  yield* db.reminderSchedule.schedule({
+    scheduledAt: Stdb.ScheduleAt.interval("5 minutes"),
+    note: "wake up",
+  })
+})
+```
+
+Use `Stdb.ScheduleAt.interval(...)` for persistent re-fire rows,
+`Stdb.ScheduleAt.at(...)` for one-shot absolute times,
+`Stdb.ScheduleAt.after(ctx.timestamp, duration)` for one-shot relative work, and
+`Stdb.ScheduleAt.nextCron(cron, ctx.timestamp)` for cron-derived one-shots.
+See [Scheduled Tables](/core-concepts/tables/scheduled-tables) for the table
+side of the contract.
+
+
+---
+
+# Source: /core-concepts/functions/reducer-context
+
+---
+draft: false
+title: Reducer Context
+description: Read sender, timestamp, deterministic randomness, and scoped mutation context.
+sidebar:
+  order: 2
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions/reducers/reducer-context" target="_blank" rel="noopener noreferrer">SpacetimeDB: Reducer Context ↗</a>
+
+Reducer context is an Effect service yielded from the assembled module.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const audit = Stdb.table("audit", {
+  columns: {
+    id: Stdb.u64().primaryKey().autoInc(),
+    sender: Stdb.identity(),
+    message: Stdb.string(),
+  },
+})
+
+const Audit = Stdb.StdbGroup.make("Audit").add(
+  Stdb.StdbFn.reducer("audit_write", {
+    params: Stdb.struct({ message: Stdb.string() }),
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").addTables(audit).add(Audit)
+const { Db, ReducerCtx } = Module
+
+const AuditLive = Stdb.StdbBuilder.group(Module, "Audit", {
+  audit_write: Effect.fn(function* ({ message }) {
+    const ctx = yield* ReducerCtx
+    const db = yield* Db
+    yield* db.audit.insert({
+      id: 0n,
+      sender: ctx.sender,
+      message,
+    })
+  }),
+})
+```
+
+`ReducerCtx` exposes the sender identity, authenticated sender metadata,
+timestamp, connection id, deterministic random stream, UUID helpers, and the
+same writable `db` view available through `Db`.
+
+effect-spacetimedb exposes context as scoped services rather than a positional
+argument: `ReducerCtx` for reducers, `TxCtx` inside explicit transaction bodies,
+and `MutationCtx` for helpers that must work in both scopes.
+
+:::caution
+
+Reducers are deterministic synchronous host calls. `async`/Promises, timers,
+microtasks, global `Math.random`, and wall-clock reads such as `Date.now()` or
+no-argument `new Date()` throw typed errors. Use `Random.*` from
+`effect/Random`, context randomness, and the call timestamp instead. See
+[Randomness & Determinism](/the-effect-layer/randomness-and-determinism).
+
+:::
+
+
+---
+
+# Source: /core-concepts/functions/reducers
+
+---
+draft: false
+title: Reducers
+description: Declare reducers in callable groups and implement them with Effect handlers.
+sidebar:
+  order: 1
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions/reducers" target="_blank" rel="noopener noreferrer">SpacetimeDB: Reducers ↗</a>
+
+The authoring surface follows one shape: endpoints become groups, groups become
+a module, handlers implement those groups, and the completed module is built.
+
+## Keep Contracts And Implementations Separate
+
+Contracts are imported by the module. Implementations import the assembled
+module so they can use its typed accessors. Keeping those directions separate
+avoids runtime import cycles.
+
+```text
+schema.ts             shared Effect schemas and value types
+tables/users.ts       table declarations
+users/contract.ts     StdbGroup.make().add(...)
+module.ts             StdbModule.make(...).addTables(...).add(...)
+users/live.ts         StdbBuilder.group(Module, "Users", ...)
+index.ts              build(Module, [...])
+```
+
+## Assemble The Module Once
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const user = Stdb.table("user", {
+  public: true,
+  columns: { id: Stdb.string().primaryKey() },
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("user_upsert", {
+    params: Stdb.struct({ id: Stdb.string(), name: Stdb.string() }),
+  }),
+)
+
+export const Module = Stdb.StdbModule.make("app")
+  .addTables(user)
+  .add(Users)
+
+export const { Db, Tx, ReadonlyDb, From, ReducerCtx, ProcedureCtx, ViewCtx } = Module
+```
+
+Destructure accessors from the assembled module and use those exact accessors in
+handlers. They are typed against the module's tables and scopes.
+
+## Implement Groups By Name
+
+`StdbBuilder.group(Module, "GroupName", handlers)` takes a record whose keys
+match endpoint names in the group. The builder checks that every endpoint is
+implemented exactly once.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const user = Stdb.table("user", {
+  public: true,
+  columns: { id: Stdb.string().primaryKey(), name: Stdb.string() },
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("user_upsert", {
+    params: Stdb.struct({ id: Stdb.string(), name: Stdb.string() }),
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const { Db } = Module
+
+const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
+  user_upsert: Effect.fn(function* (args) {
+    const db = yield* Db
+    yield* db.user.id.replace(args)
+  }),
+})
+```
+
+Reducers are declared as data with `StdbFn.reducer(...)` and
+implemented later with Effect handlers. Reducer handlers may yield `Db`,
+`ReducerCtx`, and `MutationCtx`; transaction boundaries remain the host reducer
+call.
+
+:::caution
+
+Reducers are deterministic synchronous host calls. Promises, `async`, timers,
+microtasks, global `Math.random`, and wall-clock reads such as `Date.now()` or
+no-argument `new Date()` throw typed runtime errors. Use `Random.*` from
+`effect/Random`, `ctx.random`, and the call timestamp instead. See
+[Randomness & Determinism](/the-effect-layer/randomness-and-determinism).
+
+:::
+
+Lifecycle hooks use `StdbBuilder.lifecycle(Module, handlers)`. HTTP route groups
+use the same `StdbBuilder.group` shape as callable groups.
+
+## Build The Native Export
+
+```ts
+import { build } from "effect-spacetimedb/server-compiler"
+
+export const compiled = build(Module, [UsersLive])
+export const ModuleExports = compiled.exportGroup()
+export default compiled.schema
+```
+
+When storing implementations before building, keep the array readonly:
+
+```ts
+export const LiveGroups = [UsersLive] as const
+export const compiled = build(Module, LiveGroups)
+```
+
+:::note
+
+If handlers require custom services, pass a runtime layer to
+`build`. Built-in SpaceTimeDB capabilities are supplied by the runtime.
+
+:::
+
+```ts
+import * as Context from "effect/Context"
+import * as Layer from "effect/Layer"
+import { build } from "effect-spacetimedb/server-compiler"
+
+// A custom capability your handlers need — here, injected config.
+class AppConfig extends Context.Tag("AppConfig")<
+  AppConfig,
+  { readonly welcomeMessage: string }
+>() {}
+
+// Handlers read it with `const config = yield* AppConfig`. Because a handler
+// requires AppConfig, build now asks for its runtime layer.
+const AppConfigLive = Layer.succeed(AppConfig, { welcomeMessage: "welcome" })
+
+export const compiled = build(Module, [UsersLive], { runtime: AppConfigLive })
+```
+
+
+---
+
+# Source: /core-concepts/functions/views
+
+---
+draft: false
+title: Views
+description: Declare sender and anonymous views with typed read-only access.
+sidebar:
+  order: 5
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions/views" target="_blank" rel="noopener noreferrer">SpacetimeDB: Views ↗</a>
+
+Views are callable group endpoints with return value types. Sender views use
+`StdbFn.view(...)`; anonymous views use `StdbFn.anonymousView(...)`.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const user = Stdb.table("user", {
+  public: true,
+  columns: {
+    id: Stdb.string().primaryKey(),
+    name: Stdb.string(),
+  },
+})
+
+const Users = Stdb.StdbGroup.make("Users")
+  .add(Stdb.StdbFn.view("self_user", { returns: Stdb.option(user.row) }))
+  .add(Stdb.StdbFn.anonymousView("all_users", { returns: Stdb.array(user.row) }))
+
+const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const { ReadonlyDb, ViewCtx } = Module
+
+const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
+  self_user: Effect.fn(function* () {
+    const ctx = yield* ViewCtx
+    const db = yield* ReadonlyDb
+    return yield* db.user.id.find(String(ctx.sender))
+  }),
+  all_users: Effect.fn(function* () {
+    const db = yield* ReadonlyDb
+    return yield* db.user.toArray()
+  }),
+})
+```
+
+Views are read-only Effect handlers. Sender views may yield
+`ViewCtx`; anonymous views may yield `AnonymousViewCtx`. Both may yield
+`ReadonlyDb` and `From`.
+
+
+---
+
+# Source: /core-concepts/subscriptions
+
+---
+draft: false
+title: Subscriptions
+description: Use scoped WebSocket sessions, table targets, and event-table streams safely.
+sidebar:
+  order: 7
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/clients/subscriptions/semantics" target="_blank" rel="noopener noreferrer">SpacetimeDB: Subscriptions ↗</a>
+
+Subscriptions are scoped native resources. A session can subscribe to public
+tables and event tables, then release each subscription when the scope exits or
+the handle is unsubscribed.
+
+```ts
+const program = Effect.gen(function* () {
+  const session = yield* Example.client.ws.Session
+
+  yield* session.subscribe(Example.targets.allPublicTables())
+  yield* session.streamEventTable("presenceEvent").pipe(Stream.runDrain)
+})
+```
+
+Each subscribe call opens its own native SpacetimeDB query set on the session
+connection. `allPublicTables()` remains one native multi-query subscription.
+
+The wrapper intentionally follows the native TypeScript SDK model:
+
+- `session.subscribe(target)` opens one native subscription for that target.
+- `tableGroup(keys).subscribe` opens one native subscription per table key.
+- `streamTable`, `streamRows`, `streamTableWithContext`,
+  `streamTableEvents`, and `streamEventTable` each open the subscription needed
+  for that stream.
+- `allPublicTables()` remains one native multi-query subscription.
+
+If two consumers subscribe to the same table or event table, they own two native
+query sets. The wrapper does not add query-key APIs or client-side
+deduplication on top of the native SDK.
+
+## Streams
+
+Persistent-table streams use bounded callback queues by default and should be
+treated as invalidation signals: re-read the authoritative session cache when a
+change arrives. Event-table streams are raw event feeds and are unbounded unless
+you opt into a bounded buffer and accept lossy overflow behavior.
+
+The session stream helper family covers the common shapes:
+
+| Helper | Use |
+| --- | --- |
+| `streamTable(key, options?)` | Persistent-table insert/update/delete signals. |
+| `streamRows(key)` | Initial snapshot followed by cache snapshots after table changes. |
+| `tableGroup(keys, options?)` | Multi-table snapshot group with `subscribe`, `readSnapshot`, and `changes`. |
+| `streamTableEvents(key, options?)` | Persistent-table changes with decoded `StdbEventContext`. |
+| `streamEventTable(key, options?)` | Event-table insert feed. |
+| `streamTarget(target, options?)` | Stream a projected subscription target. |
+
+Persistent-table streams accept `{ buffer: { bufferSize, strategy } }`, where
+`strategy` is `"sliding"` or `"dropping"`. The default is a bounded sliding
+queue sized for cache invalidation signals. Event-table streams accept
+`{ buffer: { bufferSize } }`; overflowing that buffer fails the stream with
+`EventTableStreamOverflowError` rather than silently dropping events.
+
+Event tables use native delivery semantics. Every live native query set that
+covers an event can deliver that event, so subscribe once at an app state
+boundary and fan out from that stream when a domain needs one event-processing
+path.
+
+Persistent table subscriptions populate the native connection cache. The cache
+merges row coverage across live query sets, so snapshot reads through generated
+client caches, `streamRows(key)`, and `tableGroup(keys).readSnapshot` always
+read the connection-owned table state rather than a wrapper-local copy. A
+transaction applies atomically before callbacks fire, so snapshot reads taken
+from callbacks observe the post-transaction cache.
+
+`tableGroup(keys).changes` emits an initial snapshot and then burst-coalesced
+snapshots by re-reading the generated client's authoritative cache. Native SDK
+callbacks for one server message are dispatched synchronously, so a transaction
+burst normally lands in one drain batch and produces one snapshot. If the
+consumer falls behind, several bursts can coalesce into one later snapshot; the
+emission still re-reads the post-apply cache and converges to current state.
+
+## Event Context
+
+`streamTableEvents` decodes native generated-client event metadata into
+`StdbEventContext`. Use `decodeStdbEventContext` from
+`effect-spacetimedb/client` when you are working with lower-level generated
+callbacks yourself.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as StdbClient from "effect-spacetimedb/client"
+
+declare const rawContext: unknown
+
+const decoded = StdbClient.decodeStdbEventContext(rawContext).pipe(
+  Effect.map((context): StdbClient.StdbEventContextType => context),
+)
+```
+
+## Failure Propagation
+
+Subscription setup failures are routed into the stream queue explicitly so
+rejected subscriptions, invalidated connections, and transport errors do not
+turn into streams that simply never emit.
+
+
+---
+
+# Source: /core-concepts/tables/access-permissions
+
+---
+draft: false
+title: Access Permissions
+description: Public table visibility, and the unsupported RLS surface.
+sidebar:
+  order: 8
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/access-permissions" target="_blank" rel="noopener noreferrer">SpacetimeDB: Access Permissions ↗</a>
+
+effect-spacetimedb supports table-level public visibility:
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const publicUser = Stdb.table("public_user", {
+  public: true,
+  columns: {
+    id: Stdb.string().primaryKey(),
+  },
+})
+
+const privateAudit = Stdb.table("private_audit", {
+  public: false,
+  columns: {
+    id: Stdb.u64().primaryKey().autoInc(),
+    note: Stdb.string(),
+  },
+})
+```
+
+Row-level security / `clientVisibilityFilter` is not supported. Use private
+tables plus reducers, procedures, views, or HTTP handlers to expose scoped data
+intentionally.
+
+
+---
+
+# Source: /core-concepts/tables/auto-increment
+
+---
+draft: false
+title: Auto-Increment
+description: Use auto-increment primary keys and generated schedule ids.
+sidebar:
+  order: 4
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/auto-increment" target="_blank" rel="noopener noreferrer">SpacetimeDB: Auto-Increment ↗</a>
+
+Auto-increment is column metadata on a primary key. Chain `.primaryKey()` before
+`.autoInc()` so the declaration satisfies SpacetimeDB's host rules.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const issue = Stdb.table("issue", {
+  public: true,
+  columns: {
+    id: Stdb.u64().primaryKey().autoInc(),
+    title: Stdb.string(),
+  },
+})
+```
+
+Scheduled tables derive their auto-increment schedule id for you:
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const reminderSchedule = Stdb.scheduledTable("reminder_schedule", {
+  columns: {
+    note: Stdb.string(),
+  },
+})
+```
+
+effect-spacetimedb validates auto-increment at declaration time:
+`.autoInc()` without `.primaryKey()` throws, and defaults cannot be combined with
+primary keys or auto-increment columns.
+
+
+---
+
+# Source: /core-concepts/tables/column-types
+
+---
+draft: false
+title: Column Types
+description: Declare typed tables, indexes, constraints, rows, and reusable value types.
+sidebar:
+  order: 2
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/column-types" target="_blank" rel="noopener noreferrer">SpacetimeDB: Column Types ↗</a>
+
+Tables are declared with `Stdb.table(name, options)`. Bind each table to a
+variable so its `row` value type, column metadata, index metadata, and generated
+accessor types can flow through the module.
+
+```typescript twoslash
+import * as Schema from "effect/Schema"
+import * as Stdb from "effect-spacetimedb"
+
+const UserId = Schema.String.pipe(Schema.brand("UserId"))
+const ShortString = Stdb.string(Schema.String.pipe(Schema.minLength(1)))
+
+export const user = Stdb.table("user", {
+  public: true,
+  columns: {
+    id: Stdb.string(UserId).primaryKey(),
+    name: ShortString,
+  },
+})
+
+export const membership = Stdb.table("membership", {
+  public: false,
+  columns: {
+    tenant_id: ShortString,
+    email: ShortString,
+  },
+  indexes: (c) => [Stdb.index("membership_email_tenant_idx", [c.email, c.tenant_id])],
+  constraints: (c) => [Stdb.unique("membership_tenant_email_unique", [c.tenant_id, c.email])],
+})
+```
+
+effect-spacetimedb wraps Effect schemas in `Stdb.*` value types, then uses those
+value types consistently for table columns, reducer/procedure params, view
+returns, and declared errors.
+
+## Value-Type Pattern
+
+Use a plain Effect schema as the domain source of truth, then wrap it at
+SpaceTimeDB declaration boundaries:
+
+```ts
+const UserId = Schema.String.pipe(Schema.brand("UserId"))
+
+Stdb.string(UserId) // table columns, params, returns, and declared error fields
+```
+
+Keep reusable `Stdb.*` aliases for generic non-branded values, such as a
+length-limited string used in many columns. For custom codecs, use
+`Stdb.custom(schema, { type })` so the SpaceTimeDB lowering is explicit.
+
+For the full helper catalog, including integer widths, native timestamp/UUID
+values, and transport codecs, see [Value Types](/the-effect-layer/value-types).
+
+## Column Names And Row Types
+
+Use `.name("db_name")` on a value type when the database column name should
+differ from the TypeScript field name.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const user = Stdb.table("user", {
+  columns: {
+    userId: Stdb.string().name("user_id").primaryKey(),
+    displayName: Stdb.string().name("display_name"),
+  },
+})
+
+type UserRow = Stdb.TableRow<typeof user>
+
+const UserRow = Stdb.rowType(user)
+const SameUserRow = user.row
+```
+
+`Stdb.rowType(table)` and `table.row` are the reusable value type for a full row;
+`Stdb.TableRow<typeof table>` is the authored TypeScript row type.
+
+## Optionality
+
+`Stdb.option(T)` means the value is present but may be `undefined`.
+`Stdb.optional(T)` and `.optional()` mean the field or table column may be
+omitted. Both lower to SATS `option<T>` where structs are materialized, but they
+produce different TypeScript property shapes.
+
+See [Value-Type Design](/the-effect-layer/value-type-design) and
+[Option vs Optional](/the-effect-layer/option-vs-optional) for the Effect-native
+typing details.
+
+
+---
+
+# Source: /core-concepts/tables/constraints
+
+---
+draft: false
+title: Constraints
+description: Declare primary keys and unique constraints with value-type metadata.
+sidebar:
+  order: 2
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/constraints" target="_blank" rel="noopener noreferrer">SpacetimeDB: Constraints ↗</a>
+
+Primary keys and single-column unique constraints are declared on the column
+value type. Multi-column unique constraints are declared in the table's
+`constraints` callback so column names stay type-checked.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const membership = Stdb.table("membership", {
+  public: false,
+  columns: {
+    id: Stdb.u64().primaryKey().autoInc(),
+    tenantId: Stdb.string(),
+    email: Stdb.string(),
+    externalId: Stdb.string().unique(),
+  },
+  constraints: (columns) => [
+    Stdb.unique("membership_tenant_email_unique", [
+      columns.tenantId,
+      columns.email,
+    ]),
+  ],
+})
+```
+
+Column-level `.unique()` also creates the backing index when one
+is not already implied by a primary key or explicit index. A default value cannot
+be combined with a unique constraint because SpacetimeDB would materialize the
+same default for more than one row.
+
+
+---
+
+# Source: /core-concepts/tables/default-values
+
+---
+draft: false
+title: Default Values
+description: Attach native SpaceTimeDB column defaults to value types.
+sidebar:
+  order: 5
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/default-values" target="_blank" rel="noopener noreferrer">SpacetimeDB: Default Values ↗</a>
+
+Column defaults are declared with `.default(value)` on a value type.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const profile = Stdb.table("profile", {
+  public: true,
+  columns: {
+    id: Stdb.u64().primaryKey().autoInc(),
+    displayName: Stdb.string().default("anonymous"),
+    score: Stdb.u32().default(0),
+    subscribed: Stdb.bool().default(false),
+  },
+})
+```
+
+Defaults use the authored TypeScript value for the wrapped
+`Stdb.*` value type. The library rejects defaults on primary keys,
+auto-increment columns, unique columns, and unsupported native metadata shapes.
+
+
+---
+
+# Source: /core-concepts/tables/event-tables
+
+---
+draft: false
+title: Event Tables
+description: Declare event tables and subscribe to event-table streams safely.
+sidebar:
+  order: 7
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/event-tables" target="_blank" rel="noopener noreferrer">SpacetimeDB: Event Tables ↗</a>
+
+Event tables use the same `Stdb.table(...)` builder with `event: true`.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stream from "effect/Stream"
+import * as Stdb from "effect-spacetimedb"
+
+const presenceEvent = Stdb.table("presenceEvent", {
+  public: true,
+  event: true,
+  columns: {
+    userId: Stdb.string(),
+    kind: Stdb.literal("joined", "left"),
+  },
+})
+
+const Module = Stdb.StdbModule.make("presence", {}).addTables(presenceEvent)
+const Example = Stdb.project(Module)
+
+const program = Effect.gen(function* () {
+  const session = yield* Example.client.ws.Session
+  yield* session.streamEventTable("presenceEvent").pipe(
+    Stream.runForEach((event) =>
+      Effect.log(`presence ${event.row.userId} ${event.row.kind}`),
+    ),
+  )
+})
+```
+
+effect-spacetimedb separates public persistent table targets
+from public event-table targets in `Stdb.project(...).targets`. Use
+`Example.targets.eventTables.presenceEvent` for direct target subscriptions and
+`streamEventTable("presenceEvent")` for insert-only event streams.
+
+Event tables use native delivery semantics: an event is delivered once for each
+live native query set that covers it. If an application needs exactly one
+event-processing path, subscribe once at the app state boundary and fan out from
+that Effect stream or Atom rather than opening duplicate event-table streams in
+several consumers.
+
+
+---
+
+# Source: /core-concepts/tables/file-storage
+
+---
+draft: false
+title: File Storage
+description: Link to SpacetimeDB file-storage docs; effect-spacetimedb has no extra API.
+sidebar:
+  order: 9
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/file-storage" target="_blank" rel="noopener noreferrer">SpacetimeDB: File Storage ↗</a>
+
+effect-spacetimedb does not add a file-storage authoring API. Follow the
+SpacetimeDB documentation for runtime file storage behavior and keep only the
+metadata that belongs in module tables in `Stdb.table(...)`.
+
+Status: link-only; no Effect-specific delta.
+
+
+---
+
+# Source: /core-concepts/tables/indexes
+
+---
+draft: false
+title: Indexes
+description: Declare btree, hash, and direct indexes from table columns.
+sidebar:
+  order: 3
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/indexes" target="_blank" rel="noopener noreferrer">SpacetimeDB: Indexes ↗</a>
+
+Single-column indexes can live on the column. Composite indexes live in the
+table's `indexes` callback.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const playerScore = Stdb.table("player_score", {
+  public: true,
+  columns: {
+    id: Stdb.u64().primaryKey().autoInc(),
+    playerId: Stdb.string().index("hash"),
+    score: Stdb.u32().index("direct"),
+    season: Stdb.string(),
+  },
+  indexes: (columns) => [
+    Stdb.index("player_score_season_score_idx", [
+      columns.season,
+      columns.score,
+    ], { algorithm: "btree" }),
+  ],
+})
+```
+
+effect-spacetimedb accepts the native algorithms
+`"btree"`, `"hash"`, and `"direct"` at both declaration sites. `hash` indexes
+are point-only; `direct` indexes are range-capable.
+
+
+---
+
+# Source: /core-concepts/tables/performance
+
+---
+draft: false
+title: Performance
+description: Link to SpacetimeDB table-performance docs; effect-spacetimedb has no extra runtime semantics.
+sidebar:
+  order: 10
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/performance" target="_blank" rel="noopener noreferrer">SpacetimeDB: Performance ↗</a>
+
+Table performance is a SpacetimeDB runtime concern. effect-spacetimedb exposes
+the native index algorithms through `.index(...)` and `Stdb.index(...)`, but it
+does not change the host query planner or storage semantics.
+
+For authoring syntax, see [Indexes](/core-concepts/tables/indexes).
+
+
+---
+
+# Source: /core-concepts/tables/scheduled-tables
+
+---
+draft: false
+title: Scheduled Tables
+description: Use scheduled tables and scheduled reducers or procedures.
+sidebar:
+  order: 3
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/schedule-tables" target="_blank" rel="noopener noreferrer">SpacetimeDB: Scheduled Tables ↗</a>
+
+Scheduled tables are private by default and reserve `scheduledId` and
+`scheduledAt`. A scheduled endpoint receives `{ data: table.row }`.
+
+`Stdb.scheduledTable(name, options)` auto-injects two columns before user
+columns:
+
+- `scheduledId`: a `u64().primaryKey().autoInc()` column with native column name
+  `scheduled_id`.
+- `scheduledAt`: a `ScheduleAt` column with native column name `scheduled_at`.
+
+Authors cannot also declare `scheduledId`, `scheduledAt`, `scheduled_id`, or
+`scheduled_at`; the constructor rejects those reserved names. A custom
+`scheduledId` value type may be supplied through `options.scheduledId`, but it
+must still be a `u64` value type and is still marked primary-key and auto-inc.
+
+Scheduled tables default to `public: false`, the same local default as
+`Stdb.table(...)`, and they honor an explicit `public: true`. User columns are
+spread directly into the table shape after the injected scheduler columns; there
+is no `{ data }` wrapper in the table row shape.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const reminderSchedule = Stdb.scheduledTable("reminderSchedule", {
+  columns: {
+    note: Stdb.string(),
+  },
+})
+
+const Reminders = Stdb.StdbGroup.make("Reminders").add(
+  Stdb.StdbFn.scheduledProcedure("reminderFire", {
+    table: reminderSchedule,
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app")
+  .addTables(reminderSchedule)
+  .add(Reminders)
+
+const RemindersLive = Stdb.StdbBuilder.group(Module, "Reminders", {
+  reminderFire: Effect.fn(function* ({ data }) {
+    yield* Effect.log(`reminder: ${data.note}`)
+  }),
+})
+```
+
+To seed schedule rows inside a reducer or transaction body, use the generated
+`.schedule(...)` helper. It fills the auto-increment sentinel for you.
+
+```ts
+yield* db.reminderSchedule.schedule({
+  scheduledAt: Stdb.ScheduleAt.interval("5 minutes"),
+  note: "wake up",
+})
+```
+
+| Schedule form | Host behavior |
+| --- | --- |
+| `Stdb.ScheduleAt.at(...)` or `after(...)` | One-shot row. Reducers consume it after execution; procedures consume it before execution. |
+| `Stdb.ScheduleAt.interval(...)` | Row persists and re-fires until deleted. |
+
+For fixed wall-clock or tick alignment, prefer self-rescheduling one-shot rows:
+handle a `Time` row, insert the next `Time` row, then return. Use `Interval`
+when simple persistent re-fire spacing is enough.
+
+`Stdb.scheduledTable(...)` creates the reserved
+`scheduled_id`/`scheduled_at` columns and `StdbFn.scheduledReducer(...)` or
+`StdbFn.scheduledProcedure(...)` binds exactly one typed handler to the table.
+
+## Validation Boundaries
+
+The TypeScript DSL rejects raw schemas in SATS positions at compile time by
+requiring opaque value types. Cross-object module invariants are validated by
+`validateModule` / `Stdb.validate`:
+
+| Invariant | Compile-time | Runtime validation diagnostic |
+| --- | ---: | --- |
+| Raw Effect schema in a SATS position | Yes | `UnsupportedTypeDescriptor` remains as a malformed-spec fallback |
+| Duplicate table/view relation names | No | `DuplicateRelationName` |
+| Duplicate reducer/procedure/HTTP/view/lifecycle export names | No | `DuplicateCallableName` |
+| Reserved `__http_router__` export name | No | `DuplicateCallableName` |
+| Non-canonical declared names under canonical naming policy | No | `NonCanonicalDeclaredName` |
+| Reserved declared error tags | No | `ReservedDeclaredErrorTag` |
+| Duplicate declared error tags | No | `DuplicateDeclaredErrorTag` |
+| String literal authored/generated-client tag collisions | No | `LiteralTagCollision` |
+
+Broad cross-group uniqueness checks stay in runtime validation because lifting
+large cross-object comparisons into the type system can hit TypeScript
+instantiation-depth limits. Smaller bounded checks, such as reserved names and
+casing policy, are better candidates for future compile-time feedback.
+
+
+---
+
+# Source: /getting-started
+
+---
+draft: false
+title: Getting Started
+description: Install effect-spacetimedb, write a minimal module, build it, and generate a client.
+sidebar:
+  order: 1
+---
+
+import { TabItem, Tabs } from "@astrojs/starlight/components";
+
+`effect-spacetimedb` is an Effect-first authoring layer for SpaceTimeDB modules.
+You describe the module once, implement handlers with scoped Effect services,
+then build native module exports and generated clients from the same contract.
+
+## Install
+
+<Tabs syncKey="package-manager">
+  <TabItem label="npm">
+
+    ```sh
+    npm install effect-spacetimedb effect@4.0.0-beta.93 spacetimedb@2.6.1
+    ```
+
+  </TabItem>
+  <TabItem label="pnpm">
+
+    ```sh
+    pnpm add effect-spacetimedb effect@4.0.0-beta.93 spacetimedb@2.6.1
+    ```
+
+  </TabItem>
+  <TabItem label="bun">
+
+    ```sh
+    bun add effect-spacetimedb effect@4.0.0-beta.93 spacetimedb@2.6.1
+    ```
+
+  </TabItem>
+</Tabs>
+
+:::caution[Version match]
+
+The SpaceTimeDB CLI version must match the `spacetimedb` package version your
+project depends on — `spacetime build` and `spacetime generate` read a
+version-specific module format:
+
+```sh
+spacetime --version   # must match your installed `spacetimedb` package
+```
+
+If several CLI versions are installed, make sure the matching `spacetime` is the
+one on your `PATH`, or invoke it by full path in your build scripts.
+
+:::
+
+## Minimal Module
+
+The same module — a `user` table and a `user_upsert` reducer — in
+effect-spacetimedb and in the native SpaceTimeDB SDK:
+
+<Tabs syncKey="impl">
+  <TabItem label="effect-spacetimedb">
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+import * as Stdb from "effect-spacetimedb"
+import { build } from "effect-spacetimedb/server-compiler"
+
+// Branded + validated id. In the native SDK this column is just `string`.
+const UserId = Schema.String.pipe(
+  Schema.minLength(1),
+  Schema.maxLength(64),
+  Schema.brand("UserId"),
+)
+
+const user = Stdb.table("user", {
+  public: true,
+  columns: {
+    // The Effect schema IS the column's value type, so the brand and the
+    // length validation flow through to handlers and generated clients.
+    id: Stdb.string(UserId).primaryKey(),
+    name: Stdb.string(),
+  },
+})
+
+// camelCase names lower to snake_case on the wire (userUpsert -> user_upsert).
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("userUpsert", {
+    // Params are validated by the same schema; the native SDK accepts any string.
+    params: Stdb.struct({
+      id: Stdb.string(UserId),
+      name: Stdb.string(),
+    }),
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const { Db } = Module
+
+const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
+  userUpsert: (args) =>
+    Effect.gen(function* () {
+      const db = yield* Db
+      yield* db.user.insert(args)
+    }),
+})
+
+export const compiled = build(Module, [UsersLive])
+export const ModuleExports = compiled.exportGroup()
+export default compiled.schema
+```
+
+  </TabItem>
+  <TabItem label="Native SDK">
+
+```ts
+import { schema, table, t } from "spacetimedb/server"
+
+const spacetime = schema({
+  user: table(
+    { public: true },
+    { id: t.string().primaryKey(), name: t.string() },
+  ),
+})
+
+export const user_upsert = spacetime.reducer(
+  "user_upsert",
+  { id: t.string(), name: t.string() },
+  (ctx, { id, name }) => {
+    ctx.db.user.insert({ id, name })
+  },
+)
+
+export default spacetime
+```
+
+  </TabItem>
+</Tabs>
+
+The authoring flow is:
+
+1. Declare value types, tables, and endpoint groups.
+2. Assemble a module with `StdbModule.make(...).addTables(...).add(...)`.
+3. Implement each group with `StdbBuilder.group(...)`.
+4. Build the native module export with `build(...)` from
+   `effect-spacetimedb/server-compiler`.
+
+## Dev Loop
+
+Build modules with the native SpaceTimeDB CLI. Put the build and client
+generation commands behind package scripts:
+
+```json
+{
+  "scripts": {
+    "build": "spacetime build --module-path .",
+    "generate-client": "spacetime generate --lang typescript --js-path ./dist/bundle.js --out-dir ./src/generated --yes"
+  }
+}
+```
+
+Then run the scripts from the module package:
+
+```sh
+bun run build
+bun run generate-client
+```
+
+:::tip
+
+Use `build` before publishing a module and `generate-client` after changing the
+module contract.
+
+:::
+
+:::note
+
+Plain `spacetime generate` is the default and its `DbConnection` can be passed
+directly to the Effect client. Projects that do not want generated TypeScript in
+their stricter type graph can use the published quarantined artifact pipeline
+and a spec-typed facade described in [Codegen](/core-concepts/clients/codegen).
+
+:::
+
+## Testing your module off-host
+
+A module entry statically imports the host-only compiler (`build` from
+`effect-spacetimedb/server-compiler`). To import that entry in Vitest without a
+real SpaceTimeDB host, alias the host syscalls to the shipped stub and inline the
+`spacetimedb` package:
+
+```ts
+// vitest.config.ts
+import { defineConfig } from "vitest/config"
+import { spacetimeSysAlias } from "effect-spacetimedb/testing"
+
+export default defineConfig({
+  test: {
+    server: { deps: { inline: ["spacetimedb"] } },
+  },
+  resolve: {
+    alias: { ...spacetimeSysAlias },
+  },
+})
+```
+
+The stub keeps `console` and the deterministic backstops usable off-host, so
+importing or building a module entry in tests does not require a running host.
+
+## Next Pages
+
+- [Reducers](/core-concepts/functions/reducers)
+- [Tables / Column Types](/core-concepts/tables/column-types)
+- [Runtime model](/the-effect-layer/runtime-model)
+- [SpacetimeDB coverage map](/spacetimedb-coverage)
+- [Reference](/reference)
+
+
+---
+
+# Source: /reference
+
+---
+draft: false
+title: Reference
+description: Entrypoints, capability scopes, value-type helpers, and declared-error rules.
+sidebar:
+  order: 99
+---
+
+This is a curated reference for the public surface. It is intentionally
+hand-written; there is no generated API reference.
+
+## Entrypoints
+
+| Entrypoint | Use |
+| --- | --- |
+| `effect-spacetimedb` | Contract builders, value types, tables, declared errors, module assembly, builder APIs, and client projection. |
+| `effect-spacetimedb/client` | WebSocket generated-client adapters and client transport helpers. |
+| `effect-spacetimedb/server` | Advanced server primitives for integrations that bypass normal builder flow. |
+| `effect-spacetimedb/server-compiler` | Host-only compiler entrypoint for module entries; import `build` from here. |
+| `effect-spacetimedb/server-polyfills` | Standalone side-effect import for host compatibility shims; normal module entries get these through `server-compiler`. |
+| `effect-spacetimedb/dev-server` | Programmatic local `spacetimedb-standalone` orchestration for tests and tools that publish a prebuilt bundle. |
+| `effect-spacetimedb/testing` | Test-oriented helpers, package-local fixtures, and the `spacetimeSysAlias` preset for off-host server imports. |
+| `effect-spacetimedb/testing/spacetime-sys` | Direct `spacetime:sys` host-surface stub for off-host module imports. |
+
+Normal module authors usually need only `effect-spacetimedb` and, for WebSocket
+sessions, `effect-spacetimedb/client`.
+
+## Capability Scoping
+
+| Scope | Allowed accessors |
+| --- | --- |
+| reducer, lifecycle | `Db`, `ReducerCtx`, `MutationCtx` |
+| procedure outside a transaction | platform `Http`, `Tx`, `ProcedureCtx` |
+| `Tx.run(...)` or `HttpTx.run(...)` body | `Db`, `MutationCtx`, transaction context |
+| HTTP handler | `HttpTx`, `HttpHandlerCtx` |
+| sender view | `ReadonlyDb`, `From`, `ViewCtx` |
+| anonymous view | `ReadonlyDb`, `From`, `AnonymousViewCtx` |
+
+Use `MutationCtx` for helpers that must run in both reducers and transaction
+bodies. Do not yield accessors from another module.
+
+## Value-Type Cheat Sheet
+
+| Helper | Meaning |
+| --- | --- |
+| `Stdb.string(schema?)` | SATS string with optional Effect schema branding or checks. |
+| `Stdb.u8` / `u16` / `u32` / `u64` | Unsigned integer widths with constructor-owned bounds. |
+| `Stdb.u128` / `u256` | Wide unsigned integer widths backed by `bigint`. |
+| `Stdb.i8` / `i16` / `i32` / `i64` | Signed integer widths. |
+| `Stdb.i128` / `i256` | Wide signed integer widths backed by `bigint`. |
+| `Stdb.f32()` / `f64()` | Floating-point value types. |
+| `Stdb.bigint()` | `bigint` authored value lowered to a SATS string for JSON-safe large numbers. |
+| `Stdb.bool()` | Boolean value. |
+| `Stdb.bytes()` | `Uint8Array` byte array. |
+| `Stdb.identity()` / `connectionId()` | Native SpacetimeDB identity and connection id values. |
+| `Stdb.timestamp()` / `timeDuration()` / `uuid()` | Native timestamp, duration, and UUID values. |
+| `Stdb.scheduleAt()` | Scheduled-table `scheduledAt` column value type. |
+| `Stdb.option(T)` | Nullable value type, decoded as `T` or `undefined`. |
+| `Stdb.optional(T)` | Optional struct field annotation. |
+| `T.optional()` | Optional table column annotation. |
+| `Stdb.array(T)` | SATS array/list. |
+| `Stdb.struct({...})` | Named object shape for params, rows, returns, and errors. |
+| `Stdb.sum({...})` | Tagged union with payload variants. |
+| `T.named("Name")` | Set the generated SATS/client type name for an anonymous struct, sum, or string-literal enum; the default name is content-addressed. |
+| `Stdb.enum("A", "B")` / `enumType(...)` | Unit-variant SATS enum; prefer namespace form because `enum` cannot be named-imported. |
+| `Stdb.unit()` | Unit value for empty scheduled procedure returns, result branches, and sum payloads. |
+| `Stdb.literal(...)` | String, number, or boolean literal values; string literals lower to enums. |
+| `Stdb.result(Ok, Err)` | Result envelope value type. |
+| `Stdb.dbCodec(T)` / `httpCodec(T)` / `wsCodec(T)` | Transport codecs for DB/host, HTTP JSON, and generated WebSocket client shapes. |
+| `Stdb.lazy(() => T)` | Recursive value type reference. |
+| `Stdb.custom(schema, { type })` | Custom schema with explicit SpaceTimeDB type lowering. |
+
+See [Value Types](/the-effect-layer/value-types) for the canonical catalog with
+TypeScript values, SATS lowering, bounds, and transport encoding notes.
+
+## Authoring API
+
+| Surface | Use |
+| --- | --- |
+| `Stdb.table(...)` / `scheduledTable(...)` | Declare persistent, event, and scheduled tables. |
+| `Stdb.index(...)` / `unique(...)` | Declare table indexes and uniqueness constraints. |
+| `Stdb.StdbFn.reducer(...)` / `procedure(...)` / `scheduledReducer(...)` / `scheduledProcedure(...)` / `view(...)` / `anonymousView(...)` | Declare callable and view endpoints. |
+| `Stdb.StdbGroup.make(...)` / `Stdb.StdbHttpGroup.make(...)` | Group reducers/procedures/views and HTTP routes. |
+| `Stdb.StdbHttp.*` | Declare typed and raw HTTP handlers. |
+| `Stdb.StdbModule.make(...)` | Assemble tables, callable groups, HTTP groups, lifecycle, and settings. |
+| `Stdb.StdbBuilder.group(...)` / `groupChecked(...)` / `groupPrechecked(...)` / `lifecycle(...)` | Attach Effect implementations to an assembled module. |
+| `Stdb.project(Module)` | Build client projections, targets, and generated-client adapters. |
+| `Stdb.toHttpApi(Module)` / `httpApiBaseUrl(...)` | Project typed HTTP routes into Effect `HttpApi`. |
+| `Stdb.ScheduleAt.*` | Build scheduled table `scheduledAt` values. |
+| `Stdb.validate(...)` / `assertValid(...)` / `formatModuleDiagnostics(...)` | Run module validation manually. |
+
+Builder impl values are sealed. `GroupImpl<Name, RuntimeR, ModuleName>` and
+`LifecycleImpl<Hooks, RuntimeR, ModuleName>` expose only build-time group,
+lifecycle, runtime-requirement, and module-identity phantoms; handler
+definitions are private to the builder pipeline. The module-name parameter
+defaults to `string` so older two-argument annotations still compile, but
+`build(...)` and `plan(...)` reject widened impl annotations. Keep
+implementation arrays inferred with `as const` when storing them before
+`build(...)`.
+
+`groupPrechecked(...)` returns `GroupImpl<Name, never>` for handler records that
+already satisfy `GroupCheckedHandlers<Module, Name>`. That annotation allows only
+the server-context services valid for each endpoint kind and the current module's
+accessors. Cross-module accessors are rejected through the Effect requirements
+channel; the legacy `effect-spacetimedb/server` section/single-handler
+validators remain module-blind for compatibility, while transaction helpers keep
+branded residual runner requirements for transaction-family coherence. Use
+`group(...)` when a handler intentionally requires a custom service and provide a
+runtime to `build(...)`.
+
+## Declared Error Catalog
+
+Declared errors are created with a namespace:
+
+```ts
+const AppErrors = Stdb.errors.namespace("App")({
+  UserMissing: Stdb.error({ userId: Stdb.string(UserId) }, { status: 404 }),
+})
+```
+
+The catalog value supplies:
+
+| Surface | Purpose |
+| --- | --- |
+| generated classes | Fail directly from handlers with typed payloads. |
+| `.schema` | Decode and encode the declared error envelope. |
+| `.tags` | Known wire tags for client and route projection. |
+| `.pick(...)` | Narrow a catalog to selected declared errors. |
+
+:::caution
+
+Only Effect failures are encoded as declared errors. Defects remain defects.
+
+:::
+
+## Runtime And Client Error Types
+
+| Type | Source |
+| --- | --- |
+| `ReducerAsyncNotAllowedError` | Async, promises, timers, microtasks, or `Effect.sleep` in synchronous server handlers. |
+| `ReducerGlobalRandomNotAllowedError` | Global `Math.random` use in guarded server runtime. |
+| `ReducerWallClockNotAllowedError` | Ambient `Date.now()` or no-argument `new Date()` in guarded server runtime. |
+| `StdbHostCallError` | Generic host ABI call failure. |
+| `StdbUniqueAlreadyExistsError` / `StdbNoSuchRowError` / `StdbAutoIncOverflowError` / `StdbScheduleDelayTooLongError` | Typed native host failures. |
+| `StdbDecodeError` | Contract decode failure. |
+| `CallFailure<E>` / `RawCallFailure<E>` | Projected client call failure unions. |
+| `RemoteRejectedError` / `TransportError` / `DomainCallError<E>` | Projected client remote, transport, and raw declared-error failures. |
+
+
+---
+
+# Source: /spacetimedb-coverage
+
+---
+draft: false
+title: SpacetimeDB Coverage
+description: Manual upstream-to-effect-spacetimedb Core Concepts coverage map.
+sidebar:
+  order: 98
+---
+
+This map tracks the latest SpacetimeDB Core Concepts taxonomy against these docs.
+Every upstream topic should have exactly one row.
+
+| Upstream Core Concept topic | Upstream link | Our status | Our page / note |
+| --- | --- | --- | --- |
+| Core Concepts index | [SpacetimeDB -> Core Concepts](https://spacetimedb.com/docs/core-concepts) | mirrored | Covered by the [Core Concepts sidebar](/core-concepts/tables/column-types) and this map. |
+| Databases | [SpacetimeDB -> Databases](https://spacetimedb.com/docs/databases) | mirrored | Section root represented by the Databases sidebar group. |
+| Databases / Transactions & Atomicity | [SpacetimeDB -> Transactions & Atomicity](https://spacetimedb.com/docs/databases/transactions-atomicity) | mirrored | [Transactions & Atomicity](/core-concepts/databases/transactions-atomicity) |
+| Databases / spacetime dev | [SpacetimeDB -> spacetime dev](https://spacetimedb.com/docs/databases/developing) | mirrored | [Dev & Publish](/core-concepts/databases/dev-publish) |
+| Databases / spacetime publish | [SpacetimeDB -> spacetime publish](https://spacetimedb.com/docs/databases/building-publishing) | mirrored | [Dev & Publish](/core-concepts/databases/dev-publish) |
+| Databases / Cheat Sheet | [SpacetimeDB -> Cheat Sheet](https://spacetimedb.com/docs/databases/cheat-sheet) | mirrored | Covered by [Getting Started](/getting-started) and [Reference](/reference); no separate Effect delta. |
+| Databases / Migrations / Automatic Migrations | [SpacetimeDB -> Automatic Migrations](https://spacetimedb.com/docs/databases/automatic-migrations) | mirrored | [Migrations](/core-concepts/databases/migrations) |
+| Databases / Migrations / Incremental Migrations | [SpacetimeDB -> Incremental Migrations](https://spacetimedb.com/docs/databases/incremental-migrations) | mirrored | [Migrations](/core-concepts/databases/migrations) |
+| Functions | [SpacetimeDB -> Functions](https://spacetimedb.com/docs/functions) | mirrored | Section root represented by the Functions sidebar group. |
+| Functions / Reducers | [SpacetimeDB -> Reducers](https://spacetimedb.com/docs/functions/reducers) | mirrored | [Reducers](/core-concepts/functions/reducers) |
+| Functions / Reducers / Reducer Context | [SpacetimeDB -> Reducer Context](https://spacetimedb.com/docs/functions/reducers/reducer-context) | mirrored | [Reducer Context](/core-concepts/functions/reducer-context) |
+| Functions / Reducers / Lifecycle | [SpacetimeDB -> Lifecycle](https://spacetimedb.com/docs/functions/reducers/lifecycle) | mirrored | [Lifecycle](/core-concepts/functions/lifecycle) |
+| Functions / Reducers / Error Handling | [SpacetimeDB -> Error Handling](https://spacetimedb.com/docs/functions/reducers/error-handling) | mirrored | [Error Handling](/core-concepts/functions/error-handling) |
+| Functions / Procedures | [SpacetimeDB -> Procedures](https://spacetimedb.com/docs/functions/procedures) | mirrored | [Procedures](/core-concepts/functions/procedures) |
+| Functions / Views | [SpacetimeDB -> Views](https://spacetimedb.com/docs/functions/views) | mirrored | [Views](/core-concepts/functions/views) |
+| Functions / HTTP Handlers | [SpacetimeDB -> Functions](https://spacetimedb.com/docs/functions) | mirrored | [HTTP Handlers](/core-concepts/functions/http-handlers); a dedicated upstream HTTP handlers page is not published yet. |
+| Tables | [SpacetimeDB -> Tables](https://spacetimedb.com/docs/tables) | mirrored | Section root represented by the Tables sidebar group. |
+| Tables / Column Types | [SpacetimeDB -> Column Types](https://spacetimedb.com/docs/tables/column-types) | mirrored | [Column Types](/core-concepts/tables/column-types) |
+| Tables / File Storage | [SpacetimeDB -> File Storage](https://spacetimedb.com/docs/tables/file-storage) | mirrored | [File Storage](/core-concepts/tables/file-storage) |
+| Tables / Auto-Increment | [SpacetimeDB -> Auto-Increment](https://spacetimedb.com/docs/tables/auto-increment) | mirrored | [Auto-Increment](/core-concepts/tables/auto-increment) |
+| Tables / Constraints | [SpacetimeDB -> Constraints](https://spacetimedb.com/docs/tables/constraints) | mirrored | [Constraints](/core-concepts/tables/constraints) |
+| Tables / Default Values | [SpacetimeDB -> Default Values](https://spacetimedb.com/docs/tables/default-values) | mirrored | [Default Values](/core-concepts/tables/default-values) |
+| Tables / Indexes | [SpacetimeDB -> Indexes](https://spacetimedb.com/docs/tables/indexes) | mirrored | [Indexes](/core-concepts/tables/indexes) |
+| Tables / Access Permissions | [SpacetimeDB -> Access Permissions](https://spacetimedb.com/docs/tables/access-permissions) | not-supported | [Access Permissions](/core-concepts/tables/access-permissions); RLS / `clientVisibilityFilter` is not supported. |
+| Tables / Scheduled Tables | [SpacetimeDB -> Scheduled Tables](https://spacetimedb.com/docs/tables/schedule-tables) | mirrored | [Scheduled Tables](/core-concepts/tables/scheduled-tables) |
+| Tables / Event Tables | [SpacetimeDB -> Event Tables](https://spacetimedb.com/docs/tables/event-tables) | mirrored | [Event Tables](/core-concepts/tables/event-tables) |
+| Tables / Performance | [SpacetimeDB -> Performance](https://spacetimedb.com/docs/tables/performance) | mirrored | [Performance](/core-concepts/tables/performance) |
+| Clients / Subscriptions | [SpacetimeDB -> Subscriptions](https://spacetimedb.com/docs/clients/subscriptions) | mirrored | [Subscriptions](/core-concepts/subscriptions) |
+| Clients / Subscriptions / Semantics | [SpacetimeDB -> Subscription Semantics](https://spacetimedb.com/docs/clients/subscriptions/semantics) | mirrored | [Subscriptions](/core-concepts/subscriptions) |
+| Authentication | [SpacetimeDB -> Authentication](https://spacetimedb.com/docs/core-concepts/authentication) | not-supported | effect-spacetimedb does not wrap SpacetimeAuth/Auth0/Clerk/BetterAuth; authenticate through the native SpacetimeDB client/runtime. |
+| Authentication / SpacetimeAuth | [SpacetimeDB -> SpacetimeAuth](https://spacetimedb.com/docs/core-concepts/authentication/spacetimeauth/) | not-supported | No Effect-specific API. |
+| Authentication / SpacetimeAuth / Creating a Project | [SpacetimeDB -> Creating a Project](https://spacetimedb.com/docs/core-concepts/authentication/spacetimeauth/creating-a-project) | not-supported | No Effect-specific API. |
+| Authentication / SpacetimeAuth / Configuring a Project | [SpacetimeDB -> Configuring a Project](https://spacetimedb.com/docs/core-concepts/authentication/spacetimeauth/configuring-a-project) | not-supported | No Effect-specific API. |
+| Authentication / SpacetimeAuth / Testing | [SpacetimeDB -> Testing](https://spacetimedb.com/docs/core-concepts/authentication/spacetimeauth/testing) | not-supported | No Effect-specific API. |
+| Authentication / SpacetimeAuth / React Integration | [SpacetimeDB -> React Integration](https://spacetimedb.com/docs/core-concepts/authentication/spacetimeauth/react-integration) | not-supported | No Effect-specific API. |
+| Authentication / SpacetimeAuth / Steam | [SpacetimeDB -> Steam](https://spacetimedb.com/docs/core-concepts/authentication/spacetimeauth/steam) | not-supported | No Effect-specific API. |
+| Authentication / Auth0 | [SpacetimeDB -> Auth0](https://spacetimedb.com/docs/core-concepts/authentication/Auth0) | not-supported | No Effect-specific API. |
+| Authentication / Clerk | [SpacetimeDB -> Clerk](https://spacetimedb.com/docs/core-concepts/authentication/Clerk) | not-supported | No Effect-specific API. |
+| Authentication / BetterAuth | [SpacetimeDB -> Authentication](https://spacetimedb.com/docs/core-concepts/authentication) | not-supported | No dedicated upstream BetterAuth page is present in the live sitemap; no Effect-specific API. |
+| Authentication / Usage | [SpacetimeDB -> Usage](https://spacetimedb.com/docs/core-concepts/authentication/usage) | not-supported | No Effect-specific API. |
+| Clients | [SpacetimeDB -> Clients](https://spacetimedb.com/docs/clients) | mirrored | Section root represented by the Clients sidebar group. |
+| Clients / Codegen | [SpacetimeDB -> Codegen](https://spacetimedb.com/docs/clients/codegen) | mirrored | [Codegen](/core-concepts/clients/codegen) |
+| Clients / Connection | [SpacetimeDB -> Connection](https://spacetimedb.com/docs/clients/connection) | mirrored | [Connection](/core-concepts/clients/connection) |
+| Clients / API | [SpacetimeDB -> API](https://spacetimedb.com/docs/clients/api) | mirrored | [SDK API](/core-concepts/clients/sdk-api) |
+| Clients / Rust | [SpacetimeDB -> Rust](https://spacetimedb.com/docs/clients/rust) | not-supported | effect-spacetimedb targets TypeScript/Effect. |
+| Clients / C# | [SpacetimeDB -> C#](https://spacetimedb.com/docs/clients/c-sharp) | not-supported | effect-spacetimedb targets TypeScript/Effect. |
+| Clients / TypeScript | [SpacetimeDB -> TypeScript](https://spacetimedb.com/docs/clients/typescript) | mirrored | [Connection](/core-concepts/clients/connection) and [SDK API](/core-concepts/clients/sdk-api) cover the TypeScript Effect delta. |
+| Clients / Unreal | [SpacetimeDB -> Unreal](https://spacetimedb.com/docs/clients/unreal) | not-supported | effect-spacetimedb targets TypeScript/Effect. |
+| Effect Layer / Value-Type Design | N/A | native | [Value-Type Design](/the-effect-layer/value-type-design) |
+| Effect Layer / Value Representations | N/A | native | [Value Representations](/the-effect-layer/value-representations) |
+| Effect Layer / Value Types | N/A | native | [Value Types](/the-effect-layer/value-types) |
+| Effect Layer / Option vs Optional | N/A | native | [Option vs Optional](/the-effect-layer/option-vs-optional) |
+| Effect Layer / Runtime Model | N/A | native | [Runtime Model](/the-effect-layer/runtime-model) |
+| Effect Layer / Randomness & Determinism | N/A | native | [Randomness & Determinism](/the-effect-layer/randomness-and-determinism) |
+| Effect Layer / Migrating From Native SDK | N/A | native | [Migrating From Native SDK](/the-effect-layer/migrating-from-native-sdk) |
+
+
+---
+
+# Source: /the-effect-layer/migrating-from-native-sdk
+
+---
+draft: false
+title: Migrating From Native SDK Shape
+description: Move from native SpaceTimeDB module code to effect-spacetimedb contracts incrementally.
+sidebar:
+  order: 8
+---
+
+import { TabItem, Tabs } from "@astrojs/starlight/components";
+
+:::tip
+
+You do not need to rewrite a whole module at once. Start by modeling the module
+contract, then move handlers behind the typed builder group by group.
+
+:::
+
+## The Same Module, Both Ways
+
+The native module and the equivalent effect-spacetimedb contract — declare the
+shape, then implement handlers behind the typed group:
+
+<Tabs syncKey="impl">
+  <TabItem label="Native SDK">
+
+```ts
+import { schema, table, t } from "spacetimedb/server"
+
+const spacetime = schema({
+  user: table(
+    { public: true },
+    { id: t.string().primaryKey(), name: t.string() },
+  ),
+})
+
+export const user_upsert = spacetime.reducer(
+  "user_upsert",
+  { id: t.string(), name: t.string() },
+  (ctx, { id, name }) => {
+    ctx.db.user.insert({ id, name })
+  },
+)
+
+export default spacetime
+```
+
+  </TabItem>
+  <TabItem label="effect-spacetimedb">
+
+```ts
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+// 1. declare the contract
+const user = Stdb.table("user", {
+  public: true,
+  columns: {
+    id: Stdb.string().primaryKey(),
+    name: Stdb.string(),
+  },
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("user_upsert", {
+    params: Stdb.struct({ id: Stdb.string(), name: Stdb.string() }),
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const { Db } = Module
+
+// 2. implement handlers behind the typed group
+const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
+  user_upsert: (args) =>
+    Effect.gen(function* () {
+      const db = yield* Db
+      yield* db.user.insert(args)
+    }),
+})
+```
+
+  </TabItem>
+</Tabs>
+
+## Native Shape To Contract Shape
+
+| Native concept | effect-spacetimedb concept |
+| --- | --- |
+| reducer function export | `StdbFn.reducer(...)` in a callable group |
+| procedure function export | `StdbFn.procedure(...)` in a callable group |
+| table builder | `Stdb.table(...)` bound to a variable |
+| scheduled table callback | `StdbFn.scheduledReducer(...)` or `scheduledProcedure(...)` |
+| HTTP handler export | `StdbHttpGroup` plus `StdbBuilder.group(...)` |
+
+## Suggested Order
+
+1. Move schemas and table declarations into leaf files.
+2. Declare groups without changing runtime behavior.
+3. Assemble a module and destructure the typed accessors.
+4. Port handlers one group at a time.
+5. Generate the client and replace ad hoc call sites with projected clients.
+
+Keep the runtime constraints in mind: module handlers must remain synchronous,
+deterministic, and transactional. Network calls, timers, and secrets belong
+outside reducers and are passed in as arguments or handled by external services.
+
+
+---
+
+# Source: /the-effect-layer/option-vs-optional
+
+---
+draft: false
+title: Stdb.option vs Stdb.optional
+description: Choose value nullability or field optionality intentionally.
+sidebar:
+  order: 6
+---
+
+`Stdb.option(T)` is a nullable value type. Its decoded TypeScript value is
+`T | undefined`, and its SATS wire type is `option<T>`. Use it anywhere a value
+type is allowed: arguments, array elements, table columns, nested types, and
+struct fields. In a struct field, the key is still required.
+
+`Stdb.optional(T)` and `.optional()` are field or column optionality annotations.
+They mean the struct field or table column itself may be omitted. In struct and
+callable param fields they lower to the same SATS `option<T>` wire type as
+`Stdb.option(T)`.
+
+Rule of thumb:
+
+- Use `Stdb.option` for standalone nullable values and fields that are always
+  present but may be none.
+- Use `Stdb.optional` or `.optional()` when the property or column may be
+  omitted.
+
+The wire shape is the same for struct fields; the TypeScript shape differs:
+`Stdb.optional(T)` gives `x?: T`, while `Stdb.option(T)` gives
+`x: T | undefined`.
+
+
+---
+
+# Source: /the-effect-layer/randomness-and-determinism
+
+---
+draft: false
+title: Randomness And Determinism
+description: Deterministic randomness for reducers, and why it is not secret.
+sidebar:
+  order: 5
+---
+
+Reducers must be deterministic. Every replica needs to reproduce the same result
+from the same logged inputs, so module code should use host-provided time and
+randomness rather than ambient JavaScript globals.
+
+## Reducer Randomness
+
+Inside Effect-based reducers, use `Random.*` from `effect/Random`. The constrained server
+runtime wires Effect randomness to the call context's deterministic random
+stream.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Random from "effect/Random"
+
+const roll = Effect.gen(function* () {
+  const die = yield* Random.nextIntBetween(1, 6)
+  const fraction = yield* Random.next
+  return { die, fraction }
+})
+```
+
+:::caution
+
+Do not call global `Math.random` in reducers, procedures, views, or HTTP handler
+effects. Development guards replace it with a throwing stub so accidental use
+fails early.
+
+:::
+
+## Wall Clock
+
+Use the call timestamp supplied by the current context instead of ambient clock
+globals. In guarded development runs, `Date.now()` and no-argument `new Date()`
+throw `ReducerWallClockNotAllowedError`; `Math.random` throws
+`ReducerGlobalRandomNotAllowedError`; suspended Effects, promises, timers, and
+microtasks throw `ReducerAsyncNotAllowedError`.
+
+The Effect clock is wired to the same transaction timestamp, so `Effect.Clock`
+and `DateTime.now` are deterministic inside server handlers.
+
+## UUID Helpers
+
+Reducer, transaction, and HTTP handler contexts expose deterministic UUID
+helpers. Use `ctx.newUuidV4()` and `ctx.newUuidV7()` when a row needs a stable
+identifier produced inside server module code.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+declare const Module: Stdb.AnyStdbModule
+
+const { ReducerCtx } = Module
+
+const ids = Effect.gen(function* () {
+  const ctx = yield* ReducerCtx
+  return {
+    randomId: ctx.newUuidV4(),
+    timeSortableId: ctx.newUuidV7(),
+  }
+})
+```
+
+## Runtime Wiring
+
+The constrained server runtime wires `Random.*` from `effect/Random` to the
+current SpaceTimeDB call context through `ctx.random`, so helpers such as
+`Random.next`, `Random.nextIntBetween`, and `Random.shuffle` consume the same
+deterministic stream exposed by the host.
+
+SpaceTimeDB replaces `Math.random` in module runtimes. In guarded development
+runs, `effect-spacetimedb` also replaces it with a throwing guard so accidental
+callers fail loudly in tests and CI. The runtime still installs a deterministic
+fallback as a non-semantic backstop for stray library paths, but application
+logic should not depend on it.
+
+The host random stream is deterministic and replica-reproducible. Supplying a
+developer-chosen seed makes results more reproducible, not more secret.
+
+## Strength
+
+Reducer randomness is useful for gameplay-grade choices: shuffles, loot rolls,
+procedural content, and reproducible simulations. It is not appropriate for
+secrets, tokens, authentication, anti-cheat, or any security-sensitive value.
+
+If a value must be unpredictable, generate it outside the deterministic reducer
+with a trusted source of entropy and pass it in as an argument.
+
+## Rules
+
+- Use `Random.*` from `effect/Random` inside server handlers.
+- Use context randomness only at low-level interop boundaries.
+- Never use `Math.random` for server semantics.
+- Never use ambient wall-clock reads for committed server semantics.
+- Treat reducer randomness as deterministic and non-cryptographic.
+
+
+---
+
+# Source: /the-effect-layer/runtime-model
+
+---
+draft: false
+title: Runtime Model
+description: How Effect programs run inside SpaceTimeDB's synchronous, deterministic module host.
+sidebar:
+  order: 1
+---
+
+SpaceTimeDB runs module code inside a strict host contract: each reducer,
+procedure, view, HTTP handler, and lifecycle handler is synchronous,
+run-to-completion, single-transaction where applicable, and deterministic.
+`effect-spacetimedb` runs Effect programs inside that contract rather than
+pretending the module runtime is a normal JavaScript environment.
+
+## Synchronous Effects Only
+
+:::caution
+
+Handler effects must complete in one synchronous pass. Do not use promises,
+`async` functions, timers, `queueMicrotask`, or `Effect.sleep` in server module
+handlers. Development guards make these operations fail loudly so code that
+would suspend the module host is caught early.
+
+:::
+
+Finalizers from scoped Effects still run synchronously before the host commits or
+rolls back, so `Effect.acquireRelease` is safe when the acquired resource is
+bounded to the current call.
+
+At the host boundary, each reducer, procedure, view, HTTP handler, and lifecycle
+handler is executed with the sync runner and `Scheduler.PreventSchedulerYield`.
+Anything that suspends the fiber surfaces as `ReducerAsyncNotAllowedError`.
+`Effect.sleep` fails with the same error in all modes. Guarded development runs
+also replace timer and microtask globals with throwing stubs so accidental use
+fails before a module is published.
+
+## Determinism
+
+Every replica must replay the same input log to the same state. Use
+`Random.*` from `effect/Random` for deterministic randomness and use the call
+timestamp for time. Do not call `Math.random`, `Date.now`, or
+`performance.now` for server semantics. See
+[Randomness & Determinism](/the-effect-layer/randomness-and-determinism) for
+the full guard and UUID-helper contract.
+
+Determinism is reproducibility, not secrecy. Generate tokens, secrets, and
+cryptographically unpredictable values outside the reducer and pass them in.
+
+The server runtime wires `Random.*` from `effect/Random` to `ctx.random`. It also
+provides the Effect clock from `ctx.timestamp`, so `Effect.Clock` and
+`DateTime.now` reflect the transaction timestamp. In guarded development runs,
+`Math.random`, `Date.now()`, and no-argument `new Date()` throw deterministic
+runtime errors; explicit conversions such as `new Date(123)`, `Date.parse`, and
+`Date.UTC` remain available.
+
+## Transactions
+
+Reducers run inside one ambient writable transaction and may yield `Db`
+directly. Procedures and HTTP handlers open transactions explicitly with `Tx` or
+`HttpTx`. Transaction bodies may be retried after optimistic commit conflicts,
+so keep them pure database work and put external side effects outside them.
+
+Only mutable transactions exist in the JavaScript host. SpaceTimeDB exposes no
+read-only transaction for procedures; a read-only transaction would be a
+type-level convention, not a host feature. A procedure that opens several
+transactions has no automatic rollback across them, so multi-step workflows need
+their own status rows and cleanup process.
+
+## Host Call Failures
+
+Host ABI calls can fail before user code gets a normal return value. Generic or
+unrecognized host failures surface as `StdbHostCallError` with the operation
+label and original cause. Four native SpaceTimeDB host errors are split out so
+handlers can branch without string-sniffing causes:
+
+- `StdbUniqueAlreadyExistsError`
+- `StdbAutoIncOverflowError`
+- `StdbNoSuchRowError`
+- `StdbScheduleDelayTooLongError`
+
+Each carries `{ op, cause }`, matching `StdbHostCallError`. Branch on a specific
+tag only when a handler has a real recovery path, such as translating a unique
+constraint collision into a declared domain error. Otherwise let the error
+propagate so the host-boundary throw keeps the operation label and original
+cause.
+
+The classifier uses native error class names rather than `instanceof`, because
+ordinary server runtime files cannot value-import `spacetimedb/server` without
+loading the host-only syscall surface. Dependency bumps should re-check the
+native server error-name surface.
+
+## Observability
+
+Tracing is disabled on the server. Effect spans are not exported from a reducer,
+and the default tracer would allocate span ids from ambient randomness, so
+server effects run with tracing off. `Effect.fn` still works; it produces a noop
+span.
+
+`Effect.log*` bridges to the host console through the runtime logger. Logs
+emitted while a reducer, procedure, HTTP handler, view, or lifecycle handler runs
+carry the module, handler, and kind. Caller-scoped handlers also annotate the
+sender identity; anonymous views and HTTP handlers omit sender.
+
+## Polyfills And Guarded Mode
+
+SpaceTimeDB's module runtime is a minimal JavaScript environment. The server
+compat layer installs small shims only when they are missing:
+
+- a deterministic `Math.random` fallback, used only as a library backstop,
+- immediate-execution timer shims and no-op clear functions.
+
+Module entrypoints import `effect-spacetimedb/server-compiler`, which installs
+the server compatibility polyfills before exposing `build`. Native
+`spacetime build` preserves that side-effectful compiler entrypoint.
+
+The constrained runtime has a production mode and a guarded development mode.
+Guarded mode is selected automatically under tests and temporarily swaps
+forbidden globals for throwing stubs for the duration of each call, restoring
+them afterward. Code that passes guarded mode behaves deterministically in the
+host.
+
+## Quick Rules
+
+- Keep handler bodies synchronous.
+- Use `Random.*` from `effect/Random`, not `Math.random`.
+- Use call timestamps, not ambient clocks.
+- Write directly in reducers; use `tx.run(...)` in procedures and HTTP handlers.
+- Keep transaction bodies idempotent and database-only.
+- Import `effect-spacetimedb/server-compiler` in module entrypoints; it installs
+  the server polyfills without a separate bundle prelude injection.
+
+
+---
+
+# Source: /the-effect-layer/value-representations
+
+---
+draft: false
+title: Value Representations
+description: Authored values, schema-encoded values, and host JavaScript values.
+sidebar:
+  order: 4
+---
+
+`effect-spacetimedb` works with three related value shapes:
+
+- **Authored Type values** are what handlers and typed clients use.
+- **Schema encoded values** are the wire side of Effect schema codecs, especially
+  for typed HTTP request and response bodies.
+- **Host JS values** are the shapes accepted by SpaceTimeDB's JavaScript host for
+  reducer arguments, table rows, lookup keys, and handler returns.
+
+The host representation is close to authored values but not identical to schema
+encoded values. The library normalizes host values before schema decoding so
+handlers can work with authored Type values.
+
+See [Value Types](/the-effect-layer/value-types) for the canonical helper
+catalog. This page focuses on transport and encoding semantics.
+
+## Compatibility Rules
+
+- Absent optional struct fields and absent `Stdb.option` fields are omitted from
+  host structs.
+- Result host input accepts `{ ok }` and `{ err }` envelopes, then normalizes
+  them to schema tagged result shapes.
+- Sum host input uses authored tagged values: `{ tag }` for unit variants and
+  `{ tag, value }` for payload variants.
+- Primitive, literal, custom, and no-descriptor leaves delegate to their schema
+  encoder.
+
+HTTP JSON has its own representation profile. It rewrites exact option
+envelopes, canonicalizes declared field names for SATS JSON, and normalizes
+responses back to declared field names where needed.
+
+## Result Envelopes
+
+Result values are the main host/schema asymmetry. Host values use `{ ok }` /
+`{ err }` envelopes, while the Effect schema codec expects tagged
+`{ tag, value }` result envelopes. DB and WebSocket host decoders normalize the
+host envelope before schema decoding, and handler return encoding emits the
+native `{ ok }` / `{ err }` shape.
+
+## Literal And Sum Tags
+
+Sum host values use authored tagged shapes: `{ tag }` for unit variants and
+`{ tag, value }` for variants with payloads.
+
+String `Stdb.literal(...)` values also use authored tags on DB/host and HTTP
+paths when the authored value is a valid SpaceTimeDB identifier. Values that are
+not valid identifiers use a generated-client-safe PascalCase SATS tag while
+decoding back to the authored value. Generated-client WebSocket calls accept the
+PascalCase convention; DB and HTTP profiles keep authored tags where SATS
+permits them.
+
+## Numeric And Binary Profiles
+
+- `u8`/`u16`/`u32` and `i8`/`i16`/`i32` are authored as `number` and checked at
+  their constructor-owned integer bounds.
+- `u64`/`u128`/`u256` and `i64`/`i128`/`i256` are authored as `bigint`, checked
+  at their fixed-width bounds, and remain `bigint` in DB and WebSocket shapes.
+- `Stdb.bigint()` is authored as `bigint` but lowers to a SATS string so large
+  arbitrary integers can move through JSON safely.
+- `Stdb.f32()` and `Stdb.f64()` use `number`. DB and generated WebSocket shapes
+  preserve native `NaN`/`Infinity`; HTTP JSON rejects non-finite values because
+  JSON has no representation for them.
+- `Stdb.bytes()` is a `Uint8Array` byte array.
+
+## Native Host Values
+
+`Stdb.timestamp()`, `Stdb.timeDuration()`, `Stdb.uuid()`,
+`Stdb.identity()`, and `Stdb.connectionId()` use the native SpacetimeDB classes
+in authored server and generated-client values. Their HTTP JSON shape is the
+schema-encoded representation produced by `Stdb.httpCodec(...)`.
+
+## HTTP JSON Profile
+
+HTTP JSON input preparation rewrites exact `{ some: value }` option envelopes,
+drops unknown struct fields, canonicalizes declared field names to snake case,
+and prepares literal and sum payloads for SATS JSON.
+
+Output normalization accepts SpacetimeDB HTTP JSON shapes, falls back to
+schema-AST normalization when a value is not in a descriptor-specific shape,
+recurses into bare options, and rebinds canonical snake-case struct fields back
+to declared field names.
+
+String literal SATS enum objects use the schema variant as the JSON object key
+or `{ tag }` value. HTTP JSON payloads emitted by this package use schema tags;
+raw SATS JSON callers should emit those same tags and deploy in the same rollout
+as any module republish that changes persisted enum schemas.
+
+## Value Codecs
+
+Use `Stdb.dbCodec(T)` for host/DB values, `Stdb.httpCodec(T)` for HTTP JSON,
+and `Stdb.wsCodec(T)` for generated WebSocket client values. The WebSocket codec
+accepts the generated client's PascalCase enum tags for sums and string
+literals, while DB and HTTP profiles keep authored tags where SATS permits them.
+
+## Single Traversal Rule
+
+Per-kind traversal logic lives in the value-type descriptor fold. Representation
+profiles are layered over that traversal so host, HTTP, and WebSocket codecs do
+not drift into independent descriptor dispatch rules.
+
+
+---
+
+# Source: /the-effect-layer/value-type-design
+
+---
+draft: false
+title: Value-Type Design
+description: Why Stdb value types are opaque wrappers around Effect schemas.
+sidebar:
+  order: 2
+---
+
+An `Stdb.*` value type wraps an Effect schema rather than being a plain schema.
+That design is deliberate: SpaceTimeDB declaration sites must reject raw Effect
+schemas at compile time, while application code still needs ordinary schemas for
+decode, encode, HTTP bodies, and domain logic.
+
+## The Two Jobs
+
+A value type must:
+
+1. Reuse an Effect schema for TypeScript values and JSON codecs.
+2. Carry SpaceTimeDB SATS information so tables, params, returns, and errors
+   lower to native types.
+
+Effect annotations preserve runtime metadata, but TypeScript cannot see whether
+a schema has a particular annotation. Phantom type markers on schemas are also
+fragile because Effect transforms rebuild schema types and strip the marker.
+
+## Why Annotations Are Not Enough
+
+Two Effect behaviors constrain the design:
+
+- **Annotations are runtime-only at the type level.** `effect-spacetimedb`
+  stores the real SATS information as schema annotations, and those annotations
+  survive transforms. But a schema with an annotation and a schema without one
+  have the same TypeScript type, so annotations alone cannot make raw schemas in
+  SATS positions a compile-time error.
+- **Schema transforms rebuild schema types.** `.pipe`, `.check`, `.brand`, and
+  `.annotate` return the canonical schema type and drop any phantom property
+  added by a cast. That is sound: the transform creates a new schema object that
+  does not carry the cast-on property at runtime.
+
+## The Trilemma
+
+Enforcing SATS positions at compile time, keeping value types as plain Effect
+schemas, and staying robust under composition are mutually exclusive:
+
+| Approach | Compile-time rejection of raw schemas | Value type is a plain Effect schema | Robust under transforms |
+| --- | --- | --- | --- |
+| Phantom marker on schema type | Yes | Yes | No; transforms strip the marker. |
+| Opaque wrapper | Yes | No; use `.schema` to unwrap. | Yes |
+| Annotations only | No; validate at module build time. | Yes | Yes |
+
+`effect-spacetimedb` chooses the opaque wrapper. The wrapper is not itself a
+schema; unwrap with `.schema` when ordinary Effect schema interop is required.
+
+This keeps one important guarantee: raw schemas are rejected in SATS positions at
+compile time. It also avoids "tag must be last" bugs where a refinement or brand
+accidentally strips a marker.
+
+## Accepted Tradeoffs
+
+- **`.schema` unwraps a value type to its Effect schema** for decode/encode,
+  `Schema.*` combinators, and HTTP request/response bodies.
+- **All refinement happens inside the constructor.** Each scalar takes either no
+  schema or one Effect schema. Branding is just `Schema.brand(...)` on the
+  passed schema, not a privileged argument.
+- **Numeric width belongs to the constructor.** `Stdb.u16()` always enforces the
+  `[0, 65535]` range because Effect range checks do not narrow the TypeScript
+  type enough for SATS width proof at the call site.
+
+## Recommended Pattern
+
+For branded domain values, keep the raw Effect schema as the source of truth and
+wrap it inline at SpaceTimeDB boundaries:
+
+```ts
+const UserId = Schema.String.pipe(Schema.brand("UserId"))
+
+Stdb.string(UserId) // table fields, params, returns, error fields
+```
+
+Avoid keeping parallel aliases such as a raw `UserId` schema and a separate
+`UserIdT` value-type wrapper for the same domain id. Wrap the domain schema at
+declaration sites. Generic, non-branded SATS scalars reused across many fields
+may be kept as value-type aliases.
+
+For generic SATS values reused across many fields, keep a value-type alias:
+
+```ts
+const ShortString = Stdb.string(Schema.String.pipe(Schema.minLength(1)))
+```
+
+Composites and rows are the value types you usually keep. A row's `.schema`
+decodes the whole row.
+
+## Literal Unions
+
+If a union exists for SpaceTimeDB use, declare it with `Stdb.literal(...)`. It
+lowers to a SATS enum on the wire and decodes to the literal TypeScript union.
+
+String literal enum tags preserve authored strings verbatim on DB/host and HTTP
+paths when the authored value is a valid SpaceTimeDB identifier. Non-identifier
+values use a generated-client-safe PascalCase tag in the SATS schema while still
+decoding to the authored value. Official generated clients expose schema
+variants through SpaceTimeDB's PascalCase convention, so
+`Stdb.literal("pending_review")` encodes as `{ tag: "pending_review" }` for DB
+and HTTP and as `{ tag: "PendingReview" }` for generated-client WebSocket calls.
+
+HTTP JSON tools should send the schema SATS tag. Existing modules with persisted
+enum columns may need a reset or hand-written migration when republished because
+changing SATS variant names changes the column type identity.
+
+Numeric `Stdb.literal(...)` values lower to `f64`; non-finite numbers and unsafe
+integers beyond `Number.MAX_SAFE_INTEGER` are rejected.
+
+If the union is a core shared domain schema also consumed by HTTP DTOs, keep
+`Stdb.custom(CoreSchema, { type: <string scalar> })` so the values have one
+source of truth. A lint rule enforces that custom inline literals do not replace
+`Stdb.literal(...)` for local SATS-only unions.
+
+## Optional Fields
+
+`Stdb.optional(...)`, table-column `.optional()`, and `Stdb.option(...)` all
+lower to SATS `option<T>` when a struct is materialized. They differ in the
+TypeScript surface: field-level optionality gives `key?: T`, while
+`Stdb.option(...)` gives a required `key: T | undefined` value. Prefer
+`Stdb.option(...)` for fields constructed from computed possibly-undefined
+values.
+
+## Alternative Design
+
+If compile-time rejection were not required, annotations-only value types would
+be simpler and more Effect-native: the value type would be a plain schema, with
+raw schemas in SATS positions caught by module validation instead of typecheck.
+This package chooses the compile-time guarantee over that simpler interop model.
+
+
+---
+
+# Source: /the-effect-layer/value-types
+
+---
+draft: false
+title: Value Types
+description: Canonical value-type helper catalog for authored TypeScript values, SATS lowering, and transport codecs.
+sidebar:
+  order: 3
+---
+
+Value types wrap Effect schemas with the SpaceTimeDB type information needed for
+tables, call params, returns, declared errors, HTTP routes, and generated
+clients.
+
+```typescript twoslash
+import * as Schema from "effect/Schema"
+import * as Stdb from "effect-spacetimedb"
+
+const UserId = Schema.String.pipe(Schema.brand("UserId"))
+
+const user = Stdb.table("user", {
+  columns: {
+    id: Stdb.string(UserId).primaryKey(),
+    level: Stdb.u32(),
+    credits: Stdb.bigint(),
+    createdAt: Stdb.timestamp(),
+  },
+})
+```
+
+Use namespace form for helpers, including `Stdb.enum(...)`; `enum` cannot be a
+named import in JavaScript.
+
+## Scalar Helpers
+
+| Helper | Authored TypeScript value | SATS lowering | Bounds / encoding |
+| --- | --- | --- | --- |
+| `Stdb.string(schema?)` | `string` or branded string | `string` | Optional schema refines the authored value. |
+| `Stdb.bool(schema?)` | `boolean` or branded boolean | `bool` | Optional schema refines the authored value. |
+| `Stdb.u8()` / `u16()` / `u32()` | `number` | unsigned integer width | Constructor checks `0..2^8-1`, `0..2^16-1`, or `0..2^32-1`. |
+| `Stdb.i8()` / `i16()` / `i32()` | `number` | signed integer width | Constructor checks `-(2^(n-1))..2^(n-1)-1`. |
+| `Stdb.u64()` / `u128()` / `u256()` | `bigint` | unsigned integer width | Constructor checks `0..2^n-1`; DB and generated-client transports keep `bigint`. |
+| `Stdb.i64()` / `i128()` / `i256()` | `bigint` | signed integer width | Constructor checks `-(2^(n-1))..2^(n-1)-1`; DB and generated-client transports keep `bigint`. |
+| `Stdb.f32()` / `f64()` | `number` | `f32` / `f64` | DB and WebSocket profiles preserve `NaN`/`Infinity`; HTTP JSON rejects non-finite numbers. |
+| `Stdb.bigint()` | `bigint` | `string` | JSON-safe arbitrary-size integer encoded through `Schema.BigIntFromString`. |
+| `Stdb.bytes()` | `Uint8Array` | byte array | Host and generated-client values are byte arrays. |
+| `Stdb.identity()` | `spacetimedb.Identity` | identity | Native identity object. |
+| `Stdb.connectionId()` | `spacetimedb.ConnectionId` | connection id | Native connection id object. |
+| `Stdb.timestamp()` | `spacetimedb.Timestamp` | timestamp | Native timestamp object, microseconds since Unix epoch. |
+| `Stdb.timeDuration()` | `spacetimedb.TimeDuration` | time duration | Native duration object, microseconds. |
+| `Stdb.scheduleAt()` | `spacetimedb.ScheduleAt` | schedule-at | Scheduled-table `scheduledAt` value type. |
+| `Stdb.uuid()` | `spacetimedb.Uuid` | UUID | Native UUID object. |
+| `Stdb.unit()` | `void` / `undefined` | unit | Empty payload marker for sums, results, and scheduled procedure returns. |
+
+`Stdb.bigint()` is not the same as the fixed-width integer helpers. Use
+`Stdb.bigint()` when the database column should be a SATS string carrying a
+JSON-safe arbitrary integer. Use `i64`/`u64`/`i128`/`u128`/`i256`/`u256` when the
+database column should be a native integer width and the authored value should
+stay a `bigint`.
+
+## Composite Helpers
+
+| Helper | Authored TypeScript value | SATS lowering | Notes |
+| --- | --- | --- | --- |
+| `Stdb.array(T)` | `ReadonlyArray<TypeOf<T>>` | array/list | Recurses through the inner value type. |
+| `Stdb.option(T)` | `TypeOf<T>` or `undefined` | `option<T>` | Present field whose value can be absent. |
+| `Stdb.optional(T)` | optional struct field | `option<T>` in structs | Produces an optional TypeScript property. |
+| `T.optional()` | optional table column | `option<T>` column | Column may be omitted on inserts. |
+| `Stdb.struct({ ... })` | object | SATS struct | Use for rows, params, returns, and declared-error payloads. Anonymous structs get a content-addressed name unless you set one with [`.named(...)`](#type-names). |
+| `Stdb.sum({ Tag: Payload })` | `{ tag, value? }` | SATS enum/sum | Unit payloads omit `value`; payload variants require `value`. Anonymous sums get a content-addressed name unless you set one with [`.named(...)`](#type-names). |
+| `Stdb.enum("A", "B")` / `enumType(...)` | tagged unit variants | SATS enum | Unit-variant sums; prefer namespace form because `enum` cannot be named-imported. |
+| `Stdb.literal(...)` | string, number, or boolean literal | string literals -> enum; numbers -> `f64`; booleans -> `bool` | String literal generated-client tags use SpaceTimeDB PascalCase. Numeric literals reject non-finite values and unsafe integers. |
+| `Stdb.result(Ok, Err)` | Effect-style result envelope | SATS result | Normalizes host `{ ok }` / `{ err }` envelopes. |
+| `Stdb.lazy(() => T)` | recursive value | lazy SATS type | Use for recursive structs or sums. |
+| `Stdb.custom(schema, { type })` | schema-authored value | lowering of `type` | Keep the SpaceTimeDB lowering explicit when wrapping custom schemas. |
+
+## Type names
+
+Anonymous `Stdb.struct(...)`, `Stdb.sum(...)`, and string-literal
+`Stdb.literal(...)` types have no author-given name, so their generated
+SATS/client type name is **content-addressed**: a stable hash of the shape such
+as `EffectSpacetimeDbStruct...`. The hash is deterministic and collision-free,
+but not readable.
+
+Set a semantic name with `.named(...)`:
+
+```ts
+Stdb.struct({ id: Stdb.string() }).named("UserView") // generated type: `UserView`
+```
+
+The identifier is emitted verbatim, so prefer PascalCase (`MembershipView`) —
+casing is not applied for you. JavaScript keywords, generated-client helper
+names (`__*`), and callable-local bindings (`params`, `returnType`) are reserved.
+When an anonymous value type is exported as a top-level reusable contract type,
+keep the `.named(...)` identifier equal to the exported `const` identifier, for
+example `export const UserView = Stdb.struct(...).named("UserView")`. Nested
+inline names can use their own semantic payload names.
+
+`table.row` is already named: it carries the table's PascalCase type name
+automatically and reuses the table's single generated type, so a `user` table's
+`user.row` lowers to the `User` type with no `.named(...)` needed. Return or nest
+it directly:
+
+```ts
+Stdb.option(user.row) // reuses the table's `User` type, not a duplicate
+```
+
+`.named(...)` is distinct from `.name(...)`: `.name(...)` sets SpacetimeDB's
+native builder column metadata and does not rename the generated type.
+
+## Codecs
+
+| Helper | Profile | When to use |
+| --- | --- | --- |
+| `Stdb.dbCodec(T)` | SpaceTimeDB host / DB shape | Low-level host interop, table rows, reducer args, and generated server values. |
+| `Stdb.httpCodec(T)` | HTTP JSON shape | Typed HTTP request and response bodies. Rejects non-finite floating-point numbers because JSON cannot carry them. |
+| `Stdb.wsCodec(T)` | Generated WebSocket client shape | Client cache rows, subscription events, and callable payloads. Sum and string-literal tags are rewritten to the generated client's PascalCase convention. |
+
+The public docs use this page as the helper catalog. See
+[Value Representations](/the-effect-layer/value-representations) for the
+transport profiles and [Column Types](/core-concepts/tables/column-types) for
+table-specific usage.

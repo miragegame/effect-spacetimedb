@@ -1,0 +1,91 @@
+---
+import Logo from "./Logo.astro"
+
+const links = [
+  { label: "Getting Started", href: "/getting-started" },
+  { label: "Core Concepts", href: "/core-concepts/functions/reducers" },
+  { label: "Effect Layer", href: "/the-effect-layer/runtime-model" },
+  { label: "Reference", href: "/reference" },
+]
+---
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <div class="site-footer__brand">
+      <Logo />
+      <p>Typed SpacetimeDB modules with Effect-shaped contracts, handlers, and clients.</p>
+      <div class="site-footer__copy">MIT</div>
+    </div>
+    <nav class="site-footer__links" aria-label="Footer navigation">
+      {links.map((link) => <a href={link.href}>{link.label}</a>)}
+    </nav>
+  </div>
+  <div class="site-footer__legal">
+    <p>
+      Not affiliated with SpacetimeDB (Clockwork Laboratories) or Effect
+      (Effectful Technologies).
+    </p>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    border-top: 1px solid var(--site-border);
+    background: var(--site-surface);
+    padding: 36px 24px;
+  }
+  .site-footer__inner {
+    max-width: 1120px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.6fr);
+    gap: 32px;
+  }
+  .site-footer__brand p {
+    color: var(--site-text-muted);
+    max-width: 460px;
+    line-height: 1.6;
+    margin: 14px 0 0;
+  }
+  .site-footer__copy {
+    margin-top: 14px;
+    color: var(--site-text-faint);
+    font-family: var(--site-font-mono);
+    font-size: 12px;
+  }
+  .site-footer__links {
+    display: grid;
+    gap: 10px;
+    align-content: start;
+  }
+  .site-footer__links a {
+    color: var(--site-text-muted);
+    font-family: var(--site-font-mono);
+    font-size: 11.7px;
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    text-decoration: none;
+    text-transform: uppercase;
+  }
+  .site-footer__links a:hover {
+    color: var(--site-accent-strong);
+  }
+  .site-footer__legal {
+    max-width: 1120px;
+    margin: 28px auto 0;
+    padding-top: 20px;
+    border-top: 1px solid var(--site-border);
+  }
+  .site-footer__legal p {
+    margin: 0;
+    max-width: 720px;
+    color: var(--site-text-faint);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  @media (max-width: 680px) {
+    .site-footer__inner {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

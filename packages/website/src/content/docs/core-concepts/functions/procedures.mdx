@@ -1,0 +1,102 @@
+---
+draft: false
+title: Procedures
+description: Declare read-returning callables and run mutations inside explicit transactions.
+sidebar:
+  order: 4
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions/procedures" target="_blank" rel="noopener noreferrer">SpacetimeDB: Procedures ↗</a>
+
+Procedures are declared in callable groups with params and a return value type.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const user = Stdb.table("user", {
+  public: true,
+  columns: {
+    id: Stdb.string().primaryKey(),
+    name: Stdb.string(),
+  },
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.procedure("user_get", {
+    params: Stdb.struct({ id: Stdb.string() }),
+    returns: Stdb.option(user.row),
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const { Db, Tx } = Module
+
+const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
+  user_get: Effect.fn(function* ({ id }) {
+    const tx = yield* Tx
+    return yield* tx.run(
+      Effect.gen(function* () {
+        const db = yield* Db
+        return yield* db.user.id.find(id)
+      }),
+    )
+  }),
+})
+```
+
+Procedure handlers cannot yield `Db` directly. Use the module's
+`Tx` runner and keep transaction bodies pure database work because the native
+runtime may retry them after optimistic commit conflicts.
+
+## Scheduling
+
+Scheduled reducers and procedures are declared with the callable group API and
+backed by a scheduled table. The scheduled endpoint receives
+`{ data: table.row }`; insert future work with the generated table
+`.schedule(row)` helper from a reducer or transaction body.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const reminderSchedule = Stdb.scheduledTable("reminderSchedule", {
+  columns: {
+    note: Stdb.string(),
+  },
+})
+
+const Reminders = Stdb.StdbGroup.make("Reminders").add(
+  Stdb.StdbFn.scheduledProcedure("reminderFire", {
+    table: reminderSchedule,
+    allowExternalCallers: false,
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app")
+  .addTables(reminderSchedule)
+  .add(Reminders)
+
+const { Db } = Module
+
+const RemindersLive = Stdb.StdbBuilder.group(Module, "Reminders", {
+  reminderFire: Effect.fn(function* ({ data }) {
+    yield* Effect.logInfo(`reminder: ${data.note}`)
+  }),
+})
+
+const enqueueReminder = Effect.gen(function* () {
+  const db = yield* Db
+  yield* db.reminderSchedule.schedule({
+    scheduledAt: Stdb.ScheduleAt.interval("5 minutes"),
+    note: "wake up",
+  })
+})
+```
+
+Use `Stdb.ScheduleAt.interval(...)` for persistent re-fire rows,
+`Stdb.ScheduleAt.at(...)` for one-shot absolute times,
+`Stdb.ScheduleAt.after(ctx.timestamp, duration)` for one-shot relative work, and
+`Stdb.ScheduleAt.nextCron(cron, ctx.timestamp)` for cron-derived one-shots.
+See [Scheduled Tables](/core-concepts/tables/scheduled-tables) for the table
+side of the contract.

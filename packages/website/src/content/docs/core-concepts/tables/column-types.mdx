@@ -1,0 +1,96 @@
+---
+draft: false
+title: Column Types
+description: Declare typed tables, indexes, constraints, rows, and reusable value types.
+sidebar:
+  order: 2
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/column-types" target="_blank" rel="noopener noreferrer">SpacetimeDB: Column Types ↗</a>
+
+Tables are declared with `Stdb.table(name, options)`. Bind each table to a
+variable so its `row` value type, column metadata, index metadata, and generated
+accessor types can flow through the module.
+
+```typescript twoslash
+import * as Schema from "effect/Schema"
+import * as Stdb from "effect-spacetimedb"
+
+const UserId = Schema.String.pipe(Schema.brand("UserId"))
+const ShortString = Stdb.string(Schema.String.pipe(Schema.minLength(1)))
+
+export const user = Stdb.table("user", {
+  public: true,
+  columns: {
+    id: Stdb.string(UserId).primaryKey(),
+    name: ShortString,
+  },
+})
+
+export const membership = Stdb.table("membership", {
+  public: false,
+  columns: {
+    tenant_id: ShortString,
+    email: ShortString,
+  },
+  indexes: (c) => [Stdb.index("membership_email_tenant_idx", [c.email, c.tenant_id])],
+  constraints: (c) => [Stdb.unique("membership_tenant_email_unique", [c.tenant_id, c.email])],
+})
+```
+
+effect-spacetimedb wraps Effect schemas in `Stdb.*` value types, then uses those
+value types consistently for table columns, reducer/procedure params, view
+returns, and declared errors.
+
+## Value-Type Pattern
+
+Use a plain Effect schema as the domain source of truth, then wrap it at
+SpaceTimeDB declaration boundaries:
+
+```ts
+const UserId = Schema.String.pipe(Schema.brand("UserId"))
+
+Stdb.string(UserId) // table columns, params, returns, and declared error fields
+```
+
+Keep reusable `Stdb.*` aliases for generic non-branded values, such as a
+length-limited string used in many columns. For custom codecs, use
+`Stdb.custom(schema, { type })` so the SpaceTimeDB lowering is explicit.
+
+For the full helper catalog, including integer widths, native timestamp/UUID
+values, and transport codecs, see [Value Types](/the-effect-layer/value-types).
+
+## Column Names And Row Types
+
+Use `.name("db_name")` on a value type when the database column name should
+differ from the TypeScript field name.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const user = Stdb.table("user", {
+  columns: {
+    userId: Stdb.string().name("user_id").primaryKey(),
+    displayName: Stdb.string().name("display_name"),
+  },
+})
+
+type UserRow = Stdb.TableRow<typeof user>
+
+const UserRow = Stdb.rowType(user)
+const SameUserRow = user.row
+```
+
+`Stdb.rowType(table)` and `table.row` are the reusable value type for a full row;
+`Stdb.TableRow<typeof table>` is the authored TypeScript row type.
+
+## Optionality
+
+`Stdb.option(T)` means the value is present but may be `undefined`.
+`Stdb.optional(T)` and `.optional()` mean the field or table column may be
+omitted. Both lower to SATS `option<T>` where structs are materialized, but they
+produce different TypeScript property shapes.
+
+See [Value-Type Design](/the-effect-layer/value-type-design) and
+[Option vs Optional](/the-effect-layer/option-vs-optional) for the Effect-native
+typing details.

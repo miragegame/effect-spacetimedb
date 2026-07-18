@@ -1,0 +1,53 @@
+---
+import "../styles/marketing.css"
+
+import Footer from "../components/marketing/Footer.astro"
+import Nav from "../components/marketing/Nav.astro"
+import ThemeProvider from "../components/ThemeProvider.astro"
+
+interface Props {
+  frontmatter?: {
+    title?: string
+    description?: string
+  }
+  title?: string
+  description?: string
+}
+
+const frontmatter = Astro.props.frontmatter ?? {}
+const title = Astro.props.title ?? frontmatter.title ?? "Effect SpacetimeDB"
+const description =
+  Astro.props.description ??
+  frontmatter.description ??
+  "Effect-native builders and clients for typed SpacetimeDB modules."
+const canonical = new URL(Astro.url.pathname, Astro.site)
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <ThemeProvider />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical.href} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Effect SpacetimeDB" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical.href} />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+  </head>
+  <body class="site-shell">
+    <header class="marketing-header">
+      <Nav marketing />
+    </header>
+    <main>
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

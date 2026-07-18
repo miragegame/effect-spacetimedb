@@ -1,0 +1,106 @@
+---
+draft: false
+title: Value Representations
+description: Authored values, schema-encoded values, and host JavaScript values.
+sidebar:
+  order: 4
+---
+
+`effect-spacetimedb` works with three related value shapes:
+
+- **Authored Type values** are what handlers and typed clients use.
+- **Schema encoded values** are the wire side of Effect schema codecs, especially
+  for typed HTTP request and response bodies.
+- **Host JS values** are the shapes accepted by SpaceTimeDB's JavaScript host for
+  reducer arguments, table rows, lookup keys, and handler returns.
+
+The host representation is close to authored values but not identical to schema
+encoded values. The library normalizes host values before schema decoding so
+handlers can work with authored Type values.
+
+See [Value Types](/the-effect-layer/value-types) for the canonical helper
+catalog. This page focuses on transport and encoding semantics.
+
+## Compatibility Rules
+
+- Absent optional struct fields and absent `Stdb.option` fields are omitted from
+  host structs.
+- Result host input accepts `{ ok }` and `{ err }` envelopes, then normalizes
+  them to schema tagged result shapes.
+- Sum host input uses authored tagged values: `{ tag }` for unit variants and
+  `{ tag, value }` for payload variants.
+- Primitive, literal, custom, and no-descriptor leaves delegate to their schema
+  encoder.
+
+HTTP JSON has its own representation profile. It rewrites exact option
+envelopes, canonicalizes declared field names for SATS JSON, and normalizes
+responses back to declared field names where needed.
+
+## Result Envelopes
+
+Result values are the main host/schema asymmetry. Host values use `{ ok }` /
+`{ err }` envelopes, while the Effect schema codec expects tagged
+`{ tag, value }` result envelopes. DB and WebSocket host decoders normalize the
+host envelope before schema decoding, and handler return encoding emits the
+native `{ ok }` / `{ err }` shape.
+
+## Literal And Sum Tags
+
+Sum host values use authored tagged shapes: `{ tag }` for unit variants and
+`{ tag, value }` for variants with payloads.
+
+String `Stdb.literal(...)` values also use authored tags on DB/host and HTTP
+paths when the authored value is a valid SpaceTimeDB identifier. Values that are
+not valid identifiers use a generated-client-safe PascalCase SATS tag while
+decoding back to the authored value. Generated-client WebSocket calls accept the
+PascalCase convention; DB and HTTP profiles keep authored tags where SATS
+permits them.
+
+## Numeric And Binary Profiles
+
+- `u8`/`u16`/`u32` and `i8`/`i16`/`i32` are authored as `number` and checked at
+  their constructor-owned integer bounds.
+- `u64`/`u128`/`u256` and `i64`/`i128`/`i256` are authored as `bigint`, checked
+  at their fixed-width bounds, and remain `bigint` in DB and WebSocket shapes.
+- `Stdb.bigint()` is authored as `bigint` but lowers to a SATS string so large
+  arbitrary integers can move through JSON safely.
+- `Stdb.f32()` and `Stdb.f64()` use `number`. DB and generated WebSocket shapes
+  preserve native `NaN`/`Infinity`; HTTP JSON rejects non-finite values because
+  JSON has no representation for them.
+- `Stdb.bytes()` is a `Uint8Array` byte array.
+
+## Native Host Values
+
+`Stdb.timestamp()`, `Stdb.timeDuration()`, `Stdb.uuid()`,
+`Stdb.identity()`, and `Stdb.connectionId()` use the native SpacetimeDB classes
+in authored server and generated-client values. Their HTTP JSON shape is the
+schema-encoded representation produced by `Stdb.httpCodec(...)`.
+
+## HTTP JSON Profile
+
+HTTP JSON input preparation rewrites exact `{ some: value }` option envelopes,
+drops unknown struct fields, canonicalizes declared field names to snake case,
+and prepares literal and sum payloads for SATS JSON.
+
+Output normalization accepts SpacetimeDB HTTP JSON shapes, falls back to
+schema-AST normalization when a value is not in a descriptor-specific shape,
+recurses into bare options, and rebinds canonical snake-case struct fields back
+to declared field names.
+
+String literal SATS enum objects use the schema variant as the JSON object key
+or `{ tag }` value. HTTP JSON payloads emitted by this package use schema tags;
+raw SATS JSON callers should emit those same tags and deploy in the same rollout
+as any module republish that changes persisted enum schemas.
+
+## Value Codecs
+
+Use `Stdb.dbCodec(T)` for host/DB values, `Stdb.httpCodec(T)` for HTTP JSON,
+and `Stdb.wsCodec(T)` for generated WebSocket client values. The WebSocket codec
+accepts the generated client's PascalCase enum tags for sums and string
+literals, while DB and HTTP profiles keep authored tags where SATS permits them.
+
+## Single Traversal Rule
+
+Per-kind traversal logic lives in the value-type descriptor fold. Representation
+profiles are layered over that traversal so host, HTTP, and WebSocket codecs do
+not drift into independent descriptor dispatch rules.

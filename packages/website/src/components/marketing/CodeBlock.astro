@@ -1,0 +1,38 @@
+---
+import { Code } from "astro:components"
+import type {
+  BundledLanguage,
+  LanguageRegistration,
+  SpecialLanguage,
+} from "shiki"
+import { spacetimedbShikiTheme } from "../../styles/spacetimedb-shiki-theme.js"
+
+type CodeLanguage = BundledLanguage | LanguageRegistration | SpecialLanguage
+
+interface Props {
+  filename?: string
+  caption?: string
+  code: string
+  compact?: boolean
+  lang?: CodeLanguage
+}
+
+const {
+  filename = "module.ts",
+  caption,
+  code,
+  compact = false,
+  lang = "ts",
+} = Astro.props
+---
+
+<figure class:list={["code-block", compact && "code-block--compact"]}>
+  <div class="code-block__header">
+    <span class="code-block__dot code-block__dot--red"></span>
+    <span class="code-block__dot code-block__dot--yellow"></span>
+    <span class="code-block__dot code-block__dot--green"></span>
+    <span class="code-block__filename">{filename}</span>
+  </div>
+  <Code code={code} lang={lang} theme={spacetimedbShikiTheme} />
+  {caption && <figcaption>{caption}</figcaption>}
+</figure>

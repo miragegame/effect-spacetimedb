@@ -1,0 +1,28 @@
+---
+// Overrides Starlight's docs Footer: renders the default footer (edit link,
+// last updated, prev/next pagination) and appends the affiliation disclaimer.
+import Default from "@astrojs/starlight/components/Footer.astro"
+---
+
+<Default />
+
+<div class="site-legal">
+  <p>
+    Not affiliated with SpacetimeDB (Clockwork Laboratories) or Effect
+    (Effectful Technologies).
+  </p>
+</div>
+
+<style>
+  .site-legal {
+    margin-top: 2rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--site-border, var(--sl-color-hairline));
+  }
+  .site-legal p {
+    margin: 0;
+    color: var(--site-text-faint, var(--sl-color-gray-4));
+    font-size: var(--sl-text-xs);
+    line-height: 1.6;
+  }
+</style>

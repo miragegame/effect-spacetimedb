@@ -1,0 +1,49 @@
+---
+---
+
+<meta name="color-scheme" content="dark" />
+<meta name="theme-color" content="#0b1114" />
+
+<script is:inline>
+  const lockStaticSidebarGroups = () => {
+    document
+      .querySelectorAll(".sidebar-content .top-level > li > details")
+      .forEach((details) => {
+        const label = details
+          .querySelector("summary .group-label > .large")
+          ?.textContent?.trim();
+        if (label !== "Guides" && label !== "Concepts") return;
+
+        details.open = true;
+        if (!details.hasAttribute("data-static-sidebar-group")) {
+          details.addEventListener("toggle", () => {
+            if (!details.open) details.open = true;
+          });
+        }
+        details.setAttribute("data-static-sidebar-group", "");
+        details.querySelector("summary")?.setAttribute("aria-disabled", "true");
+      });
+  };
+
+  document.addEventListener("DOMContentLoaded", lockStaticSidebarGroups);
+  document.addEventListener("astro:page-load", lockStaticSidebarGroups);
+
+  window.StarlightThemeProvider = (() => {
+    const storageKey = "starlight-theme";
+    const apply = () => {
+      document.documentElement.dataset.theme = "dark";
+      try {
+        localStorage.setItem(storageKey, "dark");
+      } catch {}
+    };
+    apply();
+    return {
+      updatePickers(theme = "dark") {
+        document.querySelectorAll("starlight-theme-select").forEach((picker) => {
+          const select = picker.querySelector("select");
+          if (select) select.value = theme;
+        });
+      },
+    };
+  })();
+</script>

@@ -1,0 +1,60 @@
+---
+type Variant = "primary" | "secondary" | "ghost"
+
+interface Props {
+  href: string
+  variant?: Variant
+}
+
+const { href, variant = "primary" } = Astro.props
+---
+
+<a href={href} class:list={["button", `button--${variant}`]}>
+  <slot />
+</a>
+
+<style>
+  .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    padding: 0 16px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    font-family: var(--site-font-mono);
+    font-size: 11.7px;
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    text-decoration: none;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .button--primary {
+    background: var(--site-accent);
+    color: #071216;
+  }
+  /* Keep the dark label on hover; only the background brightens. Matches
+     SpacetimeDB's primary button (dark text stays put on a light/green bg). */
+  .button--primary:hover {
+    background: var(--site-accent-strong);
+    color: #071216;
+  }
+  .button--secondary {
+    color: var(--site-text-strong);
+    border-color: var(--site-border-strong);
+    background: var(--site-surface);
+  }
+  /* Text stays strong on hover; only the border picks up the accent. */
+  .button--secondary:hover {
+    border-color: var(--site-accent-strong);
+    color: var(--site-text-strong);
+  }
+  .button--ghost {
+    color: var(--site-text-muted);
+    background: transparent;
+  }
+  .button--ghost:hover {
+    color: var(--site-accent-strong);
+  }
+</style>

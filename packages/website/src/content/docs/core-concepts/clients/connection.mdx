@@ -1,0 +1,107 @@
+---
+draft: false
+title: Client Connection
+description: Project a module contract into typed HTTP and WebSocket clients.
+sidebar:
+  order: 6
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/clients/connection" target="_blank" rel="noopener noreferrer">SpacetimeDB: Client Connection ↗</a>
+
+`Stdb.project(Module)` produces a client-safe projection. It contains no
+server runtime; it is only the callable, route, table, and subscription shape
+needed by clients.
+
+## HTTP Client
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+declare const Module: Stdb.AnyStdbModule
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const Example = Stdb.project(Module)
+const HttpLive = Example.client.http.layer({ uri, databaseName, token })
+
+const program = Effect.gen(function* () {
+  const client = yield* Example.client.http.Tag
+  yield* client.reducers.user_upsert({ userId: "u1", name: "Ada" })
+}).pipe(Effect.provide(HttpLive))
+```
+
+Typed HTTP handlers are called with just their payload. Raw handlers take the
+payload and request options.
+
+## Effect HttpApi Projection
+
+Typed `post`, `put`, and `patch` routes can be projected into a stock Effect
+`HttpApi`:
+
+```ts
+const api = Stdb.toHttpApi(Module)
+```
+
+This is useful when callers already use `HttpApiClient.make(...)` and want
+status-based declared-error decoding.
+
+## WebSocket Client
+
+WebSocket sessions use generated native bindings through
+`effect-spacetimedb/client`.
+
+```typescript twoslash
+import * as StdbClient from "effect-spacetimedb/client"
+import * as Stdb from "effect-spacetimedb"
+
+declare const Module: Stdb.AnyStdbModule
+declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
+  typeof Module.spec,
+  unknown
+>
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const Example = Stdb.project(Module)
+
+const WsLive = Example.client.ws.layerGenerated({
+  DbConnection,
+  uri,
+  databaseName,
+  token,
+})
+```
+
+`layerGenerated` and `scopedGenerated` are the generated-client paths. The
+standalone generated config helper is reserved for the package testing
+entrypoint.
+
+Named tags let one process hold multiple sessions for the same module.
+
+```typescript twoslash
+import * as StdbClient from "effect-spacetimedb/client"
+import * as Stdb from "effect-spacetimedb"
+
+declare const Module: Stdb.AnyStdbModule
+declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
+  typeof Module.spec,
+  unknown
+>
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const Example = Stdb.project(Module)
+const MainSession = Example.client.ws.tag("main")
+const MainLive = Example.client.ws.layerGenerated(
+  { DbConnection, uri, databaseName, token },
+  { name: "main" },
+)
+```
+
+The native generated client still owns the actual WebSocket
+connection. effect-spacetimedb layers typed Effect services, scoped sessions,
+and projected HTTP clients over the module contract.

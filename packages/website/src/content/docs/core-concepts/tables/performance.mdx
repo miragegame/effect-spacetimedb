@@ -1,0 +1,15 @@
+---
+draft: false
+title: Performance
+description: Link to SpacetimeDB table-performance docs; effect-spacetimedb has no extra runtime semantics.
+sidebar:
+  order: 10
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/performance" target="_blank" rel="noopener noreferrer">SpacetimeDB: Performance ↗</a>
+
+Table performance is a SpacetimeDB runtime concern. effect-spacetimedb exposes
+the native index algorithms through `.index(...)` and `Stdb.index(...)`, but it
+does not change the host query planner or storage semantics.
+
+For authoring syntax, see [Indexes](/core-concepts/tables/indexes).

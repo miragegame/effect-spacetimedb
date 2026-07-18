@@ -1,0 +1,141 @@
+---
+draft: false
+title: Error Handling
+description: Model domain failures as tagged errors that cross reducer, procedure, route, and client boundaries.
+sidebar:
+  order: 5
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions/reducers/error-handling" target="_blank" rel="noopener noreferrer">SpacetimeDB: Error Handling ↗</a>
+
+Declared errors are tagged errors with a namespace prefix. The namespace keeps
+wire tags globally unique within a module, while each field uses a normal
+`Stdb.*` value type.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const AppErrors = Stdb.errors.namespace("App")({
+  UserMissing: Stdb.error({ userId: Stdb.string() }),
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("user_require", {
+    params: Stdb.struct({ userId: Stdb.string() }),
+    errors: AppErrors,
+  }),
+  Stdb.StdbFn.procedure("user_get", {
+    params: Stdb.struct({ userId: Stdb.string() }),
+    returns: Stdb.option(Stdb.struct({ id: Stdb.string() })),
+    errors: AppErrors,
+  }),
+)
+
+const UserRoutes = Stdb.StdbHttpGroup.make("UserRoutes").add(
+  Stdb.StdbHttp.post("user_token_rotate", "/users/token/rotate", {
+    request: Stdb.struct({ userId: Stdb.string() }).schema,
+    response: Stdb.struct({ token: Stdb.string() }).schema,
+    errors: AppErrors,
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").add(Users).add(UserRoutes)
+
+const fail = (userId: string) =>
+  Effect.gen(function* () {
+    return yield* new AppErrors.UserMissing({ userId })
+  })
+```
+
+Attach the error catalog with `errors:` and fail with the generated classes
+directly. Declared errors are encoded on the wire with a versioned envelope, so
+plain host rejection strings are not confused with domain failures.
+
+An error can optionally declare an HTTP status with
+`Stdb.error(fields, { status })`. That status applies only when the error
+surfaces over an HTTP route; on the reducer and procedure (WebSocket) path there
+is no HTTP response, so it is ignored.
+
+Clients receive declared tagged errors directly from reducer and procedure
+calls, and typed HTTP routes deliver the same errors through the projected
+Effect `HttpApi` client:
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient"
+import * as Stdb from "effect-spacetimedb"
+
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+declare const userId: string
+
+const AppErrors = Stdb.errors.namespace("App")({
+  UserMissing: Stdb.error({ userId: Stdb.string() }),
+})
+
+const Users = Stdb.StdbGroup.make("Users").add(
+  Stdb.StdbFn.reducer("user_require", {
+    params: Stdb.struct({ userId: Stdb.string() }),
+    errors: AppErrors,
+  }),
+  Stdb.StdbFn.procedure("user_get", {
+    params: Stdb.struct({ userId: Stdb.string() }),
+    returns: Stdb.option(Stdb.struct({ id: Stdb.string() })),
+    errors: AppErrors,
+  }),
+)
+
+const UserRoutes = Stdb.StdbHttpGroup.make("UserRoutes").add(
+  Stdb.StdbHttp.post("user_token_rotate", "/users/token/rotate", {
+    request: Stdb.struct({ userId: Stdb.string() }).schema,
+    response: Stdb.struct({ token: Stdb.string() }).schema,
+    errors: AppErrors,
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").add(Users).add(UserRoutes)
+const Example = Stdb.project(Module)
+const rpcClient = Example.client.http.make({ uri, databaseName, token })
+
+const requireUser = rpcClient.reducers.user_require({ userId }).pipe(
+  Effect.catchTag("AppUserMissing", (error) =>
+    Effect.log(`missing ${error.userId}`),
+  ),
+)
+
+const findUser = rpcClient.procedures.user_get({ userId }).pipe(
+  Effect.catchTag("AppUserMissing", () => Effect.succeed(undefined)),
+)
+
+const api = Stdb.toHttpApi(Module)
+
+const rotateToken = Effect.gen(function* () {
+  const client = yield* HttpApiClient.make(api, {
+    baseUrl: Stdb.httpApiBaseUrl({ uri, databaseName }),
+    transformClient: HttpClient.mapRequest(
+      HttpClientRequest.bearerToken(token),
+    ),
+  })
+
+  return yield* client.UserRoutes.user_token_rotate({
+    payload: { userId },
+  }).pipe(
+    Effect.map((response) => response.token),
+    Effect.catchTag("AppUserMissing", () => Effect.succeed(undefined)),
+  )
+})
+```
+
+Use `.raw(...)` only when you need remote rejection metadata in addition to the
+decoded declared error.
+
+Subscription and stream APIs report subscription, transport, invalidation, and
+row-decode failures. They do not carry declared domain errors because declared
+errors are emitted by reducer, procedure, and typed HTTP route calls.
+
+Declared errors are Effect failures. Defects remain defects, and
+plain host rejection strings are kept separate from decoded domain failures.
