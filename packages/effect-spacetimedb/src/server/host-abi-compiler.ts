@@ -1,4 +1,6 @@
 
+import * as Data from "effect/Data"
+
 import {
   CaseConversionPolicy,
   isRowTypedQuery,
@@ -21,12 +23,13 @@ export {
   table,
 }
 
-export class StdbHostAbiCapabilityError extends Error {
-  constructor(readonly capability: string) {
-    super(
-      `Unsupported spacetimedb host ABI: missing or malformed ${capability}. effect-spacetimedb currently supports spacetimedb ~2.6.1.`,
-    )
-    this.name = "StdbHostAbiCapabilityError"
+export class StdbHostAbiCapabilityError extends Data.TaggedError(
+  "StdbHostAbiCapabilityError",
+)<{
+  readonly capability: string
+}> {
+  override get message(): string {
+    return `Unsupported spacetimedb host ABI: missing or malformed ${this.capability}. effect-spacetimedb currently supports spacetimedb ~2.10.1.`
   }
 }
 
@@ -46,7 +49,7 @@ const assertFunctionCapability = (
   capability: keyof CompilerHostAbiShape,
 ): void => {
   if (typeof shape[capability] !== "function") {
-    throw new StdbHostAbiCapabilityError(capability)
+    throw new StdbHostAbiCapabilityError({ capability })
   }
 }
 
@@ -55,7 +58,7 @@ const assertObjectCapability = (
   capability: keyof CompilerHostAbiShape,
 ): void => {
   if (typeof shape[capability] !== "object" || shape[capability] === null) {
-    throw new StdbHostAbiCapabilityError(capability)
+    throw new StdbHostAbiCapabilityError({ capability })
   }
 }
 
@@ -68,7 +71,9 @@ export const assertCompilerHostAbiCapabilities = (
     readonly SnakeCase?: unknown
   }
   if (policy.SnakeCase == null || policy.None == null) {
-    throw new StdbHostAbiCapabilityError("CaseConversionPolicy")
+    throw new StdbHostAbiCapabilityError({
+      capability: "CaseConversionPolicy",
+    })
   }
 
   assertFunctionCapability(shape, "isRowTypedQuery")
@@ -81,11 +86,24 @@ export const assertCompilerHostAbiCapabilities = (
 }
 
 // Bump hazards for the next spacetimedb peer-range change:
-// - Re-check `UntypedReducerDef.params`; upstream 2.6/2.7 changed this type.
+// - Re-check `UntypedReducerDef.params` (`src/sdk/reducers.ts`); it is
+//   unchanged between 2.6.1 and 2.10.1, so the client reducer typing still
+//   holds, but it has moved before.
+// - Re-check the hand-written bridge types in `compiler-interop.ts` against
+//   `spacetimedb/server`: `ReducerCtx`/`ProcedureCtx`/`HandlerContext` gained a
+//   required `as` alias member in 2.10.1, `schema()`'s result type always
+//   carries `namespaces`, and `procedure()` now returns a `ProcedureExport`.
+// - Re-check how schedules are registered. Since 2.7.0 `TableOpts.scheduled`
+//   and `TableSchema.schedule` are deprecated in favour of
+//   `reducer/procedure({ onSchedule: <table handle> })`; upstream resolves the
+//   handle through `tableSourceNames`, so every scheduled table must be
+//   registered under exactly one `schema()` key, and `resolveSchedules()` /
+//   `registerModuleExports()` silently skip a second pass.
 // - Re-run the off-host import-safety tests because this module is the only
 //   allowed value edge to `spacetimedb/server`.
-// - Re-run the native package tests that cover row-typed query and scheduled
-//   target behavior before widening the peer range.
+// - Re-run the native package tests that cover row-typed query, scheduled
+//   target behavior, index uniqueness and composite index ranges before
+//   widening the peer range.
 assertCompilerHostAbiCapabilities({
   CaseConversionPolicy,
   isRowTypedQuery,

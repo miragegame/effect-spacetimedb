@@ -1,8 +1,18 @@
+import { spawnSync } from "node:child_process"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import * as Path from "node:path"
 import { fileURLToPath } from "node:url"
+import * as GetExePath from "@effect/tsgo/lib/getExePath"
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as Ts from "typescript"
 import { testEffectCallbackError } from "../helpers/effect-errors"
 
 const { expect, it } = EffectVitest
@@ -17,6 +27,18 @@ const rootEntrypoint = Path.join(srcDir, "index.ts")
 const serverEntrypoint = Path.join(serverDir, "index.ts")
 const serverCompilerEntrypoint = Path.join(srcDir, "server-compiler.ts")
 const testingEntrypoint = Path.join(srcDir, "testing.ts")
+const declarationEmitTimeoutMs = 60_000
+
+const declarationSurfaceOutDir = Path.join(
+  packageRoot,
+  ".tmp",
+  "root-declaration-surface",
+)
+const declarationSurfaceConfigPath = Path.join(
+  packageRoot,
+  ".tmp",
+  "root-declaration-surface.tsconfig.json",
+)
 
 const rootSharedFiles = [
   "builder.ts",
@@ -35,26 +57,23 @@ const rootSharedFiles = [
   "utils.ts",
 ].map((file) => Path.join(srcDir, file))
 
+const collectFilesWithExtension = (
+  dir: string,
+  extension: string,
+): ReadonlyArray<string> =>
+  readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(extension))
+    .map((entry) => Path.join(entry.parentPath, entry.name))
+    .sort()
+
 const collectTsFiles = (dir: string): ReadonlyArray<string> =>
-  Ts.sys.readDirectory(dir, [".ts"], undefined, undefined).sort()
+  collectFilesWithExtension(dir, ".ts")
 
 const readFileString = (filePath: string): string => {
-  const sourceText = Ts.sys.readFile(filePath)
-  if (sourceText === undefined) {
+  if (!existsSync(filePath)) {
     throw new Error(`Unable to read ${relativePackagePath(filePath)}`)
   }
-  return sourceText
-}
-
-const staticModuleSpecifiers = (
-  filePath: string,
-  sourceText: string,
-): ReadonlyArray<string> =>
-  staticModuleEdges(filePath, sourceText).map((edge) => edge.specifier)
-
-type StaticModuleEdge = {
-  readonly specifier: string
-  readonly kind: "type" | "value"
+  return readFileSync(filePath, { encoding: "utf8" })
 }
 
 type HostOnlyValueImport = {
@@ -63,89 +82,27 @@ type HostOnlyValueImport = {
   readonly path: ReadonlyArray<string>
 }
 
-const importDeclarationKind = (
-  declaration: Ts.ImportDeclaration,
-): StaticModuleEdge["kind"] => {
-  const clause = declaration.importClause
-  if (clause == null) {
-    return "value"
-  }
-  if (clause.isTypeOnly) {
-    return "type"
-  }
-  if (clause.name != null) {
-    return "value"
-  }
-  const bindings = clause.namedBindings
-  return bindings != null &&
-    Ts.isNamedImports(bindings) &&
-    bindings.elements.every((element) => element.isTypeOnly)
-    ? "type"
-    : "value"
-}
+// `Bun.Transpiler` is why this file is `.serial.`: the parallel project is the
+// coverage run and executes under plain Node (`vitest run --project parallel
+// --coverage`), where `Bun` is undefined. The serial project runs under
+// `bun --bun` and is already the documented home for tests outside the coverage
+// run, which costs nothing here — this file asserts a source-graph contract and
+// imports no `src/` module, so it contributes no coverage. Its 60s declaration
+// emit also belongs in the non-parallel project rather than under the parallel
+// project's 5s default timeout.
+const tsScanner = new Bun.Transpiler({ loader: "ts" })
+const tsxScanner = new Bun.Transpiler({ loader: "tsx" })
 
-const exportDeclarationKind = (
-  declaration: Ts.ExportDeclaration,
-): StaticModuleEdge["kind"] => {
-  if (declaration.isTypeOnly) {
-    return "type"
-  }
-  const clause = declaration.exportClause
-  return clause != null &&
-    Ts.isNamedExports(clause) &&
-    clause.elements.every((element) => element.isTypeOnly)
-    ? "type"
-    : "value"
-}
-
-const staticModuleEdges = (
+// Scanner-only import extraction: Bun's transpiler reports the value-level
+// edges of a module and drops the type-only ones (`import type`, `export type`,
+// and named lists whose every element is `type`), which is exactly the graph
+// these boundaries are about — a type-only edge carries no runtime dependency.
+const staticModuleSpecifiers = (
   filePath: string,
   sourceText: string,
-): ReadonlyArray<StaticModuleEdge> => {
-  const source = Ts.createSourceFile(
-    filePath,
-    sourceText,
-    Ts.ScriptTarget.Latest,
-    true,
-    Ts.ScriptKind.TS,
-  )
-  const edges: Array<StaticModuleEdge> = []
-
-  const visit = (node: Ts.Node): void => {
-    if (Ts.isImportDeclaration(node)) {
-      if (Ts.isStringLiteral(node.moduleSpecifier)) {
-        edges.push({
-          specifier: node.moduleSpecifier.text,
-          kind: importDeclarationKind(node),
-        })
-      }
-    } else if (
-      Ts.isExportDeclaration(node) &&
-      node.moduleSpecifier != null &&
-      Ts.isStringLiteral(node.moduleSpecifier)
-    ) {
-      edges.push({
-        specifier: node.moduleSpecifier.text,
-        kind: exportDeclarationKind(node),
-      })
-    } else if (
-      Ts.isCallExpression(node) &&
-      node.expression.kind === Ts.SyntaxKind.ImportKeyword
-    ) {
-      const firstArgument = node.arguments[0]
-      if (firstArgument != null && Ts.isStringLiteral(firstArgument)) {
-        edges.push({
-          specifier: firstArgument.text,
-          kind: "value",
-        })
-      }
-    }
-
-    Ts.forEachChild(node, visit)
-  }
-
-  visit(source)
-  return edges
+): ReadonlyArray<string> => {
+  const scanner = filePath.endsWith(".tsx") ? tsxScanner : tsScanner
+  return scanner.scanImports(sourceText).map((record) => record.path)
 }
 
 const resolveRelativeSpecifier = (
@@ -266,14 +223,11 @@ const contractValueImportCycles = (): ReadonlyArray<ReadonlyArray<string>> => {
   )
 
   for (const sourcePath of files) {
-    for (const edge of staticModuleEdges(
+    for (const specifier of staticModuleSpecifiers(
       sourcePath,
       readFileString(sourcePath),
     )) {
-      if (edge.kind === "type") {
-        continue
-      }
-      const resolved = resolveRelativeSpecifier(sourcePath, edge.specifier)
+      const resolved = resolveRelativeSpecifier(sourcePath, specifier)
       if (resolved !== undefined && fileSet.has(resolved)) {
         graph.get(sourcePath)?.push(resolved)
       }
@@ -304,27 +258,20 @@ const hostOnlyValueImportsReachableFrom = (
     }
     visited.add(current.filePath)
 
-    for (const edge of staticModuleEdges(
+    for (const specifier of staticModuleSpecifiers(
       current.filePath,
       readFileString(current.filePath),
     )) {
-      if (edge.kind === "type") {
-        continue
-      }
-
-      if (isHostOnlyRuntimeSpecifier(edge.specifier)) {
+      if (isHostOnlyRuntimeSpecifier(specifier)) {
         violations.push({
           sourcePath: current.filePath,
-          specifier: edge.specifier,
+          specifier,
           path: current.path,
         })
         continue
       }
 
-      const resolved = resolveRelativeSpecifier(
-        current.filePath,
-        edge.specifier,
-      )
+      const resolved = resolveRelativeSpecifier(current.filePath, specifier)
       if (resolved !== undefined && fileSet.has(resolved)) {
         pending.push({
           filePath: resolved,
@@ -341,82 +288,104 @@ const hostOnlyValueImportsReachableFrom = (
   )
 }
 
+const toConfigPath = (filePath: string): string =>
+  filePath.split(Path.sep).join("/")
+
+const configRelativePath = (fromFile: string, targetFile: string): string => {
+  const relative = toConfigPath(
+    Path.relative(Path.dirname(fromFile), targetFile),
+  )
+  return relative.startsWith(".") ? relative : `./${relative}`
+}
+
+// The declaration surface is emitted by the native compiler: TypeScript 7 has no
+// in-process `program.emit()`, so the config below pins the same option deltas
+// the in-process emit used to apply (declaration-only, no composite/incremental
+// bookkeeping, rooted at src/, seeded with the root entrypoint alone) and the
+// compiler writes the outputs into a temp directory the test then reads back.
+const writeDeclarationEmitConfig = (): void => {
+  mkdirSync(Path.dirname(declarationSurfaceConfigPath), { recursive: true })
+  rmSync(declarationSurfaceOutDir, { force: true, recursive: true })
+  const config = {
+    compilerOptions: {
+      composite: false,
+      declaration: true,
+      declarationDir: toConfigPath(declarationSurfaceOutDir),
+      declarationMap: false,
+      emitDeclarationOnly: true,
+      incremental: false,
+      noEmit: false,
+      outDir: toConfigPath(declarationSurfaceOutDir),
+      rootDir: toConfigPath(srcDir),
+      // Kept out of the package's own dist-types bookkeeping; the inherited
+      // build-info path would otherwise be rewritten by this throwaway emit.
+      tsBuildInfoFile: toConfigPath(
+        Path.join(
+          declarationSurfaceOutDir,
+          "root-declaration-surface.tsbuildinfo",
+        ),
+      ),
+    },
+    extends: configRelativePath(
+      declarationSurfaceConfigPath,
+      Path.join(packageRoot, "tsconfig.build.json"),
+    ),
+    files: [toConfigPath(rootEntrypoint)],
+    include: [],
+  }
+  writeFileSync(
+    declarationSurfaceConfigPath,
+    `${JSON.stringify(config, null, 2)}\n`,
+    { encoding: "utf8" },
+  )
+}
+
+// Same two steps the package's `scripts/effect-tsgo.mjs` wrapper performs:
+// resolve the native compiler shipped with @effect/tsgo, then run it. The
+// declaration probe keeps a best-effort chmod because the pool's executable is
+// already runnable; the wrapper additionally copies non-executable read-only
+// binaries into package scratch before launch.
+const runDeclarationEmit = (): void => {
+  const compilerExecutable = GetExePath.default()
+  try {
+    chmodSync(compilerExecutable, 0o755)
+  } catch {
+    // Best effort: the package manager usually installs the binary executable.
+  }
+  const emit = spawnSync(
+    compilerExecutable,
+    ["-p", declarationSurfaceConfigPath],
+    { cwd: packageRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+  )
+  if (emit.status !== 0) {
+    throw new Error(
+      [emit.stdout, emit.stderr]
+        .filter((output) => output.length > 0)
+        .join("\n"),
+    )
+  }
+}
+
 const emitRootDeclarationSurfaceText = (): string => {
-  const configPath = Path.join(packageRoot, "tsconfig.build.json")
-  const configFile = Ts.readConfigFile(configPath, Ts.sys.readFile)
-  if (configFile.error != null) {
-    throw new Error(
-      Ts.formatDiagnostic(configFile.error, {
-        getCanonicalFileName: (fileName) => fileName,
-        getCurrentDirectory: () => packageRoot,
-        getNewLine: () => "\n",
-      }),
-    )
-  }
+  writeDeclarationEmitConfig()
+  runDeclarationEmit()
 
-  const parsed = Ts.parseJsonConfigFileContent(
-    configFile.config,
-    Ts.sys,
-    packageRoot,
+  const rootDeclarationPath = Path.normalize(
+    Path.join(declarationSurfaceOutDir, "index.d.ts"),
   )
-  const outDir = Path.join(
-    packageRoot,
-    "node_modules",
-    ".tmp",
-    "root-declaration-surface",
-  )
-  const {
-    declarationDir: _declarationDir,
-    tsBuildInfoFile: _tsBuildInfoFile,
-    ...baseOptions
-  } = parsed.options
-  void _declarationDir
-  void _tsBuildInfoFile
-  const options: Ts.CompilerOptions = {
-    ...baseOptions,
-    composite: false,
-    declaration: true,
-    declarationDir: outDir,
-    declarationMap: false,
-    emitDeclarationOnly: true,
-    incremental: false,
-    noEmit: false,
-    outDir,
-    rootDir: srcDir,
-  }
-  const host = Ts.createCompilerHost(options)
-  const outputs = new Map<string, string>()
-  host.writeFile = (fileName, text) => {
-    outputs.set(Path.normalize(fileName), text)
-  }
-
-  const program = Ts.createProgram([rootEntrypoint], options, host)
-  const emit = program.emit(undefined, undefined, undefined, true)
-  const diagnostics = [
-    ...Ts.getPreEmitDiagnostics(program),
-    ...emit.diagnostics,
-  ].filter((diagnostic) => diagnostic.category === Ts.DiagnosticCategory.Error)
-
-  if (diagnostics.length > 0) {
-    throw new Error(
-      Ts.formatDiagnosticsWithColorAndContext(diagnostics, {
-        getCanonicalFileName: (fileName) => fileName,
-        getCurrentDirectory: () => packageRoot,
-        getNewLine: () => "\n",
-      }),
-    )
-  }
-
-  const rootDeclarationPath = Path.normalize(Path.join(outDir, "index.d.ts"))
-  if (!outputs.has(rootDeclarationPath)) {
+  if (!existsSync(rootDeclarationPath)) {
     throw new Error(
       `Root declaration output missing: ${relativePackagePath(rootDeclarationPath)}`,
     )
   }
 
-  return [...outputs.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([fileName, text]) => `// ${relativePackagePath(fileName)}\n${text}`)
+  return collectFilesWithExtension(declarationSurfaceOutDir, ".d.ts")
+    .map((fileName) => Path.normalize(fileName))
+    .sort((left, right) => left.localeCompare(right))
+    .map(
+      (fileName) =>
+        `// ${relativePackagePath(fileName)}\n${readFileString(fileName)}`,
+    )
     .join("\n")
 }
 
@@ -486,7 +455,7 @@ describe("import graph boundaries", () => {
         },
         catch: testEffectCallbackError("effect-spacetimedb/root-dts-surface"),
       }),
-    { timeout: 20_000 },
+    { timeout: declarationEmitTimeoutMs },
   )
 
   it.effect(

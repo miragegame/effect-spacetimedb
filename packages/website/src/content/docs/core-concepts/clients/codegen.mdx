@@ -20,6 +20,12 @@ module, then run `spacetime generate` against the built bundle:
 }
 ```
 
+The `spacetime` CLI has to match the `spacetimedb` package the module depends
+on. `spacetime build` and `spacetime generate` read and write a
+version-specific module-definition format, so a mismatched CLI either refuses
+the module or emits bindings a host of the other version rejects. Move the CLI,
+the package, and the server together.
+
 This is the default path. In an ordinary strict TypeScript project, import the
 generated `DbConnection` and pass it directly to the Effect client:
 
@@ -65,7 +71,7 @@ import {
 
 const target = {
   moduleBundlePath: "dist/bundle.js",
-  stagingDir: "node_modules/.tmp/effect-spacetimedb-codegen/staging",
+  stagingDir: ".tmp/effect-spacetimedb-codegen/staging",
   artifactDir: "src/generated-client",
   spacetimeCommand: ["spacetime"],
 }
@@ -79,11 +85,14 @@ await Effect.runPromise(program.pipe(Effect.provide(NodeServices.layer)))
 
 Run this script without `--check` to emit the artifact. Use `--check` in CI to
 regenerate in staging and compare without rewriting the committed artifact.
+Add `.tmp/` to the consumer project's `.gitignore` so generated staging files
+cannot be committed accidentally.
 
 The codegen export runs under plain Node 20 or newer. Install `esbuild@^0.25` as
 an optional peer and provide the platform layer at your executable boundary;
 the example uses `@effect/platform-node`'s `NodeServices.layer`. The pipeline
-asserts the supported SpaceTimeDB CLI version before generation.
+asserts the exact SpaceTimeDB CLI version it was built against before
+generating, and fails with `CodegenCliVersionError` on anything else.
 
 The artifact declaration is deliberately erased. Restore type identity in one
 hand-written facade tied to the same module contract used by the server:
@@ -103,6 +112,41 @@ export const DbConnection: GeneratedConnectionOf<typeof Module.spec> =
 Import the facade everywhere else. `generatedConnection(...)` is an identity at
 runtime; the generated JavaScript still comes entirely from
 `spacetime generate`, so upstream retains SDK and wire compatibility. Generated
-sessions also validate that every public table and public event table in the
-contract exists on the built connection and fail with
-`GeneratedArtifactShapeError` when the artifact is stale.
+sessions also validate that every public table, public event table, and public
+view in the contract exists on the built connection and fail with
+`GeneratedArtifactShapeError`, naming the missing keys, when the artifact is
+stale.
+
+## Accessor Keys Are camelCase
+
+`spacetime generate` keys the generated `db` and `tables` accessors by the
+**camelCase** spelling of each relation's name, and emits a `@deprecated`
+snake_case alias wherever the two spellings differ.
+
+effect-spacetimedb resolves tables, event tables, and views alike by their
+**contract key** — the key you wrote in `addTables(...)` or the views group.
+Declared names are required to be camelCase-canonical, so the contract key is
+the generated accessor key under either name policy, and the deprecated aliases
+are never resolved. A client that exposes only the alias is treated as stale and
+fails acquisition with `GeneratedArtifactShapeError`.
+
+Only SQL and subscription text keeps the wire name. A module on the
+`snake_case` policy still queries `all_users` while its rows arrive through the
+`allUsers` accessor.
+
+## Never Format A Generated Artifact
+
+Both the artifact pipeline's `--check` mode and drift checks compare generated
+files by content. A formatter run over `src/generated` or `src/generated-client`
+rewrites bytes the generator did not produce and turns every subsequent check
+red, with a diff that looks like real drift. Exclude the directory *and its
+contents* from your formatter — a directory-only pattern does not stop a
+pre-commit hook that passes explicit file paths:
+
+```json
+{
+  "files": {
+    "includes": ["**", "!src/generated-client", "!src/generated-client/**"]
+  }
+}
+```

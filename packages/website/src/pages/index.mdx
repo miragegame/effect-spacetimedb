@@ -117,7 +117,7 @@ yield* httpClient.Users.get({ path: { userId } })
 const group = session.tableGroup(["user"] as const)
 yield* group.changes.pipe(Stream.runForEach(renderUsers))`;
 
-<Section padding="92px 24px 66px" maxWidth={1240}>
+<Section padding="92px 24px 66px" widthMax={1240}>
   <div class="hero-grid">
     <div>
       <h1 class="hero-title">
@@ -142,7 +142,7 @@ yield* group.changes.pipe(Stream.runForEach(renderUsers))`;
   </div>
 </Section>
 
-<Section class="landing-section landing-section--alt" padding="78px 24px" maxWidth={1220}>
+<Section class="landing-section landing-section--alt" padding="78px 24px" widthMax={1220}>
   <div class="section-heading">
     <Eyebrow>native sdk . effect-spacetimedb</Eyebrow>
     <h2>Same call. Typed recovery.</h2>
@@ -164,7 +164,7 @@ yield* group.changes.pipe(Stream.runForEach(renderUsers))`;
   </div>
 </Section>
 
-<Section class="landing-section" padding="78px 24px" maxWidth={1180}>
+<Section class="landing-section" padding="78px 24px" widthMax={1180}>
   <div class="section-heading">
     <Eyebrow>effect-native value</Eyebrow>
     <h2>What Effect brings to SpacetimeDB.</h2>
@@ -226,7 +226,7 @@ yield* group.changes.pipe(Stream.runForEach(renderUsers))`;
   </div>
 </Section>
 
-<Section class="landing-section landing-section--alt" padding="78px 24px" maxWidth={1180}>
+<Section class="landing-section landing-section--alt" padding="78px 24px" widthMax={1180}>
   <div class="section-heading">
     <Eyebrow>schema . clients . subscriptions</Eyebrow>
     <h2>Stay in the same Effect vocabulary.</h2>
@@ -241,7 +241,7 @@ yield* group.changes.pipe(Stream.runForEach(renderUsers))`;
   </div>
 </Section>
 
-<Section class="landing-section" padding="82px 24px 94px" maxWidth={980}>
+<Section class="landing-section" padding="82px 24px 94px" widthMax={980}>
   <div class="outro">
     <Eyebrow>docs . llms.txt . source</Eyebrow>
     <h2>Use the docs as your implementation contract.</h2>

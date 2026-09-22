@@ -1,5 +1,5 @@
 import * as EffectVitest from "@effect/vitest"
-import * as FastCheck from "effect/testing/FastCheck"
+import * as FastCheck from "fast-check"
 import { ConnectionId, Identity, Timestamp } from "spacetimedb"
 import {
   deserializeCapturedValue,
@@ -57,9 +57,7 @@ const ownKeyShape = (value: unknown): unknown => {
   return typeof value
 }
 
-const codecPropertyOptions = {
-  fastCheck: { numRuns: 100, seed: 0xcae7_2026 },
-} as const
+const codecPropertyParameters = { numRuns: 100, seed: 0xcae7_2026 }
 
 const U128Max = (1n << 128n) - 1n
 const U256Max = (1n << 256n) - 1n
@@ -308,16 +306,16 @@ describe("captured event codec", () => {
     expect(Array.from(nested[0]?.bytes as Uint8Array)).toEqual([4, 5, 6])
   })
 
-  it.prop(
-    "serializes identically after deserialize/serialize roundtrip",
-    [generatedCapturedValueArbitrary],
-    ([original]) => {
-      const serialized = serializeCapturedValue(original)
+  it("serializes identically after deserialize/serialize roundtrip", () => {
+    FastCheck.assert(
+      FastCheck.property(generatedCapturedValueArbitrary, (original) => {
+        const serialized = serializeCapturedValue(original)
 
-      expect(
-        serializeCapturedValue(deserializeCapturedValue(serialized)),
-      ).toEqual(serialized)
-    },
-    codecPropertyOptions,
-  )
+        expect(
+          serializeCapturedValue(deserializeCapturedValue(serialized)),
+        ).toEqual(serialized)
+      }),
+      codecPropertyParameters,
+    )
+  })
 })

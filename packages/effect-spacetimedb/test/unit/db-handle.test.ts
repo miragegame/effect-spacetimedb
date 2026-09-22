@@ -27,6 +27,7 @@ import {
   StdbUniqueAlreadyExistsError,
 } from "effect-spacetimedb/server"
 import type { Bound as NativeBound } from "spacetimedb/server"
+import { indexValueCodecOf } from "../../src/index-value-codec.ts"
 import { hostCause } from "../helpers/server-runtime"
 import { TestLayer } from "../helpers/test-layer"
 
@@ -1384,32 +1385,38 @@ describe("db handle factory", (it) => {
     }),
   )
 
-  it.effect(
-    "rejects full-width composite range bounds that SpaceTimeDB 2.6.1 misroutes as points",
-    () =>
-      Effect.gen(function* () {
-        const factory = StdbTesting.makeDbHandleFactory(IndexedModule)
-        const db = factory.readwrite(makeRawDb([adaRow]) as never)
-        const failure = yield* db.user.tenantName
-          .filterToArray({
-            tenant: "tenant-a",
-            name: {
-              from: { tag: "included", value: "Ada" },
-              to: { tag: "excluded", value: "Bea" },
-            },
-          } as never)
-          .pipe(Effect.flip)
+  it("lowers optional table fields before encoding composite index ranges", () => {
+    const indexedOptionalEntry = Stdb.table("indexedOptionalEntry", {
+      columns: {
+        id: Stdb.string().primaryKey(),
+        status: Stdb.string(),
+        deliveredAt: Stdb.timestamp().optional(),
+        reason: Stdb.string().optional(),
+      },
+      indexes: [
+        Stdb.index({
+          name: "byStatusDeliveredAtReason",
+          columns: ["status", "deliveredAt", "reason"],
+          algorithm: "btree",
+        }),
+      ],
+    })
+    const codec = indexValueCodecOf(
+      indexedOptionalEntry,
+      "db.indexedOptionalEntry.byStatusDeliveredAtReason.filter",
+    )
+    const definedReasonRange = {
+      from: { tag: "excluded", value: undefined },
+      to: { tag: "unbounded" },
+    } as const
 
-        expect(failure).toBeInstanceOf(StdbDecodeError)
-        if (failure instanceof StdbDecodeError) {
-          expect(failure.phase).toBe("args")
-          expect(failure.cause).toBeInstanceOf(TypeError)
-          expect(String(failure.cause)).toContain(
-            "SpaceTimeDB 2.6.1 routes that input as a point scan",
-          )
-        }
-      }),
-  )
+    expect(
+      codec.encodeRange(
+        ["status", "deliveredAt", "reason"],
+        ["terminated", undefined, definedReasonRange],
+      ),
+    ).toEqual(["terminated", undefined, definedReasonRange])
+  })
 
   it.effect("wraps iterator next, return, and throw failures with labels", () =>
     Effect.gen(function* () {

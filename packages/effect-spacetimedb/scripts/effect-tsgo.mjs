@@ -1,27 +1,51 @@
 import { spawnSync } from "node:child_process"
-import { chmodSync } from "node:fs"
-import { createRequire } from "node:module"
+import {
+  accessSync,
+  chmodSync,
+  constants,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+} from "node:fs"
+import { basename, join } from "node:path"
+import { fileURLToPath } from "node:url"
+import getExePath from "@effect/tsgo/lib/getExePath"
 
-const require = createRequire(import.meta.url)
-const effectTsgoBin = require.resolve("@effect/tsgo/dist/effect-tsgo.js")
-
-const exeResult = spawnSync(process.execPath, [effectTsgoBin, "get-exe-path"], {
-  encoding: "utf8",
-  stdio: ["ignore", "pipe", "inherit"],
-})
-
-if (exeResult.status !== 0) {
-  process.exit(exeResult.status ?? 1)
-}
-
-const exe = exeResult.stdout.trim()
+// The CLI's `get-exe-path` command chmods the packaged executable before it
+// prints the path, which fails when node_modules is mounted read-only.
+// Its public library entry resolves the same pinned executable without writing.
+const exe = getExePath()
+let executable = exe
+let scratchDirectory
 try {
-  chmodSync(exe, 0o755)
+  accessSync(exe, constants.X_OK)
 } catch {
-  // Best effort: the package manager usually installs the binary executable.
+  const scratchRoot = fileURLToPath(new URL("../.tmp/", import.meta.url))
+  mkdirSync(scratchRoot, { recursive: true })
+  scratchDirectory = mkdtempSync(join(scratchRoot, "effect-tsgo-"))
+  executable = join(scratchDirectory, basename(exe))
+  copyFileSync(exe, executable)
+  chmodSync(executable, 0o755)
 }
 
-const result = spawnSync(exe, process.argv.slice(2), { stdio: "inherit" })
+const runCompiler = () => {
+  try {
+    return spawnSync(executable, process.argv.slice(2), {
+      stdio: "inherit",
+    })
+  } finally {
+    if (scratchDirectory !== undefined) {
+      rmSync(scratchDirectory, { recursive: true, force: true })
+    }
+  }
+}
+
+const result = runCompiler()
+if (result.error !== undefined) {
+  console.error(result.error)
+  process.exit(1)
+}
 if (result.signal !== null) {
   process.kill(process.pid, result.signal)
 }

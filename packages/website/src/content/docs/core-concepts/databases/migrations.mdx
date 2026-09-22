@@ -13,4 +13,89 @@ separate migration DSL or change the host migration model.
 
 Use `Stdb.table(...)`, `Stdb.scheduledTable(...)`, and the callable builders to
 declare the next module schema, then follow SpacetimeDB's migration guidance for
-publishing and upgrading databases.
+publishing and upgrading databases. What follows is the part of the host model
+that decides whether a redeclaration of your contract can be published over a
+live database.
+
+## What Publishing Can Change In Place
+
+Reducers, procedures, views, and HTTP handlers are not part of a migration plan
+at all. Add, remove, rename, and retype them freely.
+
+Tables are planned. `spacetime publish` computes the migration, prints it, and
+asks before applying anything that disconnects clients. These changes are
+automatic:
+
+- adding a table, or removing one that holds no rows;
+- adding or removing an index;
+- adding or removing a unique constraint, and changing which column is the
+  primary key;
+- adding or removing an auto-increment sequence — rejected if existing values
+  already fall inside the new sequence's range;
+- flipping a table between public and private;
+- appending columns **that declare a default**;
+- a layout-compatible column type change: a sum may gain variants appended at
+  the end as long as every existing variant keeps its name and position and the
+  encoded size and alignment do not change;
+- any column change at all on an event table, which holds no resident rows.
+
+These require a fresh database (`spacetime publish --delete-data`) or the
+incremental-migration pattern: removing a column, reordering columns, removing a
+table that still holds rows, changing a column to a layout-incompatible type,
+and adding or removing a schedule.
+
+The whole migration runs in one transaction. If any step fails, it rolls back
+and the database keeps its previous schema and its data.
+
+## Appending A Column
+
+A new column has to be last and has to declare a default, because the host
+materializes that default into every existing row.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const user = Stdb.table("user", {
+  columns: {
+    id: Stdb.string().primaryKey(),
+    name: Stdb.string(),
+    // Appended in a later version of this module.
+    loginCount: Stdb.u32().default(0),
+  },
+})
+```
+
+Without a default the publish is refused while the plan is computed, before the
+database is touched. A default cannot be combined with `.primaryKey()`,
+`.unique()`, or `.autoInc()`, so a new key column is never an appended column.
+Appending rewrites every row of the table and disconnects connected clients; it
+is not a metadata-only change.
+
+## Adding A Unique Or Primary Key Constraint
+
+Adding `.unique()` or `.primaryKey()` to a column of an already-populated table
+is an automatic migration when the existing rows satisfy it. When they do not,
+the migration fails and rolls back with the data intact, reporting how many
+duplicate groups it found and listing the first ten offending values with their
+occurrence counts. Columns are identified by position in that message, not by
+name.
+
+:::note
+
+SpacetimeDB's own automatic-migrations page still lists this under forbidden
+changes. The host has allowed it since the 2.7.0 release; the upstream page has
+not caught up.
+
+:::
+
+## Renaming
+
+The declared table name is both the client-facing accessor and the name the
+database stores the table under, so changing it is a rename of the table itself
+— remove plus add — and it fails while the table holds rows. Changing a module's
+case-conversion policy rewrites every stored name the same way.
+
+Columns are the exception worth knowing, because `.name("db_name")` pins the
+database column name independently of the TypeScript field name. With the
+database name pinned, renaming the field renames only the accessor, which
+migrates in place.

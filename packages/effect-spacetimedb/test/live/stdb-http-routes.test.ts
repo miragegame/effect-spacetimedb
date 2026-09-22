@@ -20,7 +20,7 @@ import {
   decodeThingId,
   decodeUserId,
   decodeUserName,
-  firstFailure,
+  failureFirst,
   LIVE_TEST_TIMEOUT_MS,
   Live,
   makeExampleSession,
@@ -186,7 +186,7 @@ describe("effect-spacetimedb live HTTP routes", () => {
               })
               .pipe(Effect.exit)
             expect(Exit.isFailure(missingExit)).toBe(true)
-            const failure = firstFailure(missingExit)
+            const failure = failureFirst(missingExit)
             if (isUserMissingError(failure)) {
               expect(failure).toMatchObject({ userId: missingUserId })
             } else {

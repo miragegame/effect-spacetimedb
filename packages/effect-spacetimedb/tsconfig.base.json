@@ -76,7 +76,13 @@
           "schemaNumber": "error",
           "strictEffectProvide": "error",
           "unnecessaryTypeofType": "error",
-          "strictBooleanExpressions": "error"
+          "strictBooleanExpressions": "error",
+
+          "floatingEffectInVitest": "error",
+          "promiseInEffectSuccess": "error",
+          "schemaLiteralNonFinite": "error",
+          "schemaOpaqueInstanceMember": "error",
+          "extendsNativeError": "error"
         },
         "overrides": [
           {

@@ -38,3 +38,7 @@ const reminderSchedule = Stdb.scheduledTable("reminder_schedule", {
 effect-spacetimedb validates auto-increment at declaration time:
 `.autoInc()` without `.primaryKey()` throws, and defaults cannot be combined with
 primary keys or auto-increment columns.
+
+`.autoInc()` is narrower than `.primaryKey()`: only the integer widths carry a
+sequence. A string, identity, UUID, timestamp, or sum primary key is a legal key
+but rejects `.autoInc()` — allocate those values in the handler.

@@ -6,6 +6,10 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as HttpBody from "effect/unstable/http/HttpBody"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as GeneratedArtifact from "../../examples/publishable-module/generated-client/index.js"
 
 const { describe, expect, live } = EffectVitest
@@ -63,6 +67,35 @@ const observeSubscriptionApplies = (
   }
 }
 
+const callRawReducerOverHttp = (params: {
+  readonly baseUrl: string
+  readonly databaseName: string
+  readonly payload: string
+  readonly reducer: string
+  readonly token: string
+}) =>
+  Effect.flatMap(HttpClient.HttpClient, (http) => {
+    // Scheduled targets are intentionally absent from generated client contracts.
+    const request = HttpClientRequest.post(
+      `${params.baseUrl.replace(/\/+$/u, "")}/v1/database/${
+        params.databaseName
+      }/call/${params.reducer}`,
+    ).pipe(
+      HttpClientRequest.bearerToken(params.token),
+      HttpClientRequest.setBody(
+        HttpBody.text(params.payload, "application/json"),
+      ),
+    )
+    return http.execute(request).pipe(
+      Effect.flatMap((response) =>
+        response.text.pipe(
+          Effect.map((body) => ({ status: response.status, body })),
+        ),
+      ),
+      Effect.scoped,
+    )
+  }).pipe(Effect.provide(FetchHttpClient.layer))
+
 describe("effect-spacetimedb live schedules", () => {
   live(
     "enforces scheduler lifecycle behavior for scheduled reducer and procedure targets",
@@ -78,9 +111,12 @@ describe("effect-spacetimedb live schedules", () => {
           yield* session
             .streamTable("procedureSchedule")
             .pipe(Stream.runDrain, Effect.forkScoped)
+          yield* session
+            .streamTable("scheduledResult")
+            .pipe(Stream.runDrain, Effect.forkScoped)
           yield* waitForPredicate(
-            () => subscriptions.appliedCount() >= 2,
-            "schedule table streams did not apply before enqueue",
+            () => subscriptions.appliedCount() >= 3,
+            "schedule and result table streams did not apply before enqueue",
             CONVERGENCE_TIMEOUT_MS,
           )
           const reducerOneShotNote = "one-shot-reducer"
@@ -180,6 +216,40 @@ describe("effect-spacetimedb live schedules", () => {
                 row.note === procedureOneShotNote,
             ).length,
           ).toBe(0)
+
+          const scheduledResults = yield* waitForRows(
+            () => session.cache.tables.scheduledResult.toArray(),
+            (rows) =>
+              rows.some((row) => row.note === reducerOneShotNote) &&
+              rows.some((row) => row.note === procedureOneShotNote),
+            "scheduled targets did not produce result rows",
+          )
+          const scheduledNotes = [reducerOneShotNote, procedureOneShotNote]
+          yield* Effect.forEach(
+            scheduledNotes,
+            (note) => {
+              const result = scheduledResults.find((row) => row.note === note)
+              expect(result).toBeDefined()
+              expect(result?.sender).toMatch(/^[0-9a-f]{64}$/u)
+              expect(result?.identity).toBe(result?.sender)
+              expect(result?.databaseIdentity).toBe(result?.sender)
+              return Effect.void
+            },
+            { discard: true },
+          )
+
+          const externalCall = yield* callRawReducerOverHttp({
+            baseUrl: live.baseUrl,
+            databaseName: live.databaseName,
+            payload:
+              '[{"scheduled_id":0,"scheduled_at":{"Interval":{"__time_duration_micros__":1000000}},"note":"external"}]',
+            reducer: wireFunction("reminderFireReducer"),
+            token: live.token,
+          })
+          expect(externalCall.status).toBe(530)
+          expect(externalCall.body).toContain(
+            "Scheduled target reminderFireReducer is only invocable by the scheduler",
+          )
 
           const generatedProcedures = (
             GeneratedArtifact as unknown as {

@@ -7,19 +7,19 @@ import { TestLayer } from "../helpers/test-layer"
 const { expect } = EffectVitest
 const describe = EffectVitest.layer(TestLayer)
 
-class GroupFailure extends Schema.TaggedErrorClass<GroupFailure>()(
+class GroupFailure extends Schema.TaggedError<GroupFailure>()(
   "GroupFailure",
   {},
   { httpApiStatus: 401 },
 ) {}
 
-class SharedFailure extends Schema.TaggedErrorClass<SharedFailure>()(
+class SharedFailure extends Schema.TaggedError<SharedFailure>()(
   "SharedFailure",
   {},
   { httpApiStatus: 409 },
 ) {}
 
-class EndpointFailure extends Schema.TaggedErrorClass<EndpointFailure>()(
+class EndpointFailure extends Schema.TaggedError<EndpointFailure>()(
   "EndpointFailure",
   {},
   { httpApiStatus: 422 },
@@ -106,11 +106,14 @@ describe("group default errors", (it) => {
   )
 
   it.effect("reports conflicting classes that reuse a group error tag", () => {
-    class GroupCollision extends Schema.TaggedErrorClass<GroupCollision>()(
+    // The tag is deliberately reused across two classes; that collision is
+    // what this test asserts the registry detects.
+    class GroupCollision extends Schema.TaggedError<GroupCollision>()(
       "Collision",
       {},
     ) {}
-    class EndpointCollision extends Schema.TaggedErrorClass<EndpointCollision>()(
+    // Deliberate duplicate of the tag above, per this test.
+    class EndpointCollision extends Schema.TaggedError<EndpointCollision>()(
       "Collision",
       {},
     ) {}
@@ -143,7 +146,7 @@ describe("group default errors", (it) => {
   })
 
   it.effect("applies typed HTTP status validation to group defaults", () => {
-    class StatuslessFailure extends Schema.TaggedErrorClass<StatuslessFailure>()(
+    class StatuslessFailure extends Schema.TaggedError<StatuslessFailure>()(
       "StatuslessFailure",
       {},
     ) {}

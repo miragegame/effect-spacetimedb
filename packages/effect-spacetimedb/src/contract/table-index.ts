@@ -1,7 +1,11 @@
 import type { AnyFieldType } from "./field.ts"
 import * as ColumnReference from "./column-reference.ts"
+import type { IndexAlgorithmSchema } from "./field-options-annotation.ts"
 
-export type IndexAlgorithm = "btree" | "hash" | "direct"
+// One definition site: the field-options annotation decodes index algorithms
+// through `IndexAlgorithmSchema`, so the type is derived from that schema rather
+// than restated here.
+export type IndexAlgorithm = typeof IndexAlgorithmSchema.Type
 
 export type IndexSpec<
   Name extends string = string,

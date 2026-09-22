@@ -18,8 +18,8 @@ import {
 import {
   callLiveProcedure,
   callLiveReducer,
+  callLiveReducerExpectingRejection,
   provideLiveTest,
-  waitForLiveServerLog,
 } from "./helpers/live-harness"
 
 type ThingRow = {
@@ -41,29 +41,35 @@ const expectThing = (
   expect(value).toEqual(expected)
 }
 
+// A reducer that fails with a declared error rejects the caller's call and
+// carries the encoded error payload back to it. The host does not record the
+// payload anywhere else, so the caller's rejection is the only observation of
+// which declared error aborted the transaction.
+const expectDeclaredAbort = (rejection: unknown, thingId: string): void => {
+  expect(String(rejection)).toContain(`"thingId":"${thingId}"`)
+}
+
 describe("effect-spacetimedb live transactions", () => {
   live(
     "commits and rolls back reducer and Tx.run writes atomically",
     () =>
       provideLiveTest(
         Effect.gen(function* () {
-          const { connection, live } = yield* makeExampleSession
+          const { connection } = yield* makeExampleSession
           yield* callLiveReducer(connection, wireFunction("thingClear"), {})
 
           const abortedThingId = decodeThingId("tx-aborted")
-          yield* callLiveReducer(
-            connection,
-            wireFunction("thingInsertThenAbort"),
-            {
-              thingId: abortedThingId,
-              label: "aborted",
-              count: 1n,
-            },
-          ).pipe(Effect.result)
-          yield* waitForLiveServerLog(
-            live.logPath,
-            `"thingId":"${abortedThingId}"`,
-            "declared reducer abort was not recorded by the live host",
+          expectDeclaredAbort(
+            yield* callLiveReducerExpectingRejection(
+              connection,
+              wireFunction("thingInsertThenAbort"),
+              {
+                thingId: abortedThingId,
+                label: "aborted",
+                count: 1n,
+              },
+            ),
+            abortedThingId,
           )
           expectThing(
             yield* callLiveProcedure<ThingRow | undefined>(
@@ -97,16 +103,16 @@ describe("effect-spacetimedb live transactions", () => {
             },
           )
 
-          const firstAtomicId = decodeThingId("tx-atomic-first")
-          const secondAtomicId = decodeThingId("tx-atomic-second")
+          const atomicIdFirst = decodeThingId("tx-atomic-first")
+          const atomicIdSecond = decodeThingId("tx-atomic-second")
           yield* callLiveReducer(
             connection,
             wireFunction("thingInsertTwiceAtomic"),
             {
-              firstThingId: firstAtomicId,
+              firstThingId: atomicIdFirst,
               firstLabel: "first",
               firstCount: 3n,
-              secondThingId: secondAtomicId,
+              secondThingId: atomicIdSecond,
               secondLabel: "second",
               secondCount: 4n,
             },
@@ -115,10 +121,10 @@ describe("effect-spacetimedb live transactions", () => {
             yield* callLiveProcedure<ThingRow | undefined>(
               connection,
               wireFunction("thingGet"),
-              { thingId: firstAtomicId },
+              { thingId: atomicIdFirst },
             ),
             {
-              id: firstAtomicId,
+              id: atomicIdFirst,
               label: "first",
               count: 3n,
             },
@@ -127,39 +133,37 @@ describe("effect-spacetimedb live transactions", () => {
             yield* callLiveProcedure<ThingRow | undefined>(
               connection,
               wireFunction("thingGet"),
-              { thingId: secondAtomicId },
+              { thingId: atomicIdSecond },
             ),
             {
-              id: secondAtomicId,
+              id: atomicIdSecond,
               label: "second",
               count: 4n,
             },
           )
 
-          const firstRollbackId = decodeThingId("tx-rollback-first")
-          const secondRollbackId = decodeThingId("tx-rollback-second")
-          yield* callLiveReducer(
-            connection,
-            wireFunction("thingInsertTwiceThenAbort"),
-            {
-              firstThingId: firstRollbackId,
-              firstLabel: "rollback first",
-              firstCount: 5n,
-              secondThingId: secondRollbackId,
-              secondLabel: "rollback second",
-              secondCount: 6n,
-            },
-          ).pipe(Effect.result)
-          yield* waitForLiveServerLog(
-            live.logPath,
-            `"thingId":"${firstRollbackId}"`,
-            "declared multi-write reducer abort was not recorded by the live host",
+          const rollbackIdFirst = decodeThingId("tx-rollback-first")
+          const rollbackIdSecond = decodeThingId("tx-rollback-second")
+          expectDeclaredAbort(
+            yield* callLiveReducerExpectingRejection(
+              connection,
+              wireFunction("thingInsertTwiceThenAbort"),
+              {
+                firstThingId: rollbackIdFirst,
+                firstLabel: "rollback first",
+                firstCount: 5n,
+                secondThingId: rollbackIdSecond,
+                secondLabel: "rollback second",
+                secondCount: 6n,
+              },
+            ),
+            rollbackIdFirst,
           )
           expectThing(
             yield* callLiveProcedure<ThingRow | undefined>(
               connection,
               wireFunction("thingGet"),
-              { thingId: firstRollbackId },
+              { thingId: rollbackIdFirst },
             ),
             undefined,
           )
@@ -167,21 +171,21 @@ describe("effect-spacetimedb live transactions", () => {
             yield* callLiveProcedure<ThingRow | undefined>(
               connection,
               wireFunction("thingGet"),
-              { thingId: secondRollbackId },
+              { thingId: rollbackIdSecond },
             ),
             undefined,
           )
 
-          const firstTxRunId = decodeThingId("tx-run-first")
-          const secondTxRunId = decodeThingId("tx-run-second")
+          const txRunIdFirst = decodeThingId("tx-run-first")
+          const txRunIdSecond = decodeThingId("tx-run-second")
           yield* callLiveProcedure(
             connection,
             wireFunction("thingInsertTwiceInTx"),
             {
-              firstThingId: firstTxRunId,
+              firstThingId: txRunIdFirst,
               firstLabel: "tx run first",
               firstCount: 7n,
-              secondThingId: secondTxRunId,
+              secondThingId: txRunIdSecond,
               secondLabel: "tx run second",
               secondCount: 8n,
             },
@@ -190,10 +194,10 @@ describe("effect-spacetimedb live transactions", () => {
             yield* callLiveProcedure<ThingRow | undefined>(
               connection,
               wireFunction("thingGet"),
-              { thingId: firstTxRunId },
+              { thingId: txRunIdFirst },
             ),
             {
-              id: firstTxRunId,
+              id: txRunIdFirst,
               label: "tx run first",
               count: 7n,
             },
@@ -202,10 +206,10 @@ describe("effect-spacetimedb live transactions", () => {
             yield* callLiveProcedure<ThingRow | undefined>(
               connection,
               wireFunction("thingGet"),
-              { thingId: secondTxRunId },
+              { thingId: txRunIdSecond },
             ),
             {
-              id: secondTxRunId,
+              id: txRunIdSecond,
               label: "tx run second",
               count: 8n,
             },

@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect"
 
 import * as Schema from "effect/Schema"
+import type * as Tracer from "effect/Tracer"
 
 import type { HttpHandlerSpec } from "../contract/http-handler.ts"
 
@@ -30,6 +31,10 @@ import type { HttpHandlerCtxLike } from "./runtime-types.ts"
 import { hostCall } from "./services.ts"
 
 import { type SyncRunner } from "./sync-runner.ts"
+
+export const handlerSpanTraceOptions = {
+  captureStackTrace: false,
+} satisfies Tracer.TraceOptions
 
 export const assertHandlerRecordOwnership = <
   RecordType extends Record<string, unknown>,

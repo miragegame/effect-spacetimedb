@@ -85,24 +85,24 @@ describe("server handler ownership", (it) => {
     "rejects handler bundles assembled by a different server instance",
     () =>
       Effect.gen(function* () {
-        const firstServer = makeServer({
+        const serverFirst = makeServer({
           module: FullModule,
           runtime: TestSyncRunner,
         })
-        const secondServer = makeServer({
+        const serverSecond = makeServer({
           module: FullModule,
           runtime: TestSyncRunner,
         })
 
-        const mismatchedHandlers = makeHandlers(secondServer)
+        const mismatchedHandlers = makeHandlers(serverSecond)
 
-        expect(() => firstServer.handlers(mismatchedHandlers)).toThrow(
+        expect(() => serverFirst.handlers(mismatchedHandlers)).toThrow(
           "Server handlers must be assembled by the same internal server instance as the compiled module",
         )
 
         expect(() =>
           assertOwnedHandlerBundle(
-            firstServer[ServerOwnerSymbol],
+            serverFirst[ServerOwnerSymbol],
             mismatchedHandlers,
           ),
         ).toThrow(

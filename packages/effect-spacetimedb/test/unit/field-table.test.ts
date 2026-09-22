@@ -69,10 +69,10 @@ describe("field and table contracts", (it) => {
         StdbTesting.fieldOptions(userTable.columns.displayName).hasDefault,
       ).toBe(true)
       expect(
-        StdbTesting.fieldOptions(userTable.columns.displayName).defaultValue,
+        StdbTesting.fieldOptions(userTable.columns.displayName).valueDefault,
       ).toBe("anonymous")
       expect(
-        StdbTesting.fieldOptions(userTable.columns.score).defaultValue,
+        StdbTesting.fieldOptions(userTable.columns.score).valueDefault,
       ).toBe(0)
     }),
   )

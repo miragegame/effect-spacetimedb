@@ -1,6 +1,6 @@
 {
   "name": "effect-spacetimedb",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Effect-first toolkit for typed SpacetimeDB modules, clients, and generated bindings.",
   "keywords": [
     "effect",
@@ -88,9 +88,7 @@
     "build": "rm -rf dist && node scripts/effect-tsgo.mjs -p tsconfig.dist.json",
     "codegen": "bun scripts/codegen.ts",
     "codegen:check": "bun scripts/codegen.ts --check",
-    "prepack": "npm run build && node scripts/prepare-pack.mjs",
-    "postpack": "node scripts/restore-pack.mjs",
-    "check:exports": "attw --pack . --profile esm-only",
+    "check:exports": "bun run attw",
     "typecheck": "node scripts/effect-tsgo.mjs -b tsconfig.build.json tsconfig.test.json examples/publishable-module/tsconfig.build.json",
     "test": "bun --bun vitest run",
     "test:coverage": "vitest run --project parallel --coverage",
@@ -98,9 +96,12 @@
     "test:mutation": "stryker run",
     "test:watch": "bun --bun vitest",
     "test:live": "bun --bun vitest run --config vitest.live.config.ts",
-    "attw": "attw --pack . --profile esm-only --no-emoji",
+    "attw": "node scripts/attw.mjs",
+    "prepack": "node scripts/reject-direct-pack.mjs",
+    "pack:archive": "node scripts/pack.mjs .tmp/publish",
     "smoke:esm-load": "node scripts/esm-load-smoke.mjs",
     "smoke:tree-shake": "node scripts/tree-shake-smoke.mjs",
+    "smoke:mixed-version": "node scripts/mixed-version-smoke.mjs",
     "smoke:packed-codegen": "node scripts/packed-codegen-smoke.mjs",
     "smoke:dev-server-node": "node scripts/dev-server-node-smoke.mjs"
   },
@@ -111,12 +112,12 @@
     "headers-polyfill": "^4"
   },
   "peerDependencies": {
-    "@effect/atom-react": "^4.0.0-beta.93",
-    "effect": "^4.0.0-beta.93",
+    "@effect/atom-react": "^4.0.0-rc.117",
+    "effect": "^4.0.0-rc.117",
     "esbuild": "^0.25",
     "react": "^19",
     "scheduler": "*",
-    "spacetimedb": "~2.6.1"
+    "spacetimedb": "~2.10.1"
   },
   "peerDependenciesMeta": {
     "@effect/atom-react": {
@@ -133,33 +134,33 @@
     }
   },
   "devDependencies": {
-    "@effect/atom-react": "4.0.0-beta.93",
+    "@effect/atom-react": "4.0.0-rc.117",
     "@arethetypeswrong/cli": "0.18.3",
     "@biomejs/biome": "2.2.2",
-    "@effect/language-service": "0.86.2",
-    "@effect/platform-node": "4.0.0-beta.93",
+    "@effect/platform-node": "4.0.0-rc.117",
+    "@effect/platform-node-shared": "4.0.0-rc.117",
     "@stryker-mutator/core": "9.6.1",
     "@stryker-mutator/vitest-runner": "9.6.1",
-    "@effect/tsgo": "0.14.0",
-    "@effect/vitest": "4.0.0-beta.93",
-    "@vitest/coverage-v8": "4.1.2",
+    "@effect/tsgo": "0.36.5",
+    "@effect/vitest": "4.0.0-rc.117",
+    "@vitest/coverage-v8": "5.0.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.0",
     "@types/node": "22.10.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.1.7",
-    "@typescript/native-preview": "7.0.0-dev.20260218.1",
     "bun-types": "1.3.0",
-    "effect": "4.0.0-beta.93",
+    "effect": "4.0.0-rc.117",
     "esbuild": "0.25.12",
+    "fast-check": "4.9.0",
     "jsdom": "^26.1.0",
-    "react": "^19.2.1",
-    "react-dom": "^19.2.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "scheduler": "*",
-    "spacetimedb": "2.6.1",
-    "typescript": "^5.9.3",
+    "spacetimedb": "2.10.1",
+    "typescript": "7.0.2",
     "undici": "^7.16.0",
-    "vitest": "4.1.2"
+    "vitest": "5.0.1"
   },
   "publishConfig": {
     "access": "public",

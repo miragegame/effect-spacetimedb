@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import * as FastCheck from "effect/testing/FastCheck"
+import * as FastCheck from "fast-check"
 import {
   IntegerTokenKey,
   isIntegerToken,
@@ -12,12 +12,11 @@ import {
   markIntegerNumbers,
   parseJsonPreservingIntegers,
 } from "../../src/client/http-json/http-json-parser.ts"
+import { effectProperty } from "../helpers/effect-property"
 
 const { describe, expect, it } = EffectVitest
 
-const parserPropertyOptions = {
-  fastCheck: { numRuns: 100, seed: 0x1eaf_2026 },
-} as const
+const parserPropertyParameters = { numRuns: 100, seed: 0x1eaf_2026 }
 
 const nonRepresentableIntegers = [
   2n ** 53n + 1n,
@@ -65,50 +64,60 @@ const expectIntegerTokenDigits = (value: unknown): string => {
 }
 
 describe("HTTP JSON integer parser properties", () => {
-  it.effect.prop(
+  it.effect(
     "agrees structurally with JSON.parse after integer tokens are normalized",
-    [FastCheck.jsonValue()],
-    ([value]) =>
-      Effect.gen(function* () {
-        const text = JSON.stringify(value)
-        const parsed = yield* parseJsonPreservingIntegers(text)
+    () =>
+      effectProperty(
+        FastCheck.jsonValue(),
+        (value) =>
+          Effect.gen(function* () {
+            const text = JSON.stringify(value)
+            const parsed = yield* parseJsonPreservingIntegers(text)
 
-        expect(integerTokensToNumbers(parsed)).toEqual(nativeJsonParse(text))
-      }),
-    parserPropertyOptions,
+            expect(integerTokensToNumbers(parsed)).toEqual(
+              nativeJsonParse(text),
+            )
+          }),
+        parserPropertyParameters,
+      ),
   )
 
-  it.effect.prop(
-    "is injective for nested reserved and escaped token keys",
-    [FastCheck.jsonValue(), FastCheck.string()],
-    ([nested, textValue]) =>
-      Effect.gen(function* () {
-        const value = {
-          [IntegerTokenKey]: textValue,
-          nested: {
-            [IntegerTokenKey]: nested,
-            [`$effectSpacetimeDbEscaped:${IntegerTokenKey}`]: textValue,
-          },
-        }
-        const text = JSON.stringify(value)
-        const parsed = yield* parseJsonPreservingIntegers(text)
-
-        expect(integerTokensToNumbers(parsed)).toEqual(nativeJsonParse(text))
+  it.effect("is injective for nested reserved and escaped token keys", () =>
+    effectProperty(
+      FastCheck.record({
+        nested: FastCheck.jsonValue(),
+        textValue: FastCheck.string(),
       }),
-    parserPropertyOptions,
+      ({ nested, textValue }) =>
+        Effect.gen(function* () {
+          const value = {
+            [IntegerTokenKey]: textValue,
+            nested: {
+              [IntegerTokenKey]: nested,
+              [`$effectSpacetimeDbEscaped:${IntegerTokenKey}`]: textValue,
+            },
+          }
+          const text = JSON.stringify(value)
+          const parsed = yield* parseJsonPreservingIntegers(text)
+
+          expect(integerTokensToNumbers(parsed)).toEqual(nativeJsonParse(text))
+        }),
+      parserPropertyParameters,
+    ),
   )
 
-  it.effect.prop(
-    "preserves generated integer digit strings exactly",
-    [FastCheck.bigInt()],
-    ([integer]) =>
-      Effect.gen(function* () {
-        const text = integer.toString()
-        const parsed = yield* parseJsonPreservingIntegers(text)
+  it.effect("preserves generated integer digit strings exactly", () =>
+    effectProperty(
+      FastCheck.bigInt(),
+      (integer) =>
+        Effect.gen(function* () {
+          const text = integer.toString()
+          const parsed = yield* parseJsonPreservingIntegers(text)
 
-        expect(expectIntegerTokenDigits(parsed)).toBe(text)
-      }),
-    parserPropertyOptions,
+          expect(expectIntegerTokenDigits(parsed)).toBe(text)
+        }),
+      parserPropertyParameters,
+    ),
   )
 
   it.effect(
@@ -141,16 +150,17 @@ describe("HTTP JSON integer parser properties", () => {
     ),
   )
 
-  it.effect.prop(
-    "matches JSON.parse rejection parity",
-    [FastCheck.string()],
-    ([body]) =>
-      Effect.gen(function* () {
-        const exit = yield* Effect.exit(parseJsonPreservingIntegers(body))
+  it.effect("matches JSON.parse rejection parity", () =>
+    effectProperty(
+      FastCheck.string(),
+      (body) =>
+        Effect.gen(function* () {
+          const exit = yield* Effect.exit(parseJsonPreservingIntegers(body))
 
-        expect(Exit.isFailure(exit)).toBe(jsonParseThrows(body))
-      }),
-    parserPropertyOptions,
+          expect(Exit.isFailure(exit)).toBe(jsonParseThrows(body))
+        }),
+      parserPropertyParameters,
+    ),
   )
 
   it.effect("fails malformed JSON with a typed schema error", () =>

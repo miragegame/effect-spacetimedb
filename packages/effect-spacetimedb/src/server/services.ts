@@ -1,8 +1,10 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import type * as Stream from "effect/Stream"
+import type { TimeDuration } from "spacetimedb"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import type { AnyTableSpec } from "../contract/table.ts"
+import type { BodyInit, Headers } from "../http-primitives.ts"
 import type {
   ColumnKey,
   PrimaryKeyNames,
@@ -227,13 +229,29 @@ export class StdbDeclaredErrorEncodingFailure extends Data.TaggedError(
 }> {}
 
 export type HttpResponseLike = {
+  readonly status: number
   readonly text: () => string
   readonly json: () => unknown
   readonly bytes: () => Uint8Array
 }
 
+type ProcedureHttpHeadersInit =
+  | Array<[string, string]>
+  | Record<string, string>
+  | Headers
+
+export type ProcedureHttpRequestOptions = {
+  readonly body?: BodyInit | null
+  readonly headers?: ProcedureHttpHeadersInit
+  readonly method?: string
+  readonly timeout?: TimeDuration
+}
+
 export type RawProcedureHttp = {
-  readonly fetch: (url: string, init?: unknown) => HttpResponseLike
+  readonly fetch: (
+    url: string,
+    init?: ProcedureHttpRequestOptions,
+  ) => HttpResponseLike
 }
 
 export type EffectHttpClient = {
@@ -308,24 +326,24 @@ type RangeAccessorFromColumns<
   Readonly extends boolean,
 > = {
   readonly filterToArray: (
-    range: IndexRange<Table, Columns, "structural", true, false>,
+    range: IndexRange<Table, Columns, "structural", true>,
   ) => DbEffect<ReadonlyArray<TableRow<Table>>>
   readonly filterStream: (
-    range: IndexRange<Table, Columns, "structural", true, false>,
+    range: IndexRange<Table, Columns, "structural", true>,
   ) => DbStream<TableRow<Table>>
   readonly unsafe: {
     readonly filter: (
-      range: IndexRange<Table, Columns, "structural", true, false>,
+      range: IndexRange<Table, Columns, "structural", true>,
     ) => DbEffect<Iterable<TableRow<Table>>>
   }
 } & (Readonly extends true
   ? {}
   : {
       readonly delete: (
-        range: IndexRange<Table, Columns, "structural", true, false>,
+        range: IndexRange<Table, Columns, "structural", true>,
       ) => DbEffect<number>
       readonly deleteAll: (
-        range: IndexRange<Table, Columns, "structural", true, false>,
+        range: IndexRange<Table, Columns, "structural", true>,
       ) => DbEffect<number>
     })
 

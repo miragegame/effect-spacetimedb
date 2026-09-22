@@ -15,4 +15,5 @@ export type {
   MakeOptions,
   ServerInstance,
 } from "./handler-types.ts"
-export { make, makeFromModulePlan } from "./bind-from-module-plan.ts"
+export { makeFromModulePlan } from "./bind-from-module-plan.ts"
+export { make } from "./bind-make.ts"

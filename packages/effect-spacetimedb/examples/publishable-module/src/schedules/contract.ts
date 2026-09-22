@@ -31,6 +31,21 @@ export const ScheduleFunctions = Stdb.StdbGroup.make("Schedules")
     }),
   )
   .add(
+    Stdb.StdbFn.reducer("scheduleDeleteCandidate", {
+      params: Stdb.struct({
+        note: String255,
+      }),
+    }),
+  )
+  .add(
+    Stdb.StdbFn.reducer("replaceScheduledReducerNote", {
+      params: Stdb.struct({
+        existingNote: String255,
+        replacementNote: String255,
+      }),
+    }),
+  )
+  .add(
     Stdb.StdbFn.scheduledReducer("reminderFireReducer", {
       table: reducerSchedule,
     }),

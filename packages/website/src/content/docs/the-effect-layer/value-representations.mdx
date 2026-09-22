@@ -76,6 +76,14 @@ permits them.
 in authored server and generated-client values. Their HTTP JSON shape is the
 schema-encoded representation produced by `Stdb.httpCodec(...)`.
 
+These classes validate their own input, and construction is where a malformed
+value is caught: a non-integer number, a boolean, an array, `null`, a blank
+string, or a string that is not valid hex or a valid UUID is refused outright.
+Decoding runs that check inside the library's typed boundary, so an HTTP body
+carrying `{"__identity__": "not-hex"}` or `{"__uuid__": [42]}` fails with
+`StdbDecodeError` in the error channel instead of surfacing as a raw
+`TypeError` defect.
+
 ## HTTP JSON Profile
 
 HTTP JSON input preparation rewrites exact `{ some: value }` option envelopes,

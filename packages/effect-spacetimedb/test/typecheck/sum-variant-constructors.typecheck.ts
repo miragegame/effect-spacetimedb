@@ -58,12 +58,12 @@ const CollisionNames = Stdb.sum({
   }),
   name: Stdb.unit(),
 })
-const defaultContent = CollisionNames.make.default({ value: 1 })
+const contentDefault = CollisionNames.make.default({ value: 1 })
 const nameContent = CollisionNames.make.name
 
-type _DefaultContent = Assert<
+type _ContentDefault = Assert<
   IsEqual<
-    typeof defaultContent,
+    typeof contentDefault,
     Extract<Stdb.TypeOf<typeof CollisionNames>, { readonly tag: "default" }>
   >
 >

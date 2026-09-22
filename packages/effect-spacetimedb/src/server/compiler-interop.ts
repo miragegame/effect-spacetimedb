@@ -67,15 +67,38 @@ type CompilerRowBridge = {
   readonly row: Record<string, CompilerColumnBridge>
 }
 
+/**
+ * Function-side schedule registration option. The native table handle is the
+ * one `schema()` registered for the scheduled table; upstream resolves it back
+ * to a table name through its own `tableSourceNames` map.
+ */
+export type CompilerScheduleOptions = {
+  readonly onSchedule: unknown
+}
+
 export type CompilerSchemaBridge = {
   readonly reducer: (
-    params: unknown,
-    handler: (ctx: unknown, rawArgs: unknown) => void,
+    ...args:
+      | [params: unknown, handler: (ctx: unknown, rawArgs: unknown) => void]
+      | [
+          options: CompilerScheduleOptions,
+          params: unknown,
+          handler: (ctx: unknown, rawArgs: unknown) => void,
+        ]
   ) => ModuleExport
   readonly procedure: (
-    params: unknown,
-    returnType: unknown,
-    handler: (ctx: unknown, rawArgs: unknown) => unknown,
+    ...args:
+      | [
+          params: unknown,
+          returnType: unknown,
+          handler: (ctx: unknown, rawArgs: unknown) => unknown,
+        ]
+      | [
+          options: CompilerScheduleOptions,
+          params: unknown,
+          returnType: unknown,
+          handler: (ctx: unknown, rawArgs: unknown) => unknown,
+        ]
   ) => ModuleExport
   readonly view: (
     options: { readonly name: string; readonly public: boolean },
@@ -215,28 +238,27 @@ export const applyCompilerAutoInc = (builder: unknown): unknown =>
     ? (builder as AutoIncrementableTypeBuilder).autoInc()
     : unsupportedCompilerColumnMethod("autoInc()")
 
-export const withCompilerScheduledTarget = <Options extends object>(
-  options: Options,
-  resolveTarget: () => unknown,
-): Options =>
-  ({
-    ...options,
-    scheduled: resolveTarget,
-  }) as never
-
 export const defineCompilerReducer = (
   schema: CompilerSchemaBridge,
   params: unknown,
   handler: (ctx: unknown, rawArgs: unknown) => void,
-): ModuleExport => schema.reducer(params as never, handler as never)
+  onSchedule?: unknown,
+): ModuleExport =>
+  onSchedule === undefined
+    ? schema.reducer(params as never, handler as never)
+    : schema.reducer({ onSchedule }, params as never, handler as never)
 
 export const defineCompilerHostReducer = (
   schema: CompilerSchemaBridge,
   params: unknown,
   handler: (ctx: CompilerReducerHostCtx, rawArgs: unknown) => void,
+  onSchedule?: unknown,
 ): ModuleExport =>
-  defineCompilerReducer(schema, params, (ctx, rawArgs) =>
-    handler(ctx as CompilerReducerHostCtx, rawArgs),
+  defineCompilerReducer(
+    schema,
+    params,
+    (ctx, rawArgs) => handler(ctx as CompilerReducerHostCtx, rawArgs),
+    onSchedule,
   )
 
 export const defineCompilerProcedure = (
@@ -244,17 +266,30 @@ export const defineCompilerProcedure = (
   params: unknown,
   returnType: unknown,
   handler: (ctx: unknown, rawArgs: unknown) => unknown,
+  onSchedule?: unknown,
 ): ModuleExport =>
-  schema.procedure(params as never, returnType as never, handler as never)
+  onSchedule === undefined
+    ? schema.procedure(params as never, returnType as never, handler as never)
+    : schema.procedure(
+        { onSchedule },
+        params as never,
+        returnType as never,
+        handler as never,
+      )
 
 export const defineCompilerHostProcedure = (
   schema: CompilerSchemaBridge,
   params: unknown,
   returnType: unknown,
   handler: (ctx: CompilerProcedureHostCtx, rawArgs: unknown) => unknown,
+  onSchedule?: unknown,
 ): ModuleExport =>
-  defineCompilerProcedure(schema, params, returnType, (ctx, rawArgs) =>
-    handler(ctx as CompilerProcedureHostCtx, rawArgs),
+  defineCompilerProcedure(
+    schema,
+    params,
+    returnType,
+    (ctx, rawArgs) => handler(ctx as CompilerProcedureHostCtx, rawArgs),
+    onSchedule,
   )
 
 export const defineCompilerView = (

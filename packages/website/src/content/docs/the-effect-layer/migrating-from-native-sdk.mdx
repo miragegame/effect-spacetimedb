@@ -34,7 +34,6 @@ const spacetime = schema({
 })
 
 export const user_upsert = spacetime.reducer(
-  "user_upsert",
   { id: t.string(), name: t.string() },
   (ctx, { id, name }) => {
     ctx.db.user.insert({ id, name })
@@ -89,8 +88,14 @@ const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
 | reducer function export | `StdbFn.reducer(...)` in a callable group |
 | procedure function export | `StdbFn.procedure(...)` in a callable group |
 | table builder | `Stdb.table(...)` bound to a variable |
-| scheduled table callback | `StdbFn.scheduledReducer(...)` or `scheduledProcedure(...)` |
+| `reducer`/`procedure` `onSchedule` option | `StdbFn.scheduledReducer(...)` or `scheduledProcedure(...)` |
 | HTTP handler export | `StdbHttpGroup` plus `StdbBuilder.group(...)` |
+
+Schedules are registered on the function, not the table: `StdbFn.scheduledReducer(...)`
+and `scheduledProcedure(...)` compile to the native `onSchedule` option, which is
+where SpacetimeDB now expects the binding. If you are porting a module that
+passes `scheduled` to `table(...)`, that registration is deprecated upstream —
+drop it and declare the scheduled callable instead.
 
 ## Suggested Order
 

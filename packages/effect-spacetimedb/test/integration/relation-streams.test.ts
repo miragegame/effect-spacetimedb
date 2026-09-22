@@ -309,11 +309,11 @@ const collectBlockedUserInsertIds = Effect.fn(function* (params: {
   )
   yield* params.awaitSubscribeCalls(1)
   params.applySubscription()
-  const [firstRow, ...queuedRows] = params.rows
-  if (firstRow != null) {
+  const [rowFirst, ...queuedRows] = params.rows
+  if (rowFirst != null) {
     params.userRelation.emitInsert(
       reducerContext("userUpsert"),
-      rawUserRow(firstRow.id, firstRow.name),
+      rawUserRow(rowFirst.id, rowFirst.name),
     )
   }
   yield* Deferred.await(firstChangeSeen)
@@ -418,11 +418,11 @@ const collectBlockedPresenceEventOverflowExit = Effect.fn(function* (params: {
   )
   yield* params.awaitSubscribeCalls(1)
   params.applySubscription()
-  const [firstRow, ...queuedRows] = params.rows
-  if (firstRow != null) {
+  const [rowFirst, ...queuedRows] = params.rows
+  if (rowFirst != null) {
     params.eventRelation.emitInsert(
       reducerContext("presenceEmit"),
-      rawPresenceRow(firstRow.userId, firstRow.kind),
+      rawPresenceRow(rowFirst.userId, rowFirst.kind),
     )
   }
   yield* Deferred.await(firstEventSeen)
@@ -993,7 +993,7 @@ describe("relation streams", () => {
 
       expect(error).toBeInstanceOf(StdbTesting.WaitUntilTimeoutError)
       if (error instanceof StdbTesting.WaitUntilTimeoutError) {
-        expect(error.lastSnapshotSize).toBe(2)
+        expect(error.snapshotSizeLast).toBe(2)
         expect(error.table).toBe("user")
       }
     }).pipe(Effect.scoped),

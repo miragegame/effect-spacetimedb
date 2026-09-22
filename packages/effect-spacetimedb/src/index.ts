@@ -73,7 +73,11 @@ export {
   wireNameForDecl,
   wireNameOf,
 } from "./builder.ts"
-export type { CallFailure, RawCallFailure } from "./client/call-errors.ts"
+export {
+  type CallFailure,
+  ConnectionLostError,
+  type RawCallFailure,
+} from "./client/call-errors.ts"
 export type { ResultValuesOf } from "./client/result-values.ts"
 export {
   identityEquals,
@@ -287,6 +291,8 @@ export {
   option,
   optional,
   result,
+  type FieldOptionsAnnotationOrigin,
+  StdbFieldOptionsVersionError,
   StdbTypeIdentifierError,
   StdbTypeNotNameableError,
   StdbValueCodecError,

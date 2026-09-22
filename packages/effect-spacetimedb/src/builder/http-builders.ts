@@ -287,30 +287,35 @@ export const StdbFn = {
   procedure: procedureEndpoint,
   scheduledReducer: scheduledReducerEndpoint,
   scheduledProcedure: scheduledProcedureEndpoint,
-  view: <const Name extends string, const Returns extends AnyValueType>(
+  view: <
+    const Name extends string,
+    const Returns extends AnyValueType,
+    const Public extends boolean = true,
+  >(
     name: Name,
-    spec: { readonly returns: Returns; readonly public?: boolean },
-  ): SenderViewDecl<Name, Returns> => ({
+    spec: { readonly returns: Returns; readonly public?: Public },
+  ): SenderViewDecl<Name, Returns, Public> => ({
     declKind: "view",
     name,
     spec: defineSenderView({
       public: spec.public ?? true,
       returns: spec.returns,
-    }) as SenderViewDecl<Name, Returns>["spec"],
+    }) as SenderViewDecl<Name, Returns, Public>["spec"],
   }),
   anonymousView: <
     const Name extends string,
     const Returns extends AnyValueType,
+    const Public extends boolean = true,
   >(
     name: Name,
-    spec: { readonly returns: Returns; readonly public?: boolean },
-  ): AnonymousViewDecl<Name, Returns> => ({
+    spec: { readonly returns: Returns; readonly public?: Public },
+  ): AnonymousViewDecl<Name, Returns, Public> => ({
     declKind: "view",
     name,
     spec: defineAnonymousView({
       public: spec.public ?? true,
       returns: spec.returns,
-    }) as AnonymousViewDecl<Name, Returns>["spec"],
+    }) as AnonymousViewDecl<Name, Returns, Public>["spec"],
   }),
   init: (): LifecycleDecl<"init"> => ({
     declKind: "lifecycle",

@@ -105,3 +105,39 @@ const MainLive = Example.client.ws.layerGenerated(
 The native generated client still owns the actual WebSocket
 connection. effect-spacetimedb layers typed Effect services, scoped sessions,
 and projected HTTP clients over the module contract.
+
+## Connection Failures
+
+The handshake is the dividing line. A failure before the connection is
+established fails the scoped acquisition with `WsConnectError`; a failure after
+it is a connection loss, which invalidates the session and fails in-flight and
+subsequent calls with `ConnectionLostError`.
+
+| What happened | During acquisition | On an established session |
+| --- | --- | --- |
+| Socket error before the handshake | `WsConnectError` with the socket error as `cause` | — |
+| Socket error after the handshake | `WsConnectError` with the socket error as `cause` | `ConnectionLostError` whose `raw` is that error's message |
+| Close with no reported error | `WsConnectError` with `cause: undefined` | `ConnectionLostError` with `raw: "WebSocket connection disconnected"` |
+| Connect timeout | `WsConnectError` whose `cause` is `WsConnectTimeoutError` | — |
+| Generated client missing contract relations | `GeneratedArtifactShapeError`, naming the missing keys | — |
+
+A socket error raised *after* the handshake never arrives as a connect error.
+The SDK records it, closes the socket, and reports it on the disconnect path, so
+`cause` is what distinguishes a connection that died with a reason from one that
+simply closed. The causeless case covers both a clean close and the close the
+SDK performs when an inbound frame fails to decompress.
+
+In a browser, `onerror` hands the SDK an `ErrorEvent` rather than an `Error`.
+The SDK normalizes that to an `Error` carrying the event's message, with the
+original event on `.cause`, so `WsConnectError.cause` is an `Error` on every
+runtime.
+
+`ConnectionLostError` means the client never observed a terminal response for a
+call. The reducer or procedure may already have committed on the server. Treat
+the outcome as unknown, prefer idempotent mutations, and reconcile from the
+replacement session's subscribed state before retrying anything that is not.
+
+A bare scoped session surfaces terminal invalidation and stops there. Long-lived
+clients can opt into the package supervisor for bounded acquisition, jittered
+reconnect backoff, scoped per-session setup, and resubscription; a reconnect
+after a causeless close behaves exactly like one after a reported socket error.

@@ -50,6 +50,15 @@ named import in JavaScript.
 | `Stdb.uuid()` | `spacetimedb.Uuid` | UUID | Native UUID object. |
 | `Stdb.unit()` | `void` / `undefined` | unit | Empty payload marker for sums, results, and scheduled procedure returns. |
 
+The five id-like natives — `Stdb.identity()`, `Stdb.connectionId()`,
+`Stdb.timestamp()`, `Stdb.timeDuration()`, and `Stdb.uuid()` — validate at
+construction: the SpacetimeDB constructors reject anything that is not a
+`bigint`, an integer `number`, or a well-formed string, and a blank string is
+not well-formed. Where such a value arrives from outside the process, that
+rejection is reported as a typed `StdbDecodeError` on the decode boundary, not
+as a defect, so a malformed `__identity__` or `__uuid__` in an HTTP body fails
+the call rather than killing the fiber.
+
 `Stdb.bigint()` is not the same as the fixed-width integer helpers. Use
 `Stdb.bigint()` when the database column should be a SATS string carrying a
 JSON-safe arbitrary integer. Use `i64`/`u64`/`i128`/`u128`/`i256`/`u256` when the
@@ -71,6 +80,12 @@ stay a `bigint`.
 | `Stdb.result(Ok, Err)` | Effect-style result envelope | SATS result | Normalizes host `{ ok }` / `{ err }` envelopes. |
 | `Stdb.lazy(() => T)` | recursive value | lazy SATS type | Use for recursive structs or sums. |
 | `Stdb.custom(schema, { type })` | schema-authored value | lowering of `type` | Keep the SpaceTimeDB lowering explicit when wrapping custom schemas. |
+
+`Stdb.sum(...)` and `Stdb.enum(...)` columns are key- and index-capable. They
+key on the whole encoded value, so each payload of a variant is its own key.
+`.autoInc()` is not available on them. See
+[Constraints](/core-concepts/tables/constraints) and
+[Indexes](/core-concepts/tables/indexes).
 
 ## Type names
 

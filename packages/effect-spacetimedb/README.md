@@ -22,17 +22,19 @@ API reference — is at **https://effect-stdb.dev**.
 ## Installation
 
 ```sh
-npm install effect-spacetimedb effect@4.0.0-beta.93 spacetimedb@2.6.1
+npm install effect-spacetimedb effect@4.0.0-rc.117 spacetimedb@2.10.1
 ```
 
-`effect-spacetimedb` targets **Effect v4 (beta)** and **SpacetimeDB 2.6.x** as
-required peer dependencies. Pin both explicitly. This repository locks the SDK
-and CLI to exactly **2.6.1** for code generation and host compatibility; the
-published peer range intentionally accepts compatible 2.6.x SDK patches.
-This workspace also carries fixes for three published 2.6.1 SDK defects:
-`Result.err` serialization, primitive `Prettify`, and native TableCache range
-comparison. Bun applies those patches only inside this workspace; npm consumers
-must carry equivalent fixes until upstream publishes them.
+`effect-spacetimedb` targets **Effect v4 (release candidate)** and
+**SpacetimeDB 2.10.x** as required peer dependencies. Pin both explicitly. This
+repository locks the SDK and CLI to exactly **2.10.1** for code generation and
+host compatibility; the published peer range intentionally accepts compatible
+2.10.x SDK patches.
+This workspace also carries fixes for four published SDK defects: `Result.err`
+serialization, primitive `Prettify`, native TableCache range comparison, and
+server index uniqueness checks. Bun applies those patches only inside this
+workspace; npm consumers must carry equivalent fixes until upstream publishes
+them.
 `@effect/atom-react` and `react` are
 optional peers, needed only for the `effect-spacetimedb/client/atom` entrypoint.
 
@@ -226,8 +228,8 @@ export const AppModuleExports: Stdb.ModuleExports<typeof Module> =
 
 Public WebSocket cache tables expose native `count()`, unique/primary-key
 `find(...)`, and btree `filter(...)` accessors. Inputs are encoded per indexed
-column and only matching rows are decoded. SpacetimeDB 2.6.1 currently scans
-inside these native accessors; this wrapper avoids decoding unrelated rows and
+column and only matching rows are decoded. SpacetimeDB currently scans inside
+these native accessors; this wrapper avoids decoding unrelated rows and
 inherits future native index improvements automatically. Hash-indexed generated
 clients are rejected with a typed artifact-shape error because the native cache
 cannot construct them.
@@ -277,6 +279,17 @@ Build and codegen stay in your normal build step:
 spacetime build --module-path <dir>
 spacetime generate --lang typescript --js-path <dir>/dist/bundle.js --out-dir <clientDir>
 ```
+
+`spacetime generate` keys the generated `db` and `tables` accessors by the
+**camelCase** spelling of each relation's name, and defines a `@deprecated`
+snake_case alias for every name whose camelCase spelling differs.
+`effect-spacetimedb` resolves tables, event tables and views alike by the
+contract key, which a camelCase-canonical declared name makes identical to the
+generated accessor key under either name policy. Deprecated aliases are never
+resolved: a client missing a camelCase accessor fails acquisition with a typed
+artifact-shape error naming the missing keys. Only SQL and subscription text
+use the wire name, so a `snake_case` module still queries `all_users` while its
+rows arrive through the `allUsers` accessor.
 
 Import the generated client from `<clientDir>` in your app or test code, then
 pass the exact prebuilt bundle to the dev server:
@@ -424,9 +437,15 @@ with a null connection id; effect-spacetimedb rejects other callers unless the
 decl opts into `allowExternalCallers: true`. The host delay queue caps future
 delivery at roughly 2.17 years.
 
-For fixed wall-clock or tick alignment, prefer the self-rescheduling one-shot
-pattern: handle a `Time` row, then insert the next `Time` row before returning.
-Use `Interval` only when persistence with simple re-fire spacing is sufficient.
+`Interval` rows do not drift: the host computes the next fire from the previous
+*intended* time plus the interval, skipping ticks it missed, and the first fire
+of a new row is one interval away. Reach for the self-rescheduling one-shot
+pattern — handle a `Time` row, then insert the next `Time` row before returning —
+only when the target is a wall-clock or cron alignment an interval cannot
+express. Scheduled functions are dispatched concurrently and already-expired
+rows are not delivered in strict `scheduledAt` order, so a scheduled procedure
+that does IO between transactions must claim its work in the transaction that
+selects it.
 
 A branded domain type is a plain Effect schema — the single source of truth, e.g.
 `const UserId = Schema.String.pipe(Schema.brand("App/UserId"))` — used directly in app
@@ -625,6 +644,18 @@ synchronous `setTimeout`/`setImmediate` drains when those globals are absent; Ef
 scheduler requires one of them during module evaluation. Dev-guarded handlers throw
 on either timer instead. This deliberate bootstrap-only divergence does not make
 user timers supported: handler code must remain synchronous in every mode.
+
+### Observing defects
+
+`build(...)` and `Server.make(...)` accept an optional `onDefect: (cause:
+Cause.Cause<unknown>) => void`. It is called synchronously, before the host
+boundary rethrows, with the cause of any handler that *died* — an invariant
+violation rather than a declared failure. Typed errors never reach it, and the
+cause is only observed: it is re-raised unchanged, so the handler still throws
+and its transaction still aborts. That makes the hook safe for reporting
+channels that must not alter module behavior — a fault-injection harness, a
+property reporter, a metrics counter. Keep the callback synchronous, cheap and
+non-throwing: it runs inside the handler's own transaction window.
 
 For focused timing investigations, install `consoleTimerTracerLayer` from
 `effect-spacetimedb/server`. It mirrors spans to `console.time`/`timeEnd`, which
@@ -890,9 +921,55 @@ with a concrete error context should use `client.ws.tag<ErrorContext>()`; typed
 tags share the same runtime key as `Session`, so do not mix mismatched
 compile-time contexts for the same module/name pair.
 
-`connectTimeoutMillis` is optional and has no library default. Set an
-application-appropriate bound (10 seconds is a reasonable starting point) so a
-native builder that never invokes a connect callback cannot strand acquisition.
+Bare scoped acquisition keeps `connectTimeoutMillis` optional and has no
+library default. Set an application-appropriate bound (10 seconds is a
+reasonable starting point) so a native builder that never invokes a connect
+callback cannot strand acquisition.
+
+Long-lived clients should use a session supervisor. It creates a fresh scoped
+connection after invalidation, re-establishes registered subscription targets,
+and publishes both the current session and its connection phase. A timeout is
+required because connection, subscription, and setup must all complete within
+a bounded activation attempt:
+
+```ts
+import { wsSupervisorGenerated } from "effect-spacetimedb/client"
+import { supervisedSessionAtom } from "effect-spacetimedb/client/atom"
+
+const supervisorEffect = wsSupervisorGenerated({
+  module: Example.module,
+  config: {
+    DbConnection,
+    uri,
+    databaseName,
+    token,
+    connectTimeoutMillis: 10_000,
+  },
+  subscriptionTargets: [Example.targets.allPublicTables()],
+})
+
+const connectionAtom = supervisedSessionAtom(supervisorEffect)
+```
+
+The default retry schedule is jittered exponential backoff starting at 250 ms
+and capped at 30 seconds. All supervisor constructors park deterministic
+unsupported-builder failures, and generated supervisors additionally park
+artifact-shape failures; `policy` can override the delays, jitter, or retry
+predicate. During reconnect, the session signal retains the previous session as
+`AsyncResult.waiting(previous)` so atoms can keep stale data visible;
+consumers must resolve the signal again before each operation rather than cache a
+session, connection, or table cache across attempts. Before any session has
+become live, a retryable activation failure is published as a waiting failure so
+default consumers can render or degrade while the supervisor keeps retrying.
+Consumers that pass `suspendOnWaiting: true` should do so only when a previous
+success exists; otherwise a permanent cold-start failure would remain suspended.
+The optional scoped `setup` effect runs once per live session and is finalized
+before the next attempt, which is appropriate for per-session heartbeats and
+registration. A defect in acquisition or setup publishes a fatal
+`WsSessionSupervisorDefectError` instead of silently terminating the supervisor
+fiber. A fatal phase is terminal for that supervisor handle's scope; an owner
+that deliberately wants to retry a defect must build a new handle in a fresh
+scope.
 
 Use named tags when a module needs multiple sessions in one environment
 (`Example.client.ws.tag("main")` + `Example.client.ws.layerGenerated(..., { name: "main" })`).
@@ -1023,11 +1100,9 @@ const membership = yield* db.membership.membership_email_tenant_idx.find({ email
 ```
 
 Server btree accessors accept structural `{ from, to }` bounds; the compiler
-converts them to the native host `Range` class after encoding each bound. Due to
-a SpaceTimeDB 2.6.1 host bug, a composite tuple whose final range occupies the
-full index width is routed as a point scan. The wrapper rejects that form at
-compile time and runtime: use a shorter prefix range, or pass a full-width tuple
-of scalar values for an exact point lookup.
+converts them to the native host `Range` class after encoding each bound. A
+composite tuple whose final element is a range may span the full index width,
+and a full-width tuple of scalar values remains an exact point lookup.
 
 Native-style lazy iterables are available only under `unsafe`:
 
@@ -1084,20 +1159,29 @@ payloads can use their own semantic names.
 |---|---|---|
 | Connect a generated WebSocket client | `WsConnectError` (its `cause` may be `WsConnectTimeoutError` or `WsUnsupportedBuilderFeatureError`) | `WsConnectError` is root and `/client`; cause classes are `/client` |
 | Subscribe or stream | `SubscriptionRejectedError`, `SubscriptionTransportError`, `SubscriptionInvalidatedError` | Classes are `/client`; root exports the `SubscriptionFailure` union |
-| Typed reducer/procedure call | Declared error union, `RemoteRejectedError`, `TransportError`, `StdbDecodeError` via `CallFailure<E>` | Root and `/client` |
-| Raw reducer/procedure call | `DomainCallError<E>`, `RemoteRejectedError`, `TransportError`, `StdbDecodeError` via `RawCallFailure<E>` | Root and `/client` |
+| Supervise a long-lived WebSocket session | Acquisition/setup failures plus `WsSessionSupervisorDefectError` for defects | `/client` |
+| Typed reducer/procedure call | Declared error union, `ConnectionLostError`, `RemoteRejectedError`, `TransportError`, `StdbDecodeError` via `CallFailure<E>` | Root and `/client` |
+| Raw reducer/procedure call | `DomainCallError<E>`, `ConnectionLostError`, `RemoteRejectedError`, `TransportError`, `StdbDecodeError` via `RawCallFailure<E>` | Root and `/client` |
 | Generated-client validation | `GeneratedArtifactShapeError`, `WsUnsupportedBuilderFeatureError` | `/client` |
 | Code generation | `CodegenCliVersionError`, `CodegenCliExecutionError`, `CodegenEsbuildMissingError`, `CodegenBundleError`, `CodegenFileSystemError`, `CodegenArtifactDirectoryError`, `ArtifactDriftError` | `/codegen` only |
 | Server host/database access | `StdbHostCallError`, `StdbValueCodecError`, `StdbHostEncodeError`, and named host failures | Root types and `/server` |
+
+`ConnectionLostError` means the client could not observe a terminal response;
+an in-flight reducer or procedure may already have reached and committed on the
+server. Treat its outcome as unknown, prefer idempotent mutation contracts, and
+reconcile from the replacement session's subscribed state before retrying a
+non-idempotent call.
 
 ## Scope
 
 Row-level security and upstream `clientVisibilityFilter` behavior are
 deliberately outside this library's contract; the upstream filter is
 deprecated. Keep protected rows in private tables and expose them through
-typed procedures or views. Reconnection and backoff policy remain the native
-SDK's responsibility. This package exposes invalidation so applications can
-decide how to replace a session.
+typed procedures or views. Bare scoped sessions expose terminal invalidation;
+long-lived clients can opt into the package supervisor for bounded acquisition,
+jittered reconnect backoff, scoped per-session setup, and resubscription. The
+supervisor does not make a stale session reusable: consumers must follow its
+observable current-session signal.
 
 ## Entrypoints
 

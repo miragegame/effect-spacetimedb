@@ -76,22 +76,22 @@ const manyApi = Stdb.toHttpApi(ManyHttpGroupsModule)
 type ManyClient = HttpApiClient.ForApi<typeof manyApi>
 declare const manyClient: ManyClient
 
-const firstCall = manyClient.HttpGroup00.route00({
+const callFirst = manyClient.HttpGroup00.route00({
   payload: { value: "first" },
 })
-const lastCall = manyClient.HttpGroup39.route39({
+const callLast = manyClient.HttpGroup39.route39({
   payload: { value: "last" },
 })
 
-type _FirstSuccess = Assert<
+type _SuccessFirst = Assert<
   IsEqual<
-    SuccessOf<typeof firstCall>,
+    SuccessOf<typeof callFirst>,
     Schema.Schema.Type<typeof ManyGroupResponse>
   >
 >
-type _LastSuccess = Assert<
+type _SuccessLast = Assert<
   IsEqual<
-    SuccessOf<typeof lastCall>,
+    SuccessOf<typeof callLast>,
     Schema.Schema.Type<typeof ManyGroupResponse>
   >
 >

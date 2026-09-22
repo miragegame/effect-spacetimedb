@@ -157,6 +157,18 @@ const loginRecordFrom = Effect.fn(function* (
   return record
 })
 
+const cliConfigPathFrom = Effect.fn(function* (record: SpawnRecord) {
+  const configArg = record.args.find((arg) => arg.startsWith("--config-path="))
+  const configPath = configArg?.slice("--config-path=".length)
+  if (configPath === undefined || configPath.length === 0) {
+    return yield* new DevServerTestInvariantError({
+      cause: "CLI command did not receive an isolated config path",
+    })
+  }
+
+  return configPath
+})
+
 const listenAddrFrom = Effect.fn(function* (record: SpawnRecord) {
   const flagIndex = record.args.indexOf("--listen-addr")
   const listenAddr = record.args[flagIndex + 1]
@@ -215,7 +227,11 @@ describe("dev server", (it) => {
         expect("generatedClient" in runtime).toBe(false)
         expect(identity.attempts()).toBe(1)
         const loginRecord = yield* loginRecordFrom(records)
-        expect(loginRecord.args).toContain("--root-dir")
+        const loginConfigPath = yield* cliConfigPathFrom(loginRecord)
+        const publishConfigPath = yield* cliConfigPathFrom(publishRecord)
+        expect(loginConfigPath).toBe(publishConfigPath)
+        expect(loginConfigPath).toMatch(/\/cli\/cli\.toml$/u)
+        expect(loginRecord.args).not.toContain("--root-dir")
         expect(loginRecord.args).toContain("login")
         expect(loginRecord.args).toContain("--token")
         expect(loginRecord.args).toContain("test-token")
@@ -224,7 +240,7 @@ describe("dev server", (it) => {
           "/tmp/effect-spacetimedb-dev-server-test/bundle.js",
         )
         expect(publishRecord.args).not.toContain("--module-path")
-        expect(publishRecord.args).toContain("--root-dir")
+        expect(publishRecord.args).not.toContain("--root-dir")
         expect(publishRecord.args).not.toContain("--anonymous")
         expect(publishRecord.args).toContain("--yes")
         expect(publishRecord.args).toContain("--delete-data=always")
@@ -269,6 +285,52 @@ describe("dev server", (it) => {
     }),
   )
 
+  it.effect("isolates CLI state between independent dev servers", () => {
+    const records: Array<SpawnRecord> = []
+    const identity = makeIdentityHttpLayer()
+    const childProcessLayer = makeChildProcessLayer((command) => {
+      records.push({
+        args: command.args,
+        command: command.command,
+      })
+
+      return makeHandle({ exitCode: 0 })
+    })
+
+    return Effect.gen(function* () {
+      yield* makeDevServer({
+        binaries: {
+          cli: ["spacetime"],
+          standalone: ["spacetimedb-standalone"],
+        },
+        bundlePath: "/tmp/effect-spacetimedb-dev-server-test/first.js",
+        dbNamePrefix: "dev-server-test",
+      })
+      const firstConfigPath = yield* loginRecordFrom(records).pipe(
+        Effect.flatMap(cliConfigPathFrom),
+      )
+
+      records.length = 0
+      yield* makeDevServer({
+        binaries: {
+          cli: ["spacetime"],
+          standalone: ["spacetimedb-standalone"],
+        },
+        bundlePath: "/tmp/effect-spacetimedb-dev-server-test/second.js",
+        dbNamePrefix: "dev-server-test",
+      })
+      const secondConfigPath = yield* loginRecordFrom(records).pipe(
+        Effect.flatMap(cliConfigPathFrom),
+      )
+
+      expect(secondConfigPath).not.toBe(firstConfigPath)
+      expect(firstConfigPath).toMatch(/\/cli\/cli\.toml$/u)
+      expect(secondConfigPath).toMatch(/\/cli\/cli\.toml$/u)
+    }).pipe((effect) =>
+      provideDevServerUnitLayers(effect, childProcessLayer, identity.layer),
+    )
+  })
+
   it.effect("republishes to the same database without deleting data", () => {
     const records: Array<SpawnRecord> = []
     const identity = makeIdentityHttpLayer()
@@ -298,12 +360,22 @@ describe("dev server", (it) => {
       expect(publishRecords).toHaveLength(2)
       expect(publishRecords[0]?.args).toContain(runtime.databaseName)
       expect(publishRecords[0]?.args).toContain("--delete-data=always")
-      expect(publishRecords[0]?.args).toContain("--root-dir")
       expect(publishRecords[1]?.args).toContain(runtime.databaseName)
       expect(publishRecords[1]?.args).toContain(
         "/tmp/effect-spacetimedb-dev-server-test/v2.js",
       )
-      expect(publishRecords[1]?.args).toContain("--root-dir")
+      const firstPublish = publishRecords[0]
+      const secondPublish = publishRecords[1]
+      if (firstPublish === undefined || secondPublish === undefined) {
+        return yield* new DevServerTestInvariantError({
+          cause: "expected both publish command records",
+        })
+      }
+      expect(yield* cliConfigPathFrom(firstPublish)).toBe(
+        yield* cliConfigPathFrom(secondPublish),
+      )
+      expect(firstPublish.args).not.toContain("--root-dir")
+      expect(secondPublish.args).not.toContain("--root-dir")
       expect(publishRecords[1]?.args).toContain("--delete-data=never")
       expect(publishRecords[1]?.args).not.toContain("--anonymous")
       expect(identity.attempts()).toBe(1)
@@ -349,7 +421,7 @@ describe("dev server", (it) => {
         },
         bundlePath: "/tmp/effect-spacetimedb-dev-server-test/v1.js",
         dbNamePrefix: "dev-server-test",
-        clear: { firstPublish: "on-conflict", republish: "always" },
+        clear: { publishFirst: "on-conflict", republish: "always" },
       })
       yield* runtime.republish("/tmp/effect-spacetimedb-dev-server-test/v2.js")
       const publishRecords = records.filter((record) =>
@@ -690,7 +762,7 @@ describe("dev server", (it) => {
           if (command.args.includes("--version")) {
             return makeHandle({
               exitCode: 0,
-              stdout: "spacetimedb tool version 2.6.1\n",
+              stdout: "spacetimedb tool version 2.10.1\n",
             })
           }
 
@@ -704,7 +776,7 @@ describe("dev server", (it) => {
           },
           bundlePath: "/tmp/effect-spacetimedb-dev-server-test/bundle.js",
           dbNamePrefix: "dev-server-test",
-          versionRequirement: "spacetimedb tool version 2.6.1",
+          versionRequirement: "spacetimedb tool version 2.10.1",
         }).pipe((effect) =>
           provideDevServerUnitLayers(effect, childProcessLayer, identity.layer),
         )

@@ -135,8 +135,7 @@ describe("native package import safety", () => {
   it("keeps the root named-type hook active in bundled imports", async () => {
     const tempDir = path.join(
       packageRoot,
-      "node_modules",
-      ".cache",
+      ".tmp",
       `effect-spacetimedb-root-named-${Date.now().toString()}`,
     )
     await Bun.$`mkdir -p ${tempDir}`.quiet()

@@ -1,3 +1,5 @@
+import type * as Cause from "effect/Cause"
+
 import * as Effect from "effect/Effect"
 
 import type * as Layer from "effect/Layer"
@@ -1322,6 +1324,12 @@ export type BuildRuntime<RuntimeR> =
   | Layer.Layer<RuntimeR, never, never>
 
 export type BuildOptions<RuntimeR> = {
+  /**
+   * Called synchronously with the cause of any handler that died. Typed
+   * failures never reach it, and the cause is observed rather than consumed:
+   * the handler still throws and its transaction still aborts.
+   */
+  readonly onDefect?: ((cause: Cause.Cause<unknown>) => void) | undefined
   readonly runtime?: BuildRuntime<RuntimeR>
   readonly runtimeMode?: ConstrainedServerRuntimeMode
 }

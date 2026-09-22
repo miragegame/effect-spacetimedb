@@ -9,16 +9,18 @@ import type { ServerQueryRoot } from "../query/types.ts"
 import { makeDbHandleFactory } from "../server/db-handle.ts"
 import { lookupPlansOf } from "../server/db-handle-codec.ts"
 import { SpacetimeHostErrors } from "../server/host-errors.ts"
-import type {
-  BaseReducerCtx,
-  DbShape,
-  HttpHandlerCtxLike,
-  ProcedureCtxLike,
-  ServerAnonymousViewCtx,
-  ServerRandom,
-  ServerSenderViewCtx,
+import {
+  type BaseReducerCtx,
+  type DbShape,
+  type HttpHandlerCtxLike,
+  ProcedureClockNow,
+  type ProcedureCtxLike,
+  type ServerAnonymousViewCtx,
+  type ServerRandom,
+  type ServerSenderViewCtx,
 } from "../server/runtime-types.ts"
 import type { EffectDbView } from "../server/services.ts"
+import type { RawProcedureHttp } from "../server/services.ts"
 import { TestHarnessTransaction } from "./transaction.ts"
 
 export class NestedTestTransactionError extends Data.TaggedError(
@@ -242,8 +244,10 @@ const compareScalar = (
     )
   }
   if (deepEqual(left, right)) return 0
-  if (left === undefined || left === null) return -1
-  if (right === undefined || right === null) return 1
+  // SpacetimeDB encodes Option as Some | None, in that variant order.
+  // Consequently every present value sorts before an absent one.
+  if (left === undefined || left === null) return 1
+  if (right === undefined || right === null) return -1
 
   const leftNative = nativeScalarBigInt(kind, left)
   const rightNative = nativeScalarBigInt(kind, right)
@@ -328,10 +332,69 @@ const matchesRange = (
   return deepEqual(rowValue, term)
 }
 
+/**
+ * A single row write, reported once the transaction that performed it has
+ * committed.
+ *
+ * Observing writes rather than sampling rows is what lets a test see every hop
+ * of a multi-write transaction, instead of only the state the row ended a
+ * transaction in. Writes made by a transaction that later throws are discarded
+ * with the rollback and never reported, so an observer sees committed history
+ * only. Writes made outside any transaction are reported immediately.
+ *
+ * The end-of-transaction purge of event tables is not reported: those rows are
+ * a delivery buffer, not persisted state.
+ *
+ * An observer that throws propagates out of the `db` call that triggered it and
+ * aborts the module transaction, so keep observers total as well as
+ * allocation-light.
+ */
+export type TestModuleRowWrite =
+  | {
+      readonly kind: "insert"
+      readonly next: Record<string, unknown>
+      readonly previous: undefined
+      readonly table: string
+    }
+  | {
+      readonly kind: "update"
+      readonly next: Record<string, unknown>
+      readonly previous: Record<string, unknown>
+      readonly table: string
+    }
+  | {
+      readonly kind: "delete"
+      readonly next: undefined
+      readonly previous: Record<string, unknown>
+      readonly table: string
+    }
+
 export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
   module: Module,
-  options?: { readonly seed?: bigint | undefined },
+  options?: {
+    readonly http?: RawProcedureHttp | undefined
+    /**
+     * Called for every insert, update and delete the module commits, in write
+     * order. Intended for conformance recorders; keep it allocation-light and
+     * total, because it runs on every write.
+     */
+    readonly observeWrite?: ((write: TestModuleRowWrite) => void) | undefined
+    readonly seed?: bigint | undefined
+  },
 ): TestModuleHarness<Module> => {
+  const notifyWrite =
+    options?.observeWrite ?? ((_write: TestModuleRowWrite) => {})
+  // Writes are buffered while a transaction is open and flushed on commit, so a
+  // rolled-back transaction reports nothing. Outside a transaction the write is
+  // already durable, so it is reported immediately.
+  let pendingWrites: Array<TestModuleRowWrite> = []
+  const observeWrite = (write: TestModuleRowWrite): void => {
+    if (transactionActive) {
+      pendingWrites.push(write)
+      return
+    }
+    notifyWrite(write)
+  }
   const store: MutableStore = new Map(
     Object.keys(module.tables).map((key) => [key, []]),
   )
@@ -379,6 +442,12 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
       }
       assertUnique(row)
       rows.push(row)
+      observeWrite({
+        kind: "insert",
+        next: row,
+        previous: undefined,
+        table: tableKey,
+      })
       return row
     }
     const tableHandle: Record<string, unknown> = {
@@ -388,12 +457,28 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
       delete: (row: Record<string, unknown>) => {
         const index = rows.findIndex((candidate) => deepEqual(candidate, row))
         if (index < 0) return false
-        rows.splice(index, 1)
+        const [removed] = rows.splice(index, 1)
+        if (removed !== undefined) {
+          observeWrite({
+            kind: "delete",
+            next: undefined,
+            previous: removed,
+            table: tableKey,
+          })
+        }
         return true
       },
       clear: () => {
         const count = BigInt(rows.length)
-        rows.splice(0, rows.length)
+        const cleared = rows.splice(0, rows.length)
+        for (const row of cleared) {
+          observeWrite({
+            kind: "delete",
+            next: undefined,
+            previous: row,
+            table: tableKey,
+          })
+        }
         return count
       },
     }
@@ -436,6 +521,12 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
           const selected = matching(value)
           for (const row of selected) {
             rows.splice(rows.indexOf(row), 1)
+            observeWrite({
+              kind: "delete",
+              next: undefined,
+              previous: row,
+              table: tableKey,
+            })
           }
           return selected.length
         },
@@ -472,6 +563,12 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
                     const index = rows.indexOf(current)
                     const replacement = { ...next }
                     rows[index] = replacement
+                    observeWrite({
+                      kind: "update",
+                      next: replacement,
+                      previous: current,
+                      table: tableKey,
+                    })
                     return replacement
                   },
                 }
@@ -490,8 +587,9 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
   let transactionActive = false
   let uuidCounter = 0n
   const random = makeRandom(options?.seed ?? 1n)
-  const defaultHttp = {
+  const httpDefault: RawProcedureHttp = options?.http ?? {
     fetch: () => ({
+      status: 200,
       text: () => "",
       json: () => ({}),
       bytes: () => new Uint8Array(),
@@ -513,18 +611,25 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
     if (transactionActive) throw new NestedTestTransactionError()
     const snapshot = new Map([...store].map(([key, rows]) => [key, [...rows]]))
     transactionActive = true
+    pendingWrites = []
     try {
       const result = body()
       for (const key of eventTableKeys) {
         const rows = store.get(key)!
         rows.splice(0, rows.length)
       }
+      const committed = pendingWrites
+      pendingWrites = []
+      for (const write of committed) notifyWrite(write)
       return result
     } catch (cause) {
       for (const [key, rows] of snapshot) {
         const target = store.get(key)!
         target.splice(0, target.length, ...rows)
       }
+      // The rolled-back writes are discarded: an observer must see committed
+      // history only.
+      pendingWrites = []
       throw cause
     } finally {
       transactionActive = false
@@ -564,11 +669,14 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
     const { transaction = {}, ...contextOverrides } = overrides
     const context = {
       ...base(),
-      http: defaultHttp,
+      http: httpDefault,
       ...contextOverrides,
     }
     return {
       ...context,
+      [ProcedureClockNow]:
+        context[ProcedureClockNow] ??
+        (() => Number(context.timestamp.microsSinceUnixEpoch / 1_000n)),
       withTx: (body) =>
         withTx(body, {
           sender: context.sender,
@@ -591,7 +699,7 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
     makeProcedureCtx,
     makeHttpHandlerCtx: (overrides = {}) => ({
       timestamp: new Timestamp(1_000n),
-      http: defaultHttp,
+      http: httpDefault,
       databaseIdentity: new Identity(2n),
       withTx: (body) => withTx((ctx) => body({ db: ctx.db })),
       newUuidV4: () => new Uuid(++uuidCounter),

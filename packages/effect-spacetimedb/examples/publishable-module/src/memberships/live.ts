@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
+import { Range } from "spacetimedb/server"
 import { Db, ExampleModule, Tx } from "../module"
 
 export const MembershipFunctionsLive = Stdb.StdbBuilder.group(
@@ -44,6 +45,33 @@ export const MembershipFunctionsLive = Stdb.StdbBuilder.group(
                 note: row.note,
               }
             : undefined
+        }),
+      )
+    }),
+    membershipByTenantEmailRange: Effect.fn(function* ({
+      tenantId,
+      emailLo,
+      emailHi,
+    }) {
+      const tx = yield* Tx
+      return yield* tx.run(
+        Effect.gen(function* () {
+          const db = yield* Db
+          const rows =
+            yield* db.uniqueMembership.uniqueMembershipTenantEmailNoteIdx.filterToArray(
+              {
+                tenantId,
+                email: new Range(
+                  { tag: "excluded", value: emailLo },
+                  { tag: "excluded", value: emailHi },
+                ),
+              },
+            )
+          return rows.map((row) => ({
+            tenantId: row.tenantId,
+            email: row.email,
+            note: row.note,
+          }))
         }),
       )
     }),

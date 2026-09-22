@@ -1,5 +1,5 @@
-import * as Effect from "effect/Effect"
 import * as Duration from "effect/Duration"
+import * as Effect from "effect/Effect"
 import * as Match from "effect/Match"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
@@ -10,44 +10,37 @@ import type {
 import type { AnyModuleSpec } from "../contract/module.ts"
 import type { ProcedureSpec } from "../contract/procedure.ts"
 import type { ReducerSpec } from "../contract/reducer.ts"
-import { type AnyTableSpec, rowType, type TableRow } from "../contract/table.ts"
+import { rowType, type TableRow } from "../contract/table.ts"
 import type { AnyValueType } from "../contract/type.ts"
 import * as Type from "../contract/type.ts"
 import type { ModulePlan } from "../module-plan.ts"
 import { makeModulePlan } from "../module-plan.ts"
+import type {
+  PublicViewKeys,
+  ViewRowOf,
+  WsViewRowOf,
+} from "../module-projection.ts"
 import type { ClientQueryRoot } from "../query/types.ts"
 import {
   type EventTableSubscriptionTarget,
-  type MatchableSubscriptionTarget,
   type PublicEventTableKeys,
   type PublicPersistentTableKeys,
   type SubscriptionTarget,
   type TableSubscriptionTarget,
 } from "../subscription-target.ts"
 import { typedEntries, typedFromEntries } from "../utils.ts"
-import {
-  messageFromUnknown,
-  StdbDecodeError,
-  TransportError,
-  WsRpcInvokeError,
-} from "./call-errors.ts"
+import { StdbDecodeError } from "./call-errors.ts"
 import {
   callProcedure,
   callProcedureRaw,
   callReducer,
   callReducerRaw,
 } from "./call-runtime.ts"
-import type { ClientTableIndexAccessors } from "./client-index.ts"
 import { connectionStateFor } from "./connection-state.ts"
-import {
-  decodeStdbEventContext,
-  type StdbEventContext,
-} from "./event-context.ts"
+import { decodeStdbEventContext } from "./event-context.ts"
 import { type InsertEvent, type RelationHandle } from "./relation.ts"
 import { make as makeRpc, type ParamsOf } from "./rpc.ts"
 import {
-  type EventTableStreamBufferOptions,
-  type SessionStreamBufferOptions,
   streamEventTable,
   streamTableChanges,
   streamTableChangesWithContext,
@@ -57,9 +50,39 @@ import {
   type TableChangeWithContext,
 } from "./session-stream.ts"
 import * as ValueCodec from "./value-codec.ts"
-import { type SubscriptionFailure } from "./ws-subscription.ts"
 import {
-  type SubscriptionBuilderLike,
+  type WaitUntil,
+  type WaitUntilOptions,
+  WaitUntilTimeoutError,
+} from "./wait-until.ts"
+import {
+  ensureWsParamsObject,
+  eventTableStreamOptions,
+  hasWsCallableTransport,
+  missingWsRpcTransport,
+  type PublicCache,
+  type PublicViewCache,
+  type StdbTableChangeEvent,
+  subscriptionErrorMessage,
+  subscriptionTargetLabel,
+  type TableGroup,
+  type TableGroupSnapshot,
+  targetToQuerySource,
+  type ViewGroup,
+  type ViewGroupSnapshot,
+  type WsCallableTransport,
+  type WsClientOptions,
+  type WsConnectionLike,
+  type WsEventTableStreamOptions,
+  type WsStreamOptions,
+} from "./websocket-contract.ts"
+import { makePublicTableCache } from "./ws-cache.ts"
+import { makeWsConnectionAwareCalls } from "./ws-call-liveness.ts"
+import {
+  SubscriptionInvalidatedError,
+  type SubscriptionFailure,
+} from "./ws-subscription.ts"
+import {
   type SubscriptionHandleLike,
   type SubscriptionQuerySource,
   fromBuilder as subscriptionAdapterFromBuilder,
@@ -67,9 +90,6 @@ import {
   unsubscribeThen,
 } from "./ws-subscription-adapter.ts"
 import { makeTableRefAccess } from "./ws-table-ref.ts"
-import { makePublicTableCache } from "./ws-cache.ts"
-import type { WsTableRow } from "./ws-row.ts"
-import { type WaitUntil, WaitUntilTimeoutError } from "./wait-until.ts"
 
 export type {
   NativeSubscriptionHandleLike,
@@ -78,161 +98,23 @@ export type {
 } from "./ws-subscription-adapter.ts"
 export { unsubscribeThen }
 export { type WaitUntilOptions, WaitUntilTimeoutError } from "./wait-until.ts"
+export type {
+  PublicCache,
+  PublicTableCache,
+  PublicViewCache,
+  StdbTableChangeEvent,
+  TableGroup,
+  TableGroupSnapshot,
+  ViewGroup,
+  ViewGroupSnapshot,
+  WsCallableTransport,
+  WsClientOptions,
+  WsConnectionLike,
+  WsDbShape,
+  WsEventTableStreamOptions,
+  WsStreamOptions,
+} from "./websocket-contract.ts"
 export type { WsTableRow } from "./ws-row.ts"
-
-export type WsDbShape<
-  Module extends AnyModuleSpec,
-  RelationContext = unknown,
-> = {
-  readonly [Key in
-    | PublicPersistentTableKeys<Module>
-    | PublicEventTableKeys<Module>]: RelationHandle<
-    WsTableRow<Module["tables"][Key]>,
-    RelationContext
-  >
-}
-
-export type WsConnectionLike<
-  Module extends AnyModuleSpec,
-  ErrorContext,
-  RelationContext = unknown,
-> = {
-  readonly isActive?: boolean | undefined
-  readonly db: WsDbShape<Module, RelationContext>
-  readonly subscriptionBuilder: () => SubscriptionBuilderLike<
-    ErrorContext,
-    ClientQueryRoot<Module>
-  >
-}
-
-type WsCallableConnectionLike = {
-  readonly callReducerWithParams: (
-    reducerName: string,
-    paramsType: unknown,
-    params: object,
-  ) => Promise<void>
-  readonly callProcedureWithParams: (
-    procedureName: string,
-    paramsType: unknown,
-    params: object,
-    returnType: unknown,
-  ) => Promise<unknown>
-}
-
-export type WsCallableTransport = {
-  readonly callReducerWithParams: WsCallableConnectionLike["callReducerWithParams"]
-  readonly callProcedureWithParams: WsCallableConnectionLike["callProcedureWithParams"]
-}
-
-export type WsClientOptions<
-  Module extends AnyModuleSpec,
-  ErrorContext,
-  RelationContext = unknown,
-> = {
-  readonly module: Module
-  readonly connection: WsConnectionLike<Module, ErrorContext, RelationContext>
-  readonly transport?: WsCallableTransport | undefined
-}
-
-export type WsStreamOptions = {
-  readonly buffer?: SessionStreamBufferOptions | undefined
-}
-
-export type WsEventTableStreamOptions = {
-  readonly buffer?: EventTableStreamBufferOptions | undefined
-}
-
-const eventTableStreamOptions = (
-  streamOptions: WsStreamOptions | undefined,
-): WsEventTableStreamOptions | undefined => {
-  if (streamOptions?.buffer === undefined) {
-    return undefined
-  }
-
-  const { bufferSize } = streamOptions.buffer
-
-  return bufferSize === undefined ? { buffer: {} } : { buffer: { bufferSize } }
-}
-
-type TableCacheClient<Table extends AnyTableSpec> = {
-  readonly count: () => bigint
-  readonly toArray: () => Effect.Effect<
-    ReadonlyArray<TableRow<Table>>,
-    StdbDecodeError
-  >
-  readonly unsafe: {
-    /** Throws StdbDecodeError on decode failure; prefer toArray for typed failures. */
-    readonly rows: () => ReadonlyArray<TableRow<Table>>
-  }
-} & ClientTableIndexAccessors<Table>
-
-export type PublicTableCache<Module extends AnyModuleSpec> = {
-  readonly [Key in PublicPersistentTableKeys<Module>]: TableCacheClient<
-    Module["tables"][Key]
-  >
-}
-
-export type PublicCache<Module extends AnyModuleSpec> = {
-  readonly tables: PublicTableCache<Module>
-}
-
-export type TableGroupSnapshot<
-  Module extends AnyModuleSpec,
-  Keys extends ReadonlyArray<PublicPersistentTableKeys<Module>>,
-> = {
-  readonly [Key in Keys[number]]: ReadonlyArray<TableRow<Module["tables"][Key]>>
-}
-
-export type TableGroup<
-  Module extends AnyModuleSpec,
-  Keys extends ReadonlyArray<PublicPersistentTableKeys<Module>>,
-> = {
-  readonly keys: Keys
-  readonly subscribe: Effect.Effect<void, SubscriptionFailure, Scope.Scope>
-  readonly readSnapshot: Effect.Effect<
-    TableGroupSnapshot<Module, Keys>,
-    StdbDecodeError
-  >
-  readonly changes: Stream.Stream<
-    TableGroupSnapshot<Module, Keys>,
-    SubscriptionFailure | StdbDecodeError,
-    Scope.Scope
-  >
-}
-
-export type StdbTableChangeEvent<Row> = TableChangeWithContext<
-  Row,
-  StdbEventContext
->
-
-const hasWsCallableTransport = (
-  connection: WsConnectionLike<AnyModuleSpec, unknown, unknown>,
-): connection is WsConnectionLike<AnyModuleSpec, unknown, unknown> &
-  WsCallableConnectionLike =>
-  "callReducerWithParams" in connection &&
-  "callProcedureWithParams" in connection
-
-const subscriptionErrorMessage = (context: unknown, error?: Error): string => {
-  const fromError =
-    error != null && error.message.length > 0 ? error.message : undefined
-  const fromContext = messageFromUnknown(context) ?? String(context)
-
-  return fromError ?? fromContext
-}
-
-const ensureWsParamsObject = (
-  value: unknown,
-): Effect.Effect<object, StdbDecodeError> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? Effect.succeed(value)
-    : Effect.fail(
-        new StdbDecodeError({
-          phase: "args",
-          cause: new Error(
-            "WebSocket callable parameters must decode to an object payload",
-          ),
-        }),
-      )
 
 export const makeFromModulePlan = <
   Module extends AnyModuleSpec,
@@ -276,55 +158,61 @@ export const makeFromModulePlan = <
       ] as const
     }),
   ) as Record<string, (row: unknown) => unknown>
+  const viewRowTypes = typedFromEntries(
+    typedEntries(options.plan.publicViews).map(([key, viewSpec]) => {
+      const item =
+        Type.arrayItem(viewSpec.returns) ?? Type.optionItem(viewSpec.returns)
+      if (item === undefined) {
+        throw new Error(`Public view ${key} does not return rows`)
+      }
+      return [key, item] as const
+    }),
+  ) as Record<string, AnyValueType>
+  const viewRowDecoders = typedFromEntries(
+    typedEntries(options.plan.publicViews).map(([key]) => {
+      const decode = Type.dbCodec(viewRowTypes[key]!).decodeUnknownSync
+      return [
+        key,
+        (row: unknown) => {
+          try {
+            return decode(row)
+          } catch (cause) {
+            throw new StdbDecodeError({
+              phase: "row",
+              cause,
+              table: key,
+            })
+          }
+        },
+      ] as const
+    }),
+  ) as Record<string, (row: unknown) => unknown>
+  const viewRelation = <Key extends PublicViewKeys<Module>>(key: Key) =>
+    Reflect.get(options.connection.db, key) as RelationHandle<
+      WsViewRowOf<Module["views"][Key]>,
+      RelationContext
+    >
   const subscriptionAdapter = subscriptionAdapterFromBuilder({
     build: () => options.connection.subscriptionBuilder(),
     messageFromError: subscriptionErrorMessage,
   })
 
-  const missingRpcTransport = () =>
-    Effect.fail(
-      new TransportError({
-        cause: new Error("WebSocket callable transport unavailable"),
-      }),
-    )
-
-  // Bindings-bump checklist: re-check these SDK calls when
-  // callReducerWithParams/callProcedureWithParams remove their params-type
-  // placeholders. The current 2.6.1 bindings still require `undefined` there.
-  const invokeReducerWithParams = (
-    name: string,
-    params: object,
-  ): Effect.Effect<void, WsRpcInvokeError | TransportError> =>
-    rpcTransport != null
-      ? Effect.tryPromise({
-          try: () =>
-            rpcTransport.callReducerWithParams(name, undefined, params),
-          catch: (cause) => new WsRpcInvokeError({ cause }),
-        })
-      : missingRpcTransport()
-
-  const invokeProcedureWithParams = (
-    name: string,
-    params: object,
-  ): Effect.Effect<unknown, WsRpcInvokeError | TransportError> =>
-    rpcTransport != null
-      ? Effect.tryPromise({
-          try: () =>
-            rpcTransport.callProcedureWithParams(
-              name,
-              undefined,
-              params,
-              undefined,
-            ),
-          catch: (cause) => new WsRpcInvokeError({ cause }),
-        })
-      : missingRpcTransport()
+  const connectionAwareCalls = makeWsConnectionAwareCalls({
+    connectionState,
+    transport: rpcTransport,
+  })
 
   const decodeTableRow = <Key extends keyof Module["tables"] & string>(
     key: Key,
     row: unknown,
   ): TableRow<Module["tables"][Key]> =>
     tableRowDecoders[key]!(row) as TableRow<Module["tables"][Key]>
+
+  const decodeViewRow = <Key extends PublicViewKeys<Module>>(
+    key: Key,
+    row: unknown,
+  ): ViewRowOf<Module["views"][Key]> =>
+    viewRowDecoders[key]!(row) as ViewRowOf<Module["views"][Key]>
 
   const subscribeQuerySource = (
     query: SubscriptionQuerySource<ClientQueryRoot<Module>>,
@@ -341,6 +229,16 @@ export const makeFromModulePlan = <
       "spacetimedb.transport": "ws",
     }
 
+    const invalidated = connectionState.awaitInvalidation().pipe(
+      Effect.flatMap((invalidation) =>
+        Effect.fail(
+          new SubscriptionInvalidatedError({
+            raw: invalidation.message,
+          }),
+        ),
+      ),
+    )
+
     return connectionState.assertActive().pipe(
       Effect.withSpan("spacetimedb.ws.subscription.assert_active", {
         attributes,
@@ -351,6 +249,7 @@ export const makeFromModulePlan = <
             Effect.withSpan("spacetimedb.ws.subscription.request", {
               attributes,
             }),
+            Effect.raceFirst(invalidated),
             Effect.interruptible,
           ),
           unsubscribeHandle,
@@ -362,59 +261,13 @@ export const makeFromModulePlan = <
     )
   }
 
-  const subscriptionTargetLabel = (
-    target: SubscriptionTarget<Module>,
-  ): string => {
-    const matchableTarget: MatchableSubscriptionTarget<Module> = target
-
-    return Match.value(matchableTarget).pipe(
-      Match.discriminatorsExhaustive("kind")({
-        table: (t) => `table:${t.key}`,
-        eventTable: (t) => `eventTable:${t.key}`,
-        query: (t) => `query:${t.key}`,
-        allPublicTables: (t) =>
-          t.keys
-            .map((key) =>
-              key in options.plan.publicEventTables
-                ? `eventTable:${key}`
-                : `table:${key}`,
-            )
-            .join(","),
-      }),
-    )
-  }
-
-  const targetToQuerySource = (
-    target: SubscriptionTarget<Module>,
-  ): SubscriptionQuerySource<ClientQueryRoot<Module>> => {
-    type PublicQueryRootKey = keyof ClientQueryRoot<Module> & string
-    const matchableTarget: MatchableSubscriptionTarget<Module> = target
-    const sourceForKey =
-      (
-        key: PublicPersistentTableKeys<Module> | PublicEventTableKeys<Module>,
-      ): SubscriptionQuerySource<ClientQueryRoot<Module>> =>
-      (tables: ClientQueryRoot<Module>) =>
-        tables[key as PublicQueryRootKey]
-
-    return Match.value(matchableTarget).pipe(
-      Match.discriminatorsExhaustive("kind")({
-        table: (t) => sourceForKey(t.key),
-        eventTable: (t) => sourceForKey(t.key),
-        query: (t) => (tables: ClientQueryRoot<Module>) =>
-          tables[t.key].where(t.predicate),
-        allPublicTables: (t) => (tables: ClientQueryRoot<Module>) =>
-          t.keys.map((key) => tables[key as PublicQueryRootKey]),
-      }),
-    )
-  }
-
   const subscribe = (
     target: SubscriptionTarget<Module>,
     onAppliedError?: (failure: SubscriptionFailure) => void,
   ): Effect.Effect<SubscriptionHandleLike, SubscriptionFailure, Scope.Scope> =>
     subscribeQuerySource(
       targetToQuerySource(target),
-      subscriptionTargetLabel(target),
+      subscriptionTargetLabel(options.plan, target),
       onAppliedError,
     )
 
@@ -422,6 +275,11 @@ export const makeFromModulePlan = <
     key: Key,
     onAppliedError?: (failure: SubscriptionFailure) => void,
   ) => subscribe(options.plan.targets.tables[key], onAppliedError)
+
+  const subscribeViewTarget = <Key extends PublicViewKeys<Module>>(
+    key: Key,
+    onAppliedError?: (failure: SubscriptionFailure) => void,
+  ) => subscribe(options.plan.targets.views[key], onAppliedError)
 
   const rpc = makeRpc({
     reducers: options.plan.publicReducers,
@@ -445,7 +303,7 @@ export const makeFromModulePlan = <
               .encode(spec.params, value)
               .pipe(Effect.flatMap(ensureWsParamsObject)),
           invoke: (name, _spec, params) =>
-            invokeReducerWithParams(name, params),
+            connectionAwareCalls.invokeReducer(name, params),
         },
       }),
     callReducerRaw: <Spec extends ReducerSpec>(
@@ -463,7 +321,7 @@ export const makeFromModulePlan = <
               .encode(spec.params, value)
               .pipe(Effect.flatMap(ensureWsParamsObject)),
           invoke: (name, _spec, params) =>
-            invokeReducerWithParams(name, params),
+            connectionAwareCalls.invokeReducer(name, params),
         },
       }),
     callProcedure: <Spec extends ProcedureSpec>(
@@ -481,7 +339,7 @@ export const makeFromModulePlan = <
               .encode(spec.params, value)
               .pipe(Effect.flatMap(ensureWsParamsObject)),
           invoke: (name, _spec, params) =>
-            invokeProcedureWithParams(name, params),
+            connectionAwareCalls.invokeProcedure(name, params),
           decodeValue: <A>(type: AnyValueType, value: unknown) =>
             ValueCodec.ws.decode<A>(type, value),
         },
@@ -501,12 +359,12 @@ export const makeFromModulePlan = <
               .encode(spec.params, value)
               .pipe(Effect.flatMap(ensureWsParamsObject)),
           invoke: (name, _spec, params) =>
-            invokeProcedureWithParams(name, params),
+            connectionAwareCalls.invokeProcedure(name, params),
           decodeValue: <A>(type: AnyValueType, value: unknown) =>
             ValueCodec.ws.decode<A>(type, value),
         },
       }),
-    callHttpHandler: () => missingRpcTransport() as never,
+    callHttpHandler: () => missingWsRpcTransport as never,
   })
 
   const tables = makePublicTableCache({
@@ -515,6 +373,33 @@ export const makeFromModulePlan = <
     tableRowTypes,
     decodeTableRow,
   })
+  const views = typedFromEntries(
+    typedEntries(options.plan.publicViews).map(([key]) => {
+      const relation = viewRelation(key)
+      const decodeRows = (): ReadonlyArray<
+        ViewRowOf<Module["views"][typeof key]>
+      > => Array.from(relation.iter(), (row) => decodeViewRow(key, row))
+      return [
+        key,
+        {
+          count: () => relation.count(),
+          toArray: () =>
+            Effect.try({
+              try: decodeRows,
+              catch: (cause) =>
+                StdbDecodeError.is(cause)
+                  ? cause
+                  : new StdbDecodeError({
+                      phase: "row",
+                      cause,
+                      table: key,
+                    }),
+            }),
+          unsafe: { rows: decodeRows },
+        },
+      ] as const
+    }),
+  ) as unknown as PublicViewCache<Module>
 
   function streamTable<Key extends PublicPersistentTableKeys<Module>>(
     key: Key,
@@ -549,10 +434,25 @@ export const makeFromModulePlan = <
       options.connection.db[key],
       (onFailure) => subscribeTableTarget(key, onFailure),
     ).pipe(
-      // The native SDK applies a server message and dispatches its row
-      // callbacks synchronously; one drained queue chunk therefore covers one
-      // dispatch burst under normal pacing. If a future SDK yields between
-      // callbacks this degrades to extra snapshots, not stale state.
+      // Future yielding SDKs may emit extra snapshots here, never stale state.
+      Stream.chunks,
+      Stream.mapEffect(() => read),
+    )
+  }
+
+  function streamViewRows<Key extends PublicViewKeys<Module>>(
+    key: Key,
+  ): Stream.Stream<
+    ReadonlyArray<ViewRowOf<Module["views"][Key]>>,
+    SubscriptionFailure | StdbDecodeError,
+    Scope.Scope
+  > {
+    const read = views[key].toArray()
+    return streamTableSnapshotSignals(
+      connectionState,
+      viewRelation(key),
+      (onFailure) => subscribeViewTarget(key, onFailure),
+    ).pipe(
       Stream.chunks,
       Stream.mapEffect(() => read),
     )
@@ -628,10 +528,50 @@ export const makeFromModulePlan = <
         }),
       streamOptions?.buffer,
     ).pipe(
-      // The native SDK applies a server message and dispatches its row
-      // callbacks synchronously; one drained queue chunk therefore covers one
-      // dispatch burst under normal pacing. If a future SDK yields between
-      // callbacks this degrades to extra snapshots, not stale state.
+      // Future yielding SDKs may emit extra snapshots here, never stale state.
+      Stream.chunks,
+      Stream.mapEffect(() => readSnapshot),
+    )
+
+    return {
+      keys,
+      subscribe: groupSubscribe,
+      readSnapshot,
+      changes,
+    }
+  }
+
+  function viewGroup<const Keys extends ReadonlyArray<PublicViewKeys<Module>>>(
+    keys: Keys,
+    streamOptions?: WsStreamOptions,
+  ): ViewGroup<Module, Keys> {
+    const readSnapshot = Effect.forEach(keys, (key) =>
+      views[key].toArray().pipe(Effect.map((rows) => [key, rows] as const)),
+    ).pipe(
+      Effect.map(
+        (entries) =>
+          typedFromEntries(entries) as unknown as ViewGroupSnapshot<
+            Module,
+            Keys
+          >,
+      ),
+    )
+    const groupSubscribe = Effect.forEach(
+      keys,
+      function subscribeViewWithoutFailureSink(key) {
+        return subscribeViewTarget(key)
+      },
+      { discard: true },
+    )
+    const changes = streamTableGroupChanges(
+      connectionState,
+      keys.map((key) => viewRelation(key)),
+      (onFailure) =>
+        Effect.forEach(keys, (key) => subscribeViewTarget(key, onFailure), {
+          discard: true,
+        }),
+      streamOptions?.buffer,
+    ).pipe(
       Stream.chunks,
       Stream.mapEffect(() => readSnapshot),
     )
@@ -697,6 +637,7 @@ export const makeFromModulePlan = <
 
   const cache = {
     tables,
+    views,
   } as PublicCache<Module>
   const tableRefAccess = makeTableRefAccess({
     module,
@@ -707,12 +648,12 @@ export const makeFromModulePlan = <
   })
 
   const waitUntil: WaitUntil<Module> = (key, predicate, waitOptions) => {
-    let lastSnapshotSize = 0
+    let snapshotSizeLast = 0
     const timeout = waitOptions?.timeout ?? "10 seconds"
     const matching = tableGroup([key] as const).changes.pipe(
       Stream.map((snapshot) => snapshot[key]),
       Stream.map((rows) => {
-        lastSnapshotSize = rows.length
+        snapshotSizeLast = rows.length
         return rows.filter(predicate)
       }),
       Stream.filter((rows) => rows.length > 0),
@@ -726,7 +667,7 @@ export const makeFromModulePlan = <
               new WaitUntilTimeoutError({
                 table: key,
                 timeoutMillis: Duration.toMillis(timeout),
-                lastSnapshotSize,
+                snapshotSizeLast,
               }),
             ),
           ),
@@ -741,7 +682,57 @@ export const makeFromModulePlan = <
             new WaitUntilTimeoutError({
               table: key,
               timeoutMillis: Duration.toMillis(timeout),
-              lastSnapshotSize,
+              snapshotSizeLast,
+            }),
+          ),
+      }),
+    )
+  }
+
+  function waitUntilView<Key extends PublicViewKeys<Module>>(
+    key: Key,
+    predicate: (row: ViewRowOf<Module["views"][Key]>) => boolean,
+    waitOptions?: WaitUntilOptions,
+  ): Effect.Effect<
+    ReadonlyArray<ViewRowOf<Module["views"][Key]>>,
+    SubscriptionFailure | StdbDecodeError | WaitUntilTimeoutError,
+    Scope.Scope
+  > {
+    let snapshotSizeLast = 0
+    const timeout = waitOptions?.timeout ?? "10 seconds"
+    const matching = viewGroup([key] as const).changes.pipe(
+      Stream.map((snapshot) => snapshot[key]),
+      Stream.map((rows) => {
+        snapshotSizeLast = rows.length
+        return rows.filter(predicate)
+      }),
+      Stream.filter((rows) => rows.length > 0),
+      Stream.runHead,
+      Effect.flatMap((rows) =>
+        rows.pipe(
+          Match.value,
+          Match.when({ _tag: "Some" }, (some) => Effect.succeed(some.value)),
+          Match.orElse(() =>
+            Effect.fail(
+              new WaitUntilTimeoutError({
+                table: key,
+                timeoutMillis: Duration.toMillis(timeout),
+                snapshotSizeLast,
+              }),
+            ),
+          ),
+        ),
+      ),
+    )
+    return matching.pipe(
+      Effect.timeoutOrElse({
+        duration: timeout,
+        orElse: () =>
+          Effect.fail(
+            new WaitUntilTimeoutError({
+              table: key,
+              timeoutMillis: Duration.toMillis(timeout),
+              snapshotSizeLast,
             }),
           ),
       }),
@@ -753,6 +744,7 @@ export const makeFromModulePlan = <
     cache,
     procedures: rpc.procedures,
     reducers: rpc.reducers,
+    awaitInvalidation: connectionState.awaitInvalidation,
     isInvalidated: connectionState.isInvalidated,
     observeInvalidation: connectionState.observeInvalidation,
     isActive: () =>
@@ -764,12 +756,15 @@ export const makeFromModulePlan = <
     rowMatchesPrimaryKey: tableRefAccess.rowMatchesPrimaryKey,
     streamEventTable: streamEventTableForKey,
     streamRows,
+    streamViewRows,
     tableGroup,
+    viewGroup,
     streamTableEvents,
     streamTable,
     streamTableWithContext,
     streamTarget,
     waitUntil,
+    waitUntilView,
   }
 }
 

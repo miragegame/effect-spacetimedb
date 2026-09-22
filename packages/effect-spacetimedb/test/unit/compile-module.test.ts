@@ -16,7 +16,7 @@ type CapturedBuilder = {
   readonly row?: Record<string, CapturedBuilder>
   readonly fields?: Record<string, CapturedBuilder>
   readonly columnName?: string
-  readonly defaultValue?: unknown
+  readonly valueDefault?: unknown
   readonly typeName?: string
   readonly isOptional?: boolean
   readonly columnMetadata?: {
@@ -120,8 +120,8 @@ const normalizeBuilder = (
   if (builder.columnName !== undefined) {
     normalized.columnName = builder.columnName
   }
-  if (builder.defaultValue !== undefined) {
-    normalized.defaultValue = builder.defaultValue
+  if (builder.valueDefault !== undefined) {
+    normalized.valueDefault = builder.valueDefault
   }
   if (builder.typeName !== undefined) {
     normalized.typeName = builder.typeName
@@ -369,15 +369,15 @@ describe("compiled module exports", (it) => {
       const second = compileModule({ server, handlers })
       registerCompiledModule(first.schema, first.exportGroup())
       registerCompiledModule(second.schema, second.exportGroup())
-      const firstRow = findTableRow(first.schema, "cacheResetUser")
-      const secondRow = findTableRow(second.schema, "cacheResetUser")
-      const firstReturn = findProcedureReturnType(first.schema, "user_get")
-      const secondReturn = findProcedureReturnType(second.schema, "user_get")
+      const rowFirst = findTableRow(first.schema, "cacheResetUser")
+      const rowSecond = findTableRow(second.schema, "cacheResetUser")
+      const returnFirst = findProcedureReturnType(first.schema, "user_get")
+      const returnSecond = findProcedureReturnType(second.schema, "user_get")
 
-      expect(firstReturn.item).toBe(firstRow)
-      expect(secondReturn.item).toBe(secondRow)
-      expect(secondRow).not.toBe(firstRow)
-      expect(secondReturn.item).not.toBe(firstRow)
+      expect(returnFirst.item).toBe(rowFirst)
+      expect(returnSecond.item).toBe(rowSecond)
+      expect(rowSecond).not.toBe(rowFirst)
+      expect(returnSecond.item).not.toBe(rowFirst)
     }),
   )
 
@@ -441,7 +441,7 @@ describe("compiled module exports", (it) => {
             })
             expect(childDisplayName).toMatchObject({
               columnName: "display_name",
-              defaultValue: "child",
+              valueDefault: "child",
             })
             expect(childScore.kind).toBe("u32")
           }),
@@ -697,15 +697,15 @@ describe("compiled module exports", (it) => {
                   displayName: {
                     kind: "string",
                     columnName: "display_name",
-                    defaultValue: "anonymous",
+                    valueDefault: "anonymous",
                   },
                   score: {
                     kind: "u32",
-                    defaultValue: 0,
+                    valueDefault: 0,
                   },
                   status: {
                     kind: "enum",
-                    defaultValue: {
+                    valueDefault: {
                       tag: "active",
                     },
                     typeName:
@@ -740,7 +740,7 @@ describe("compiled module exports", (it) => {
                   },
                   note: {
                     kind: "string",
-                    defaultValue: "",
+                    valueDefault: "",
                   },
                 },
                 typeName: "GoldenDigest",
@@ -797,7 +797,7 @@ describe("compiled module exports", (it) => {
                     },
                     note: {
                       kind: "string",
-                      defaultValue: "",
+                      valueDefault: "",
                     },
                   },
                   typeName: "GoldenDigest",

@@ -33,6 +33,7 @@ export {
 export {
   type CallFailure,
   catchRawTags,
+  ConnectionLostError,
   DomainCallError,
   type RawCallFailure,
   RemoteRejectedBody,
@@ -93,12 +94,15 @@ export {
 export {
   make as makeWsClient,
   type PublicCache,
+  type PublicViewCache,
   type NativeSubscriptionHandleLike as WsNativeSubscriptionHandleLike,
   type StdbTableChangeEvent,
   type SubscriptionBuilderLike as WsSubscriptionBuilderLike,
   type SubscriptionHandleLike as WsSubscriptionHandleLike,
   type TableGroup,
   type TableGroupSnapshot,
+  type ViewGroup,
+  type ViewGroupSnapshot,
   type WsCallableTransport,
   type WsClientOptions,
   type WsConnectionLike,
@@ -138,6 +142,19 @@ export {
   WsUnsupportedBuilderFeatureError,
 } from "./ws-resource.ts"
 export { connectAndSubscribe } from "./connect-and-subscribe.ts"
+export {
+  makeSupervisor as wsSupervisor,
+  makeSupervisorFromModulePlan as wsSupervisorFromModulePlan,
+  makeSupervisorGenerated as wsSupervisorGenerated,
+  reconnectDelayMillisFirstDefault,
+  reconnectDelayMillisMaxDefault,
+  WsSessionSupervisorDefectError,
+  type WsSessionSupervisor,
+  type WsSessionSupervisorFailure,
+  type WsSessionSupervisorHandle,
+  type WsSessionSupervisorPhase,
+  type WsSessionSupervisorPolicy,
+} from "./ws-session-supervisor.ts"
 export {
   type SubscriptionFailure,
   SubscriptionInvalidatedError,

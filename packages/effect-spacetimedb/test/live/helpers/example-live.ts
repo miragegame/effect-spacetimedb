@@ -65,7 +65,7 @@ export const makeExampleSession: Effect.Effect<
   }
 })
 
-export const firstFailure = (exit: Exit.Exit<unknown, unknown>): unknown =>
+export const failureFirst = (exit: Exit.Exit<unknown, unknown>): unknown =>
   Exit.isFailure(exit)
     ? exit.cause.pipe(Cause.findErrorOption, Option.getOrUndefined)
     : undefined

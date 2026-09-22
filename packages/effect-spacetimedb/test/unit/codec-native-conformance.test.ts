@@ -13,14 +13,13 @@ import {
 } from "spacetimedb"
 import { TreeType } from "../fixtures/recursive-types"
 import { nativeBytes, nativeRoundTrip } from "../helpers/native-serializer"
+import { effectProperty } from "../helpers/effect-property"
 import { TestLayer } from "../helpers/test-layer"
 import { corpusArbitraries } from "../helpers/value-type-arbitrary"
 
 const { expect } = EffectVitest
 
-const nativePropertyOptions = {
-  fastCheck: { numRuns: 100, seed: 0xb5a7c0de },
-} as const
+const nativePropertyParameters = { numRuns: 100, seed: 0xb5a7c0de }
 
 const T = StdbTesting.ContractType
 
@@ -54,7 +53,7 @@ type GoldenCase = {
   readonly hex: string
 }
 
-// Re-derived from spacetimedb@2.6.1's patched native serializer. The generated-value
+// Re-derived from spacetimedb@2.10.1's patched native serializer. The generated-value
 // native properties above fuzz consistency through the pinned serializer; this
 // table pins intentional wire-format anchors.
 //
@@ -366,24 +365,25 @@ const nativeDifferentialEntries = corpusArbitraries.filter(
 
 EffectVitest.layer(TestLayer)("codec native conformance", (it) => {
   for (const { kind, type, valueArbitrary } of nativeDifferentialEntries) {
-    it.effect.prop(
-      `db native differential - ${kind}`,
-      [valueArbitrary],
-      ([value]) =>
-        Effect.gen(function* () {
-          const encoded = yield* StdbTesting.ClientValueCodec.db.encode(
-            type,
-            value,
-          )
-          const native = nativeRoundTrip(type, encoded)
-          const decoded = yield* StdbTesting.ClientValueCodec.db.decode(
-            type,
-            native,
-          )
+    it.effect(`db native differential - ${kind}`, () =>
+      effectProperty(
+        valueArbitrary,
+        (value) =>
+          Effect.gen(function* () {
+            const encoded = yield* StdbTesting.ClientValueCodec.db.encode(
+              type,
+              value,
+            )
+            const native = nativeRoundTrip(type, encoded)
+            const decoded = yield* StdbTesting.ClientValueCodec.db.decode(
+              type,
+              native,
+            )
 
-          expect(decoded).toEqual(value)
-        }),
-      nativePropertyOptions,
+            expect(decoded).toEqual(value)
+          }),
+        nativePropertyParameters,
+      ),
     )
   }
 

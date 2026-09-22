@@ -360,7 +360,7 @@ const makeGeneratedErrorClass = <
   )
   const annotations =
     typeof status === "number" ? { httpApiStatus: status } : undefined
-  const Tagged = Schema.TaggedErrorClass<GeneratedError<Tag, Fields>>()(
+  const Tagged = Schema.TaggedError<GeneratedError<Tag, Fields>>()(
     tag,
     schemaFields as never,
     annotations,

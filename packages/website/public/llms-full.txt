@@ -28,6 +28,12 @@ module, then run `spacetime generate` against the built bundle:
 }
 ```
 
+The `spacetime` CLI has to match the `spacetimedb` package the module depends
+on. `spacetime build` and `spacetime generate` read and write a
+version-specific module-definition format, so a mismatched CLI either refuses
+the module or emits bindings a host of the other version rejects. Move the CLI,
+the package, and the server together.
+
 This is the default path. In an ordinary strict TypeScript project, import the
 generated `DbConnection` and pass it directly to the Effect client:
 
@@ -73,7 +79,7 @@ import {
 
 const target = {
   moduleBundlePath: "dist/bundle.js",
-  stagingDir: "node_modules/.tmp/effect-spacetimedb-codegen/staging",
+  stagingDir: ".tmp/effect-spacetimedb-codegen/staging",
   artifactDir: "src/generated-client",
   spacetimeCommand: ["spacetime"],
 }
@@ -87,11 +93,14 @@ await Effect.runPromise(program.pipe(Effect.provide(NodeServices.layer)))
 
 Run this script without `--check` to emit the artifact. Use `--check` in CI to
 regenerate in staging and compare without rewriting the committed artifact.
+Add `.tmp/` to the consumer project's `.gitignore` so generated staging files
+cannot be committed accidentally.
 
 The codegen export runs under plain Node 20 or newer. Install `esbuild@^0.25` as
 an optional peer and provide the platform layer at your executable boundary;
 the example uses `@effect/platform-node`'s `NodeServices.layer`. The pipeline
-asserts the supported SpaceTimeDB CLI version before generation.
+asserts the exact SpaceTimeDB CLI version it was built against before
+generating, and fails with `CodegenCliVersionError` on anything else.
 
 The artifact declaration is deliberately erased. Restore type identity in one
 hand-written facade tied to the same module contract used by the server:
@@ -111,9 +120,44 @@ export const DbConnection: GeneratedConnectionOf<typeof Module.spec> =
 Import the facade everywhere else. `generatedConnection(...)` is an identity at
 runtime; the generated JavaScript still comes entirely from
 `spacetime generate`, so upstream retains SDK and wire compatibility. Generated
-sessions also validate that every public table and public event table in the
-contract exists on the built connection and fail with
-`GeneratedArtifactShapeError` when the artifact is stale.
+sessions also validate that every public table, public event table, and public
+view in the contract exists on the built connection and fail with
+`GeneratedArtifactShapeError`, naming the missing keys, when the artifact is
+stale.
+
+## Accessor Keys Are camelCase
+
+`spacetime generate` keys the generated `db` and `tables` accessors by the
+**camelCase** spelling of each relation's name, and emits a `@deprecated`
+snake_case alias wherever the two spellings differ.
+
+effect-spacetimedb resolves tables, event tables, and views alike by their
+**contract key** — the key you wrote in `addTables(...)` or the views group.
+Declared names are required to be camelCase-canonical, so the contract key is
+the generated accessor key under either name policy, and the deprecated aliases
+are never resolved. A client that exposes only the alias is treated as stale and
+fails acquisition with `GeneratedArtifactShapeError`.
+
+Only SQL and subscription text keeps the wire name. A module on the
+`snake_case` policy still queries `all_users` while its rows arrive through the
+`allUsers` accessor.
+
+## Never Format A Generated Artifact
+
+Both the artifact pipeline's `--check` mode and drift checks compare generated
+files by content. A formatter run over `src/generated` or `src/generated-client`
+rewrites bytes the generator did not produce and turns every subsequent check
+red, with a diff that looks like real drift. Exclude the directory *and its
+contents* from your formatter — a directory-only pattern does not stop a
+pre-commit hook that passes explicit file paths:
+
+```json
+{
+  "files": {
+    "includes": ["**", "!src/generated-client", "!src/generated-client/**"]
+  }
+}
+```
 
 
 ---
@@ -228,6 +272,42 @@ The native generated client still owns the actual WebSocket
 connection. effect-spacetimedb layers typed Effect services, scoped sessions,
 and projected HTTP clients over the module contract.
 
+## Connection Failures
+
+The handshake is the dividing line. A failure before the connection is
+established fails the scoped acquisition with `WsConnectError`; a failure after
+it is a connection loss, which invalidates the session and fails in-flight and
+subsequent calls with `ConnectionLostError`.
+
+| What happened | During acquisition | On an established session |
+| --- | --- | --- |
+| Socket error before the handshake | `WsConnectError` with the socket error as `cause` | — |
+| Socket error after the handshake | `WsConnectError` with the socket error as `cause` | `ConnectionLostError` whose `raw` is that error's message |
+| Close with no reported error | `WsConnectError` with `cause: undefined` | `ConnectionLostError` with `raw: "WebSocket connection disconnected"` |
+| Connect timeout | `WsConnectError` whose `cause` is `WsConnectTimeoutError` | — |
+| Generated client missing contract relations | `GeneratedArtifactShapeError`, naming the missing keys | — |
+
+A socket error raised *after* the handshake never arrives as a connect error.
+The SDK records it, closes the socket, and reports it on the disconnect path, so
+`cause` is what distinguishes a connection that died with a reason from one that
+simply closed. The causeless case covers both a clean close and the close the
+SDK performs when an inbound frame fails to decompress.
+
+In a browser, `onerror` hands the SDK an `ErrorEvent` rather than an `Error`.
+The SDK normalizes that to an `Error` carrying the event's message, with the
+original event on `.cause`, so `WsConnectError.cause` is an `Error` on every
+runtime.
+
+`ConnectionLostError` means the client never observed a terminal response for a
+call. The reducer or procedure may already have committed on the server. Treat
+the outcome as unknown, prefer idempotent mutations, and reconcile from the
+replacement session's subscribed state before retrying anything that is not.
+
+A bare scoped session surfaces terminal invalidation and stops there. Long-lived
+clients can opt into the package supervisor for bounded acquisition, jittered
+reconnect backoff, scoped per-session setup, and resubscription; a reconnect
+after a causeless close behaves exactly like one after a reported socket error.
+
 
 ---
 
@@ -282,6 +362,12 @@ The projection contains:
 effect-spacetimedb's client surface uses Effect services and
 typed errors. It does not replace the native generated WebSocket cache; it wraps
 it with scoped resources, projected callables, and subscription helpers.
+
+Every key in the projection — table, event-table, and view keys passed to
+`subscribe`, `streamTable`, `targets`, and the session's `db` — is the
+**contract key** you declared, which is also the camelCase accessor key
+`spacetime generate` emits. The wire name appears only inside SQL and
+subscription text. See [Codegen](/core-concepts/clients/codegen).
 
 ## Group-Scoped HTTP Clients
 
@@ -368,9 +454,10 @@ The exported failure model is:
 
 | Type | Meaning |
 | --- | --- |
-| `CallFailure<E>` | Typed call error union: declared errors, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
-| `RawCallFailure<E>` | Raw call error union: `DomainCallError<E>`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
+| `CallFailure<E>` | Typed call error union: declared errors, `ConnectionLostError`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
+| `RawCallFailure<E>` | Raw call error union: `DomainCallError<E>`, `ConnectionLostError`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
 | `DomainCallError<E>` | Declared error preserved as a wrapper by `.raw`. |
+| `ConnectionLostError` | The session was invalidated before a terminal response arrived; the call's outcome is unknown. |
 | `RemoteRejectedError` | The remote side rejected the call without a decodable declared error. |
 | `TransportError` | The HTTP or WebSocket transport failed before a typed response arrived. |
 | `StdbDecodeError` | A response, row, event, or payload could not be decoded with the module contract. |
@@ -510,7 +597,92 @@ separate migration DSL or change the host migration model.
 
 Use `Stdb.table(...)`, `Stdb.scheduledTable(...)`, and the callable builders to
 declare the next module schema, then follow SpacetimeDB's migration guidance for
-publishing and upgrading databases.
+publishing and upgrading databases. What follows is the part of the host model
+that decides whether a redeclaration of your contract can be published over a
+live database.
+
+## What Publishing Can Change In Place
+
+Reducers, procedures, views, and HTTP handlers are not part of a migration plan
+at all. Add, remove, rename, and retype them freely.
+
+Tables are planned. `spacetime publish` computes the migration, prints it, and
+asks before applying anything that disconnects clients. These changes are
+automatic:
+
+- adding a table, or removing one that holds no rows;
+- adding or removing an index;
+- adding or removing a unique constraint, and changing which column is the
+  primary key;
+- adding or removing an auto-increment sequence — rejected if existing values
+  already fall inside the new sequence's range;
+- flipping a table between public and private;
+- appending columns **that declare a default**;
+- a layout-compatible column type change: a sum may gain variants appended at
+  the end as long as every existing variant keeps its name and position and the
+  encoded size and alignment do not change;
+- any column change at all on an event table, which holds no resident rows.
+
+These require a fresh database (`spacetime publish --delete-data`) or the
+incremental-migration pattern: removing a column, reordering columns, removing a
+table that still holds rows, changing a column to a layout-incompatible type,
+and adding or removing a schedule.
+
+The whole migration runs in one transaction. If any step fails, it rolls back
+and the database keeps its previous schema and its data.
+
+## Appending A Column
+
+A new column has to be last and has to declare a default, because the host
+materializes that default into every existing row.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const user = Stdb.table("user", {
+  columns: {
+    id: Stdb.string().primaryKey(),
+    name: Stdb.string(),
+    // Appended in a later version of this module.
+    loginCount: Stdb.u32().default(0),
+  },
+})
+```
+
+Without a default the publish is refused while the plan is computed, before the
+database is touched. A default cannot be combined with `.primaryKey()`,
+`.unique()`, or `.autoInc()`, so a new key column is never an appended column.
+Appending rewrites every row of the table and disconnects connected clients; it
+is not a metadata-only change.
+
+## Adding A Unique Or Primary Key Constraint
+
+Adding `.unique()` or `.primaryKey()` to a column of an already-populated table
+is an automatic migration when the existing rows satisfy it. When they do not,
+the migration fails and rolls back with the data intact, reporting how many
+duplicate groups it found and listing the first ten offending values with their
+occurrence counts. Columns are identified by position in that message, not by
+name.
+
+:::note
+
+SpacetimeDB's own automatic-migrations page still lists this under forbidden
+changes. The host has allowed it since the 2.7.0 release; the upstream page has
+not caught up.
+
+:::
+
+## Renaming
+
+The declared table name is both the client-facing accessor and the name the
+database stores the table under, so changing it is a rename of the table itself
+— remove plus add — and it fails while the table holds rows. Changing a module's
+case-conversion policy rewrites every stored name the same way.
+
+Columns are the exception worth knowing, because `.name("db_name")` pins the
+database column name independently of the TypeScript field name. With the
+database name pinned, renaming the field renames only the accessor, which
+migrates in place.
 
 
 ---
@@ -764,6 +936,12 @@ const rotateToken = Effect.gen(function* () {
 Use `.raw(...)` only when you need remote rejection metadata in addition to the
 decoded declared error.
 
+A failing reducer aborts its transaction and rejects the caller's call with the
+declared error's payload intact. That rejection is the only place the payload
+appears: the host does not copy it into the module's server log, so
+`spacetime logs` is not a channel for observing which declared error aborted a
+transaction. Log deliberately from the handler when an operator needs to see it.
+
 Subscription and stream APIs report subscription, transport, invalidation, and
 row-decode failures. They do not carry declared domain errors because declared
 errors are emitted by reducer, procedure, and typed HTTP route calls.
@@ -784,7 +962,7 @@ sidebar:
   order: 4
 ---
 
-<a class="upstream-doc" href="https://spacetimedb.com/docs/functions" target="_blank" rel="noopener noreferrer">SpacetimeDB: HTTP Handlers ↗</a>
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions/http-handlers" target="_blank" rel="noopener noreferrer">SpacetimeDB: HTTP Handlers ↗</a>
 
 HTTP routes are server-to-server routes, not caller-authenticated reducers. Their
 context exposes the module database identity, timestamp, HTTP request data,
@@ -847,6 +1025,10 @@ const WebhooksLive = Stdb.StdbBuilder.group(Module, "Webhooks", {
 Use raw routes for GET or HEAD, query strings, custom auth headers, webhooks, and
 non-JSON bodies. Keep external side effects outside HTTP transaction bodies, just
 as you would for procedures.
+
+These are inbound routes the module serves. They are unrelated to the
+`[module-http]` server setting, which governs requests a module *makes* — see
+[Procedures](/core-concepts/functions/procedures).
 
 effect-spacetimedb uses `StdbHttpGroup` plus
 `StdbBuilder.group(...)` instead of exporting handler functions directly. Typed
@@ -1009,6 +1191,56 @@ Procedure handlers cannot yield `Db` directly. Use the module's
 `Tx` runner and keep transaction bodies pure database work because the native
 runtime may retry them after optimistic commit conflicts.
 
+## Outbound HTTP
+
+A procedure is the only place a module can make an outbound request. Yield the
+module's `Http` accessor outside any transaction — the host refuses a request
+while a transaction is open, so fetch first, then open the transaction that
+records the result.
+
+```ts
+const { Http, Tx, Db } = Module
+
+const syncLive = Stdb.StdbBuilder.group(Module, "Sync", {
+  sync_profile: Effect.fn(function* ({ userId }) {
+    const http = yield* Http
+    const response = yield* http.fetch(`https://example.test/users/${userId}`)
+    const profile = yield* http.json<{ readonly name: string }>(response)
+
+    const tx = yield* Tx
+    return yield* tx.run(
+      Effect.gen(function* () {
+        const db = yield* Db
+        yield* db.user.userId.replace({ userId, name: profile.name })
+      }),
+    )
+  }),
+})
+```
+
+Failures arrive as `StdbHostCallError` in the error channel, tagged with the
+operation (`http.fetch`, `http.json`, and so on).
+
+Two host policies decide whether a request is allowed at all, and both are the
+operator's, not the module's:
+
+- **Egress filtering.** Requests to loopback, link-local, and private or
+  otherwise special-purpose addresses are refused — `127.0.0.1`, `10/8`,
+  `172.16/12`, `192.168/16`, the IPv6 equivalents, and the rest of the
+  special-purpose registry. Ordinary server builds enforce this; only a
+  purpose-built test binary relaxes it for loopback. A module cannot reach a
+  service on its own host or elsewhere inside a private network. Where a
+  hostname resolves to both a blocked and a routable address, the routable one
+  is used.
+- **A global off switch.** A standalone operator can disable module-originated
+  HTTP entirely with `[module-http] enabled = false` in the server's
+  `config.toml`. It defaults to enabled and takes a server restart to change.
+  With it off, every request fails with `module outbound HTTP requests are
+  disabled`.
+
+Requests time out after 30 seconds unless you pass a shorter one, and the host
+clamps any requested timeout to 180 seconds.
+
 ## Scheduling
 
 Scheduled reducers and procedures are declared with the callable group API and
@@ -1059,7 +1291,9 @@ Use `Stdb.ScheduleAt.interval(...)` for persistent re-fire rows,
 `Stdb.ScheduleAt.after(ctx.timestamp, duration)` for one-shot relative work, and
 `Stdb.ScheduleAt.nextCron(cron, ctx.timestamp)` for cron-derived one-shots.
 See [Scheduled Tables](/core-concepts/tables/scheduled-tables) for the table
-side of the contract.
+side of the contract, the host's dispatch semantics, and why a scheduled
+procedure that does external work between transactions has to claim its work
+rows in the transaction that selects them.
 
 
 ---
@@ -1532,6 +1766,10 @@ effect-spacetimedb validates auto-increment at declaration time:
 `.autoInc()` without `.primaryKey()` throws, and defaults cannot be combined with
 primary keys or auto-increment columns.
 
+`.autoInc()` is narrower than `.primaryKey()`: only the integer widths carry a
+sequence. A string, identity, UUID, timestamp, or sum primary key is a legal key
+but rejects `.autoInc()` — allocate those values in the handler.
+
 
 ---
 
@@ -1580,6 +1818,12 @@ export const membership = Stdb.table("membership", {
 effect-spacetimedb wraps Effect schemas in `Stdb.*` value types, then uses those
 value types consistently for table columns, reducer/procedure params, view
 returns, and declared errors.
+
+Any value type can be a column. Which ones can carry a key or an index is a
+narrower question: see [Constraints](/core-concepts/tables/constraints) for the
+primary-key and unique-capable types and [Indexes](/core-concepts/tables/indexes)
+for the indexable ones. `Stdb.enum(...)` and `Stdb.sum(...)` columns qualify for
+both.
 
 ## Value-Type Pattern
 
@@ -1678,6 +1922,37 @@ is not already implied by a primary key or explicit index. A default value canno
 be combined with a unique constraint because SpacetimeDB would materialize the
 same default for more than one row.
 
+## Key-Capable Column Types
+
+A key column has to be something the host can order and compare: the integer
+widths, `bool`, `string`, `Stdb.bigint()`, `Stdb.identity()`,
+`Stdb.connectionId()`, `Stdb.timestamp()`, `Stdb.timeDuration()`,
+`Stdb.uuid()`, and any `Stdb.enum(...)` or `Stdb.sum(...)`. A sum keys on its
+whole encoded value, so a payload variant is a distinct key per payload:
+`{ tag: "Retrying", value: 7 }` and `{ tag: "Retrying", value: 9 }` are two
+rows under a sum primary key.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const Status = Stdb.sum({
+  Ready: Stdb.unit(),
+  Retrying: Stdb.u32(),
+})
+
+const progress = Stdb.table("progress", {
+  columns: {
+    status: Status.primaryKey(),
+    note: Stdb.string(),
+  },
+})
+```
+
+Arrays, structs, `Stdb.f32()`/`f64()`, and numeric `Stdb.literal(...)` (which
+lowers to `f64`) are rejected as primary keys at declaration time. `.autoInc()`
+stays narrower still: it applies only to the integer widths, so a sum, string,
+or identity primary key cannot be auto-incremented.
+
 
 ---
 
@@ -1712,6 +1987,9 @@ const profile = Stdb.table("profile", {
 Defaults use the authored TypeScript value for the wrapped
 `Stdb.*` value type. The library rejects defaults on primary keys,
 auto-increment columns, unique columns, and unsupported native metadata shapes.
+
+A default is also what makes a column appendable to a table that already holds
+rows — see [Migrations](/core-concepts/databases/migrations).
 
 
 ---
@@ -1831,6 +2109,62 @@ effect-spacetimedb accepts the native algorithms
 `"btree"`, `"hash"`, and `"direct"` at both declaration sites. `hash` indexes
 are point-only; `direct` indexes are range-capable.
 
+## Indexable Column Types
+
+`btree` and `hash` index any column type the host can key, including
+`Stdb.enum(...)` and payload-carrying `Stdb.sum(...)` columns. A unit-variant
+enum is keyed by its variant tag; a payload-carrying sum is keyed by its whole
+encoded value, so `{ tag: "Chunk", value: 4 }` and `{ tag: "Chunk", value: 5 }`
+are two different keys.
+
+`direct` is the exception. It indexes exactly one column, and only `u8`, `u16`,
+`u32`, `u64`, or a unit-variant enum.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const Kind = Stdb.enum("Ping", "Chunk")
+
+const marker = Stdb.table("marker", {
+  columns: {
+    kind: Kind.index("btree"),
+    seq: Stdb.u32(),
+  },
+  indexes: (columns) => [
+    Stdb.index("marker_kind_seq_idx", [columns.kind, columns.seq], {
+      algorithm: "btree",
+    }),
+  ],
+})
+```
+
+## Composite Lookups
+
+A composite btree index is read through the accessor named after the index. Pass
+a tuple of index-column values: either a leading prefix of the columns or the
+full width. The last value you supply may be a range; every column before it is
+matched for equality.
+
+```ts
+// Equality on both columns: a point lookup.
+yield* db.marker.marker_kind_seq_idx.filterToArray([{ tag: "Chunk" }, 7])
+
+// Equality on `kind`, range over `seq` — a range in the final column of a
+// full-width tuple is a range scan, not a point lookup.
+yield* db.marker.marker_kind_seq_idx.filterToArray([
+  { tag: "Chunk" },
+  { from: { tag: "included", value: 1 }, to: { tag: "excluded", value: 9 } },
+])
+
+// A one-column prefix scans every `seq` under that `kind`.
+yield* db.marker.marker_kind_seq_idx.filterToArray([{ tag: "Chunk" }])
+```
+
+A single-column index takes the bare value or a bare `{ from, to }` range
+instead of a tuple. Bounds are `{ tag: "included" | "excluded", value }` or
+`{ tag: "unbounded" }`, and `deleteAll(...)` accepts the same inputs as
+`filterToArray(...)`.
+
 
 ---
 
@@ -1926,16 +2260,78 @@ yield* db.reminderSchedule.schedule({
 
 | Schedule form | Host behavior |
 | --- | --- |
-| `Stdb.ScheduleAt.at(...)` or `after(...)` | One-shot row. Reducers consume it after execution; procedures consume it before execution. |
+| `Stdb.ScheduleAt.at(...)` or `after(...)` | One-shot row. Reducers consume it after execution; procedures consume it before, so a scheduled procedure can no longer find or update its own row. |
 | `Stdb.ScheduleAt.interval(...)` | Row persists and re-fires until deleted. |
 
-For fixed wall-clock or tick alignment, prefer self-rescheduling one-shot rows:
-handle a `Time` row, insert the next `Time` row, then return. Use `Interval`
-when simple persistent re-fire spacing is enough.
+`Interval` covers plain re-fire spacing. Reach for self-rescheduling one-shot
+rows when the target is a wall-clock or cron alignment an interval cannot
+express: handle a `Time` row, insert the next one with
+`Stdb.ScheduleAt.nextCron(cron, ctx.timestamp)` or `at(...)`, then return.
 
 `Stdb.scheduledTable(...)` creates the reserved
 `scheduled_id`/`scheduled_at` columns and `StdbFn.scheduledReducer(...)` or
 `StdbFn.scheduledProcedure(...)` binds exactly one typed handler to the table.
+The binding is registered on the function, which is where SpacetimeDB expects
+it; the table itself carries no schedule option.
+
+## Host Scheduling Semantics
+
+These are SpacetimeDB host behaviours, not something this library adds.
+
+**Dispatch is concurrent.** The scheduler does not wait for one due function to
+finish before dispatching the next, so a slow scheduled procedure does not
+delay unrelated scheduled work. Execution is bounded further down: scheduled
+reducers share the module's single reducer lane and still run one at a time,
+serialized with client-invoked reducers, while scheduled procedures take an
+instance from a bounded pool — one per available CPU by default — and genuinely
+run in parallel.
+
+**Already-expired work has no order.** When several schedules are past due at
+once, after a restart, a backlog, or an overrunning run, they are not guaranteed
+to run in `scheduled_at` order. Never encode ordering between two schedule rows:
+chain them, or carry an explicit sequence number in the row.
+
+**A row does not normally overlap itself.** Each row is an independent schedule
+identified by its `scheduledId`, and the host does not queue that row's next
+invocation until the current one has returned. Two different rows in the same
+table are separate schedules and may run at the same time. The exception is
+re-arming: writing a schedule row registers its timer entry immediately, so a
+procedure that updates its own row to an already-due time can be re-entered
+while it is still running. Treat self-exclusion as the normal case, never as a
+mutual-exclusion primitive.
+
+**Intervals do not drift.** The next fire time is the previous *intended* time
+plus the interval, not the time the last run started or finished, so timer
+jitter and slow runs never accumulate. Ticks missed while the database was busy
+or down are skipped rather than replayed back to back. The first fire of a newly
+inserted `Interval` row is one interval away, not immediate.
+
+**A scheduled reducer is still one transaction.** Its whole body commits or
+rolls back atomically, exactly like a client-invoked reducer. For a one-shot
+row, the host's deletion of that row is a separate transaction committed
+immediately afterwards — subscribers see two updates — and it happens whether
+the reducer succeeded or failed. Failed invocations are logged and never
+retried; re-insert a schedule row from the handler if retry is part of the
+domain.
+
+## Scheduled Procedures Must Claim Their Work
+
+A procedure has no ambient transaction: each `Tx.run(...)` is its own
+transaction, and external work such as an HTTP call necessarily happens between
+two of them. The host holds nothing across that gap — no row locks, no snapshot,
+no exclusion. Combined with concurrent dispatch, a procedure that selects
+pending rows in one transaction, calls out, and marks them done in a later
+transaction will hand the same rows to a second invocation that starts in the
+window between the two.
+
+Claim the work in the same transaction that selects it: flip a status column, or
+stamp an attempt id and a lease expiry, so the selecting transaction is what
+makes those rows invisible to everyone else. Do the external call afterwards and
+record its outcome against that claim.
+
+Keep transaction bodies idempotent and free of captured mutable state for the
+same reason procedures generally require it: the runtime may re-run a
+transaction body after a commit conflict.
 
 ## Validation Boundaries
 
@@ -1984,21 +2380,21 @@ then build native module exports and generated clients from the same contract.
   <TabItem label="npm">
 
     ```sh
-    npm install effect-spacetimedb effect@4.0.0-beta.93 spacetimedb@2.6.1
+    npm install effect-spacetimedb effect@4.0.0-rc.117 spacetimedb@2.10.1
     ```
 
   </TabItem>
   <TabItem label="pnpm">
 
     ```sh
-    pnpm add effect-spacetimedb effect@4.0.0-beta.93 spacetimedb@2.6.1
+    pnpm add effect-spacetimedb effect@4.0.0-rc.117 spacetimedb@2.10.1
     ```
 
   </TabItem>
   <TabItem label="bun">
 
     ```sh
-    bun add effect-spacetimedb effect@4.0.0-beta.93 spacetimedb@2.6.1
+    bun add effect-spacetimedb effect@4.0.0-rc.117 spacetimedb@2.10.1
     ```
 
   </TabItem>
@@ -2090,8 +2486,8 @@ const spacetime = schema({
   ),
 })
 
+// The exported binding's name is the reducer name.
 export const user_upsert = spacetime.reducer(
-  "user_upsert",
   { id: t.string(), name: t.string() },
   (ctx, { id, name }) => {
     ctx.db.user.insert({ id, name })
@@ -2204,6 +2600,8 @@ hand-written; there is no generated API reference.
 | --- | --- |
 | `effect-spacetimedb` | Contract builders, value types, tables, declared errors, module assembly, builder APIs, and client projection. |
 | `effect-spacetimedb/client` | WebSocket generated-client adapters and client transport helpers. |
+| `effect-spacetimedb/client/atom` | Effect Atom bindings for React consumers; needs the optional `@effect/atom-react` and `react` peers. |
+| `effect-spacetimedb/codegen` | Quarantined client generation: runs the native generator and emits an erased artifact. |
 | `effect-spacetimedb/server` | Advanced server primitives for integrations that bypass normal builder flow. |
 | `effect-spacetimedb/server-compiler` | Host-only compiler entrypoint for module entries; import `build` from here. |
 | `effect-spacetimedb/server-polyfills` | Standalone side-effect import for host compatibility shims; normal module entries get these through `server-compiler`. |
@@ -2249,7 +2647,7 @@ bodies. Do not yield accessors from another module.
 | `T.optional()` | Optional table column annotation. |
 | `Stdb.array(T)` | SATS array/list. |
 | `Stdb.struct({...})` | Named object shape for params, rows, returns, and errors. |
-| `Stdb.sum({...})` | Tagged union with payload variants. |
+| `Stdb.sum({...})` | Tagged union with payload variants; key- and index-capable, never auto-increment. |
 | `T.named("Name")` | Set the generated SATS/client type name for an anonymous struct, sum, or string-literal enum; the default name is content-addressed. |
 | `Stdb.enum("A", "B")` / `enumType(...)` | Unit-variant SATS enum; prefer namespace form because `enum` cannot be named-imported. |
 | `Stdb.unit()` | Unit value for empty scheduled procedure returns, result branches, and sum payloads. |
@@ -2334,6 +2732,9 @@ Only Effect failures are encoded as declared errors. Defects remain defects.
 | `StdbDecodeError` | Contract decode failure. |
 | `CallFailure<E>` / `RawCallFailure<E>` | Projected client call failure unions. |
 | `RemoteRejectedError` / `TransportError` / `DomainCallError<E>` | Projected client remote, transport, and raw declared-error failures. |
+| `WsConnectError` / `WsConnectTimeoutError` | WebSocket acquisition failed, or did not complete in time. |
+| `ConnectionLostError` | An established session was invalidated; the call's outcome is unknown. |
+| `GeneratedArtifactShapeError` | The generated client is missing relations the contract declares. |
 
 
 ---
@@ -2348,8 +2749,8 @@ sidebar:
   order: 98
 ---
 
-This map tracks the latest SpacetimeDB Core Concepts taxonomy against these docs.
-Every upstream topic should have exactly one row.
+This map tracks the SpacetimeDB Core Concepts taxonomy against these docs, as of
+SpacetimeDB 2.10.1. Every upstream topic has exactly one row.
 
 | Upstream Core Concept topic | Upstream link | Our status | Our page / note |
 | --- | --- | --- | --- |
@@ -2361,6 +2762,7 @@ Every upstream topic should have exactly one row.
 | Databases / Cheat Sheet | [SpacetimeDB -> Cheat Sheet](https://spacetimedb.com/docs/databases/cheat-sheet) | mirrored | Covered by [Getting Started](/getting-started) and [Reference](/reference); no separate Effect delta. |
 | Databases / Migrations / Automatic Migrations | [SpacetimeDB -> Automatic Migrations](https://spacetimedb.com/docs/databases/automatic-migrations) | mirrored | [Migrations](/core-concepts/databases/migrations) |
 | Databases / Migrations / Incremental Migrations | [SpacetimeDB -> Incremental Migrations](https://spacetimedb.com/docs/databases/incremental-migrations) | mirrored | [Migrations](/core-concepts/databases/migrations) |
+| Databases / Submodules | [SpacetimeDB -> Submodules](https://spacetimedb.com/docs/submodules) | not covered | Upstream 2.8.0 lets a TypeScript module mount another module under a namespace (`schema({ tbl, lib })`, `ctx.db.<ns>`, `ctx.as.<ns>`). The contract DSL does not expose it yet; the runtime tolerates the SDK's always-present namespaces. |
 | Functions | [SpacetimeDB -> Functions](https://spacetimedb.com/docs/functions) | mirrored | Section root represented by the Functions sidebar group. |
 | Functions / Reducers | [SpacetimeDB -> Reducers](https://spacetimedb.com/docs/functions/reducers) | mirrored | [Reducers](/core-concepts/functions/reducers) |
 | Functions / Reducers / Reducer Context | [SpacetimeDB -> Reducer Context](https://spacetimedb.com/docs/functions/reducers/reducer-context) | mirrored | [Reducer Context](/core-concepts/functions/reducer-context) |
@@ -2368,7 +2770,7 @@ Every upstream topic should have exactly one row.
 | Functions / Reducers / Error Handling | [SpacetimeDB -> Error Handling](https://spacetimedb.com/docs/functions/reducers/error-handling) | mirrored | [Error Handling](/core-concepts/functions/error-handling) |
 | Functions / Procedures | [SpacetimeDB -> Procedures](https://spacetimedb.com/docs/functions/procedures) | mirrored | [Procedures](/core-concepts/functions/procedures) |
 | Functions / Views | [SpacetimeDB -> Views](https://spacetimedb.com/docs/functions/views) | mirrored | [Views](/core-concepts/functions/views) |
-| Functions / HTTP Handlers | [SpacetimeDB -> Functions](https://spacetimedb.com/docs/functions) | mirrored | [HTTP Handlers](/core-concepts/functions/http-handlers); a dedicated upstream HTTP handlers page is not published yet. |
+| Functions / HTTP Handlers | [SpacetimeDB -> HTTP Handlers](https://spacetimedb.com/docs/functions/http-handlers) | mirrored | [HTTP Handlers](/core-concepts/functions/http-handlers) |
 | Tables | [SpacetimeDB -> Tables](https://spacetimedb.com/docs/tables) | mirrored | Section root represented by the Tables sidebar group. |
 | Tables / Column Types | [SpacetimeDB -> Column Types](https://spacetimedb.com/docs/tables/column-types) | mirrored | [Column Types](/core-concepts/tables/column-types) |
 | Tables / File Storage | [SpacetimeDB -> File Storage](https://spacetimedb.com/docs/tables/file-storage) | mirrored | [File Storage](/core-concepts/tables/file-storage) |
@@ -2391,7 +2793,7 @@ Every upstream topic should have exactly one row.
 | Authentication / SpacetimeAuth / Steam | [SpacetimeDB -> Steam](https://spacetimedb.com/docs/core-concepts/authentication/spacetimeauth/steam) | not-supported | No Effect-specific API. |
 | Authentication / Auth0 | [SpacetimeDB -> Auth0](https://spacetimedb.com/docs/core-concepts/authentication/Auth0) | not-supported | No Effect-specific API. |
 | Authentication / Clerk | [SpacetimeDB -> Clerk](https://spacetimedb.com/docs/core-concepts/authentication/Clerk) | not-supported | No Effect-specific API. |
-| Authentication / BetterAuth | [SpacetimeDB -> Authentication](https://spacetimedb.com/docs/core-concepts/authentication) | not-supported | No dedicated upstream BetterAuth page is present in the live sitemap; no Effect-specific API. |
+| Authentication / BetterAuth | [SpacetimeDB -> Better Auth](https://spacetimedb.com/docs/core-concepts/authentication/BetterAuth) | not-supported | No Effect-specific API. |
 | Authentication / Usage | [SpacetimeDB -> Usage](https://spacetimedb.com/docs/core-concepts/authentication/usage) | not-supported | No Effect-specific API. |
 | Clients | [SpacetimeDB -> Clients](https://spacetimedb.com/docs/clients) | mirrored | Section root represented by the Clients sidebar group. |
 | Clients / Codegen | [SpacetimeDB -> Codegen](https://spacetimedb.com/docs/clients/codegen) | mirrored | [Codegen](/core-concepts/clients/codegen) |
@@ -2450,7 +2852,6 @@ const spacetime = schema({
 })
 
 export const user_upsert = spacetime.reducer(
-  "user_upsert",
   { id: t.string(), name: t.string() },
   (ctx, { id, name }) => {
     ctx.db.user.insert({ id, name })
@@ -2505,8 +2906,14 @@ const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
 | reducer function export | `StdbFn.reducer(...)` in a callable group |
 | procedure function export | `StdbFn.procedure(...)` in a callable group |
 | table builder | `Stdb.table(...)` bound to a variable |
-| scheduled table callback | `StdbFn.scheduledReducer(...)` or `scheduledProcedure(...)` |
+| `reducer`/`procedure` `onSchedule` option | `StdbFn.scheduledReducer(...)` or `scheduledProcedure(...)` |
 | HTTP handler export | `StdbHttpGroup` plus `StdbBuilder.group(...)` |
+
+Schedules are registered on the function, not the table: `StdbFn.scheduledReducer(...)`
+and `scheduledProcedure(...)` compile to the native `onSchedule` option, which is
+where SpacetimeDB now expects the binding. If you are porting a module that
+passes `scheduled` to `table(...)`, that registration is deprecated upstream —
+drop it and declare the scheduled callable instead.
 
 ## Suggested Order
 
@@ -2882,6 +3289,14 @@ permits them.
 in authored server and generated-client values. Their HTTP JSON shape is the
 schema-encoded representation produced by `Stdb.httpCodec(...)`.
 
+These classes validate their own input, and construction is where a malformed
+value is caught: a non-integer number, a boolean, an array, `null`, a blank
+string, or a string that is not valid hex or a valid UUID is refused outright.
+Decoding runs that check inside the library's typed boundary, so an HTTP body
+carrying `{"__identity__": "not-hex"}` or `{"__uuid__": [42]}` fails with
+`StdbDecodeError` in the error channel instead of surfacing as a raw
+`TypeError` defect.
+
 ## HTTP JSON Profile
 
 HTTP JSON input preparation rewrites exact `{ some: value }` option envelopes,
@@ -3107,6 +3522,15 @@ named import in JavaScript.
 | `Stdb.uuid()` | `spacetimedb.Uuid` | UUID | Native UUID object. |
 | `Stdb.unit()` | `void` / `undefined` | unit | Empty payload marker for sums, results, and scheduled procedure returns. |
 
+The five id-like natives — `Stdb.identity()`, `Stdb.connectionId()`,
+`Stdb.timestamp()`, `Stdb.timeDuration()`, and `Stdb.uuid()` — validate at
+construction: the SpacetimeDB constructors reject anything that is not a
+`bigint`, an integer `number`, or a well-formed string, and a blank string is
+not well-formed. Where such a value arrives from outside the process, that
+rejection is reported as a typed `StdbDecodeError` on the decode boundary, not
+as a defect, so a malformed `__identity__` or `__uuid__` in an HTTP body fails
+the call rather than killing the fiber.
+
 `Stdb.bigint()` is not the same as the fixed-width integer helpers. Use
 `Stdb.bigint()` when the database column should be a SATS string carrying a
 JSON-safe arbitrary integer. Use `i64`/`u64`/`i128`/`u128`/`i256`/`u256` when the
@@ -3128,6 +3552,12 @@ stay a `bigint`.
 | `Stdb.result(Ok, Err)` | Effect-style result envelope | SATS result | Normalizes host `{ ok }` / `{ err }` envelopes. |
 | `Stdb.lazy(() => T)` | recursive value | lazy SATS type | Use for recursive structs or sums. |
 | `Stdb.custom(schema, { type })` | schema-authored value | lowering of `type` | Keep the SpaceTimeDB lowering explicit when wrapping custom schemas. |
+
+`Stdb.sum(...)` and `Stdb.enum(...)` columns are key- and index-capable. They
+key on the whole encoded value, so each payload of a variant is its own key.
+`.autoInc()` is not available on them. See
+[Constraints](/core-concepts/tables/constraints) and
+[Indexes](/core-concepts/tables/indexes).
 
 ## Type names
 

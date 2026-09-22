@@ -320,7 +320,7 @@ describe("type kernel", (it) => {
         const Envelope = StdbTesting.procedureEnvelope(
           StdbTesting.ContractType.option(First),
           StdbTesting.ContractError.errors(
-            class InsertedNameError extends Schema.TaggedErrorClass<InsertedNameError>()(
+            class InsertedNameError extends Schema.TaggedError<InsertedNameError>()(
               "InsertedNameError",
               { message: Schema.String },
             ) {},
@@ -365,18 +365,18 @@ describe("type kernel", (it) => {
     "canonicalizes independently authored recursive child fingerprints",
     () =>
       Effect.gen(function* () {
-        const FirstRecursive = makeRecursiveNameNode()
+        const RecursiveFirst = makeRecursiveNameNode()
         const SameRecursive = makeRecursiveNameNode()
         const ParentWithIndependentChildren = StdbTesting.ContractType.struct({
-          first: FirstRecursive,
+          first: RecursiveFirst,
           second: SameRecursive,
         })
         const ParentWithSharedChild = StdbTesting.ContractType.struct({
-          first: FirstRecursive,
-          second: FirstRecursive,
+          first: RecursiveFirst,
+          second: RecursiveFirst,
         })
 
-        expect(builderTypeName(typeBuilder(FirstRecursive))).toBe(
+        expect(builderTypeName(typeBuilder(RecursiveFirst))).toBe(
           builderTypeName(typeBuilder(SameRecursive)),
         )
         expect(
@@ -425,7 +425,7 @@ describe("type kernel", (it) => {
         const Envelope = StdbTesting.procedureEnvelope(
           StdbTesting.ContractType.string(),
           StdbTesting.ContractError.errors(
-            class EnvelopeNameError extends Schema.TaggedErrorClass<EnvelopeNameError>()(
+            class EnvelopeNameError extends Schema.TaggedError<EnvelopeNameError>()(
               "EnvelopeNameError",
               { message: Schema.String },
             ) {},

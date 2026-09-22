@@ -1,10 +1,15 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Cause from "effect/Cause"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Duration from "effect/Duration"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as Option from "effect/Option"
+import * as Stream from "effect/Stream"
+import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as TestClock from "effect/testing/TestClock"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import * as Stdb from "effect-spacetimedb"
 import { WsUnsupportedBuilderFeatureError } from "effect-spacetimedb/client"
 import * as StdbTesting from "effect-spacetimedb/testing"
@@ -35,12 +40,25 @@ type FullConnection = StdbTesting.ManagedWsConnection<
 >
 type FullOnConnect = Parameters<FullBuilder["onConnect"]>[0]
 type FullOnConnectError = Parameters<FullBuilder["onConnectError"]>[0]
+type FullOnDisconnect = Parameters<FullBuilder["onDisconnect"]>[0]
 
 type FaultBuilderCallbacks = {
   readonly onConnect: FullOnConnect | undefined
   readonly onConnectError: FullOnConnectError | undefined
-  readonly makeConnection: () => FullConnection
+  readonly onDisconnect: FullOnDisconnect | undefined
+  readonly makeConnection: (
+    overrides?: Partial<FullConnection>,
+  ) => FullConnection
 }
+
+// The native `onDisconnect`/`onConnectError` context is the connection object
+// itself: it has no `message`, so nothing but the second argument can name the
+// reason a connection ended.
+const makeNativeDisconnectContext = (): unknown => ({
+  ...makeFullModuleWsConnection(),
+  disconnect: () => undefined,
+  isActive: false,
+})
 
 const makeFaultBuilder = (options: {
   readonly build: (callbacks: FaultBuilderCallbacks) => FullConnection
@@ -48,12 +66,16 @@ const makeFaultBuilder = (options: {
   let disconnectCount = 0
   let onConnect: FullOnConnect | undefined
   let onConnectError: FullOnConnectError | undefined
+  let onDisconnect: FullOnDisconnect | undefined
 
-  const makeConnection = (): FullConnection => ({
+  const makeConnection = (
+    overrides: Partial<FullConnection> = {},
+  ): FullConnection => ({
     ...makeFullModuleWsConnection(),
     disconnect: () => {
       disconnectCount = disconnectCount + 1
     },
+    ...overrides,
   })
 
   const builder: FullBuilder = {
@@ -65,7 +87,10 @@ const makeFaultBuilder = (options: {
       onConnect = callback
       return builder
     },
-    onDisconnect: () => builder,
+    onDisconnect: (callback) => {
+      onDisconnect = callback
+      return builder
+    },
     onConnectError: (callback) => {
       onConnectError = callback
       return builder
@@ -74,6 +99,7 @@ const makeFaultBuilder = (options: {
       options.build({
         onConnect,
         onConnectError,
+        onDisconnect,
         makeConnection,
       }),
   }
@@ -81,10 +107,123 @@ const makeFaultBuilder = (options: {
   return {
     builder,
     disconnectCount: () => disconnectCount,
+    disconnectTransport: (context: unknown, error?: Error) =>
+      onDisconnect?.(context, error),
   }
 }
 
 describe("ws resource fault injection", (it) => {
+  it.effect(
+    "post-acquisition disconnect fails streams, refs, and WS calls with typed errors",
+    () =>
+      Effect.gen(function* () {
+        const reducerStarted = yield* Deferred.make<void>()
+        const procedureStarted = yield* Deferred.make<void>()
+        const reducerPending = Promise.withResolvers<void>().promise
+        const procedurePending = Promise.withResolvers<unknown>().promise
+        let reducerCallCount = 0
+        let procedureCallCount = 0
+        const fault = makeFaultBuilder({
+          build: ({ onConnect, makeConnection }) => {
+            const connection = makeConnection({
+              callReducerWithParams: () => {
+                reducerCallCount += 1
+                Deferred.doneUnsafe(reducerStarted, Effect.void)
+                return reducerPending
+              },
+              callProcedureWithParams: () => {
+                procedureCallCount += 1
+                Deferred.doneUnsafe(procedureStarted, Effect.void)
+                return procedurePending
+              },
+            })
+            onConnect?.(connection, Identity.zero(), "token")
+            return connection
+          },
+        })
+        const session = yield* StdbTesting.makeScopedFromModulePlan({
+          plan,
+          config: {
+            builder: () => fault.builder,
+            uri,
+            databaseName,
+          },
+        })
+        const awaitingInvalidation = yield* session
+          .awaitInvalidation()
+          .pipe(Effect.forkScoped)
+        const reducerFiber = yield* session.reducers
+          .userUpsert({
+            userId: "user-1" as never,
+            name: "Ada" as never,
+          })
+          .pipe(Effect.forkScoped)
+        const procedureFiber = yield* session.procedures
+          .userGet({ userId: "user-1" as never })
+          .pipe(Effect.forkScoped)
+
+        yield* Deferred.await(reducerStarted)
+        yield* Deferred.await(procedureStarted)
+        fault.disconnectTransport(
+          { source: "server-reboot" },
+          new Error("Maincloud server rebooted"),
+        )
+
+        const invalidation = yield* Fiber.join(awaitingInvalidation)
+        expect(invalidation.message).toBe("Maincloud server rebooted")
+
+        const inFlightReducerError = yield* Fiber.join(reducerFiber).pipe(
+          Effect.flip,
+        )
+        const inFlightProcedureError = yield* Fiber.join(procedureFiber).pipe(
+          Effect.flip,
+        )
+        expect(StdbTesting.ConnectionLostError.is(inFlightReducerError)).toBe(
+          true,
+        )
+        expect(StdbTesting.ConnectionLostError.is(inFlightProcedureError)).toBe(
+          true,
+        )
+
+        const subsequentReducerError = yield* session.reducers
+          .userUpsert({
+            userId: "user-2" as never,
+            name: "Grace" as never,
+          })
+          .pipe(Effect.flip)
+        const subsequentProcedureError = yield* session.procedures
+          .userGet({ userId: "user-2" as never })
+          .pipe(Effect.flip)
+        expect(StdbTesting.ConnectionLostError.is(subsequentReducerError)).toBe(
+          true,
+        )
+        expect(
+          StdbTesting.ConnectionLostError.is(subsequentProcedureError),
+        ).toBe(true)
+        expect(reducerCallCount).toBe(1)
+        expect(procedureCallCount).toBe(1)
+
+        const streamError = yield* session
+          .tableGroup(["user"] as const)
+          .changes.pipe(Stream.runHead, Effect.flip)
+        expect(StdbTesting.SubscriptionInvalidatedError.is(streamError)).toBe(
+          true,
+        )
+
+        const tableRef = yield* session.subscribeTableRef("user")
+        const tableRefValue = yield* SubscriptionRef.changes(tableRef).pipe(
+          Stream.filter(AsyncResult.isFailure),
+          Stream.runHead,
+        )
+        expect(Option.isSome(tableRefValue)).toBe(true)
+        if (Option.isSome(tableRefValue)) {
+          expect(
+            Option.getOrUndefined(AsyncResult.error(tableRefValue.value)),
+          ).toBeInstanceOf(StdbTesting.SubscriptionInvalidatedError)
+        }
+      }).pipe(Effect.scoped),
+  )
+
   it.effect(
     "generated acquisition rejects a missing public table and disconnects once",
     () =>
@@ -235,7 +374,11 @@ describe("ws resource fault injection", (it) => {
 
         expect(StdbTesting.GeneratedArtifactShapeError.is(error)).toBe(true)
         if (StdbTesting.GeneratedArtifactShapeError.is(error)) {
-          expect(error.missingKeys).toEqual(["user", "presenceEvent"])
+          expect(error.missingKeys).toEqual([
+            "user",
+            "presenceEvent",
+            "allUsers",
+          ])
         }
       }),
   )
@@ -515,6 +658,109 @@ describe("ws resource fault injection", (it) => {
 
         expect(WsConnectError.is(error)).toBe(true)
         expect(WsUnsupportedBuilderFeatureError.is(error.cause)).toBe(true)
+      }),
+  )
+
+  it.effect(
+    "post-acquisition close without a socket error loses the connection without a cause",
+    () =>
+      Effect.gen(function* () {
+        const fault = makeFaultBuilder({
+          build: ({ onConnect, makeConnection }) => {
+            const connection = makeConnection({
+              callReducerWithParams: () => Promise.resolve(),
+              callProcedureWithParams: () => Promise.resolve(undefined),
+            })
+            onConnect?.(connection, Identity.zero(), "token")
+            return connection
+          },
+        })
+
+        const session = yield* StdbTesting.makeScopedFromModulePlan({
+          plan,
+          config: {
+            builder: () => fault.builder,
+            uri,
+            databaseName,
+          },
+        })
+        const awaitingInvalidation = yield* session
+          .awaitInvalidation()
+          .pipe(Effect.forkScoped)
+
+        fault.disconnectTransport(makeNativeDisconnectContext(), undefined)
+
+        const invalidation = yield* Fiber.join(awaitingInvalidation)
+        expect(invalidation.message).toBe("WebSocket connection disconnected")
+
+        const reducerError = yield* session.reducers
+          .userUpsert({
+            userId: "user-1" as never,
+            name: "Ada" as never,
+          })
+          .pipe(Effect.flip)
+        expect(StdbTesting.ConnectionLostError.is(reducerError)).toBe(true)
+      }).pipe(Effect.scoped),
+  )
+
+  it.effect(
+    "a close carrying a socket error keeps it as the failure cause",
+    () =>
+      Effect.gen(function* () {
+        const socketError = new Error("WebSocket error")
+        const fault = makeFaultBuilder({
+          build: ({ onDisconnect, makeConnection }) => {
+            const connection = makeConnection()
+            onDisconnect?.(makeNativeDisconnectContext(), socketError)
+            return connection
+          },
+        })
+
+        const error = yield* Effect.flip(
+          StdbTesting.makeScopedFromModulePlan({
+            plan,
+            config: {
+              builder: () => fault.builder,
+              uri,
+              databaseName,
+            },
+          }).pipe(Effect.scoped),
+        )
+
+        expect(WsConnectError.is(error)).toBe(true)
+        expect(error.cause).toBe(socketError)
+        expect(fault.disconnectCount()).toBe(1)
+      }),
+  )
+
+  it.effect(
+    "a close without a socket error fails acquisition without a cause",
+    () =>
+      Effect.gen(function* () {
+        const context = makeNativeDisconnectContext()
+        const fault = makeFaultBuilder({
+          build: ({ onDisconnect, makeConnection }) => {
+            const connection = makeConnection()
+            onDisconnect?.(context, undefined)
+            return connection
+          },
+        })
+
+        const error = yield* Effect.flip(
+          StdbTesting.makeScopedFromModulePlan({
+            plan,
+            config: {
+              builder: () => fault.builder,
+              uri,
+              databaseName,
+            },
+          }).pipe(Effect.scoped),
+        )
+
+        expect(WsConnectError.is(error)).toBe(true)
+        expect(error.cause).toBeUndefined()
+        expect(error.context).toBe(context)
+        expect(fault.disconnectCount()).toBe(1)
       }),
   )
 })

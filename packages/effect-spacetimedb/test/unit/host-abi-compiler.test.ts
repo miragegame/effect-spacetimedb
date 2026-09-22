@@ -7,6 +7,7 @@ import {
 
 const { describe, expect, it } = EffectVitest
 
+// @effect-diagnostics-next-line extendsNativeError:off -- Stands in for the `spacetimedb` host ABI's native `SenderError` constructor in the capability probe under test.
 class TestSenderError extends Error {}
 
 const validCompilerHostAbi = {

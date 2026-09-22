@@ -34,6 +34,7 @@ export {
 export {
   type CallFailure,
   catchRawTags,
+  ConnectionLostError,
   DomainCallError,
   encodeArgsArray,
   type RawCallFailure,
@@ -93,6 +94,19 @@ export {
   type WsGeneratedConfig,
 } from "./client/ws-resource.ts"
 export {
+  makeSupervisor as makeWsSessionSupervisor,
+  makeSupervisorFromModulePlan as makeWsSessionSupervisorFromModulePlan,
+  makeSupervisorGenerated as makeWsSessionSupervisorGenerated,
+  reconnectDelayMillisFirstDefault,
+  reconnectDelayMillisMaxDefault,
+  WsSessionSupervisorDefectError,
+  type WsSessionSupervisor,
+  type WsSessionSupervisorFailure,
+  type WsSessionSupervisorHandle,
+  type WsSessionSupervisorPhase,
+  type WsSessionSupervisorPolicy,
+} from "./client/ws-session-supervisor.ts"
+export {
   type SubscriptionFailure,
   SubscriptionInvalidatedError,
   SubscriptionRejectedError,
@@ -115,9 +129,11 @@ export {
   makeTestModuleHarness,
   NestedTestTransactionError,
   type TestModuleHarness,
+  type TestModuleRowWrite,
 } from "./testing/module-harness.ts"
 export {
   type ClientQueryRoot,
+  type ClientViewQueryRoot,
   type QueryRelation,
   type TypedQuery,
 } from "./query/types.ts"

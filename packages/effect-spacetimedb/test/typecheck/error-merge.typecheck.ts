@@ -2,29 +2,23 @@ import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 import type { Assert, IsEqual } from "./helpers"
 
-class MergeFirst extends Schema.TaggedErrorClass<MergeFirst>()(
-  "MergeFirst",
-  {},
-) {}
+class MergeFirst extends Schema.TaggedError<MergeFirst>()("MergeFirst", {}) {}
 
-class MergeShared extends Schema.TaggedErrorClass<MergeShared>()(
+class MergeShared extends Schema.TaggedError<MergeShared>()(
   "MergeShared",
   {},
 ) {}
 
-class MergeSecond extends Schema.TaggedErrorClass<MergeSecond>()(
+class MergeSecond extends Schema.TaggedError<MergeSecond>()(
   "MergeSecond",
   {},
 ) {}
 
-class MergeOther extends Schema.TaggedErrorClass<MergeOther>()(
-  "MergeOther",
-  {},
-) {}
+class MergeOther extends Schema.TaggedError<MergeOther>()("MergeOther", {}) {}
 
-const FirstErrors = Stdb.errors(MergeFirst, MergeShared)
-const SecondErrors = Stdb.errors(MergeShared, MergeSecond)
-const MergedErrors = Stdb.errors.merge(FirstErrors, SecondErrors)
+const ErrorsFirst = Stdb.errors(MergeFirst, MergeShared)
+const ErrorsSecond = Stdb.errors(MergeShared, MergeSecond)
+const MergedErrors = Stdb.errors.merge(ErrorsFirst, ErrorsSecond)
 // @ts-expect-error merge requires at least one definition
 const EmptyMergeErrors = Stdb.errors.merge()
 const EquivalentHandSpreadErrors = Stdb.errors(

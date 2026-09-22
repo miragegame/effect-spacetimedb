@@ -141,6 +141,20 @@ export const ThingFunctionsLive = Stdb.StdbBuilder.group(
         }),
       )
     }),
+    thingByCountRangeExclusive: Effect.fn(function* ({ lo, hi }) {
+      const tx = yield* Tx
+      return yield* tx.run(
+        Effect.gen(function* () {
+          const db = yield* Db
+          return yield* db.thing.thingCountIdx.filterToArray(
+            new Range(
+              { tag: "excluded", value: lo },
+              { tag: "excluded", value: hi },
+            ),
+          )
+        }),
+      )
+    }),
     thingInsertTwiceInTx: Effect.fn(function* (args) {
       const tx = yield* Tx
       return yield* tx.run(

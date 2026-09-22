@@ -312,12 +312,7 @@ const makeTempResetExampleRuntime: () => Effect.Effect<
     bundlePath: exampleBundlePath,
     cwd: packageRoot,
     dbNamePrefix: exampleModuleProject.databaseNamePrefix,
-    logDir: path.join(
-      packageRoot,
-      "node_modules",
-      ".cache",
-      "effect-spacetimedb-live",
-    ),
+    logDir: path.join(packageRoot, ".tmp", "effect-spacetimedb-live"),
     versionRequirement: requiredSpacetimeCliVersion,
   })
 })
@@ -431,12 +426,7 @@ const makeMigrationLiveHarness = Effect.fn(function* () {
     bundlePath: migrationModuleProjects.v1.bundlePath,
     cwd: packageRoot,
     dbNamePrefix: migrationModuleProjects.v1.databaseNamePrefix,
-    logDir: path.join(
-      packageRoot,
-      "node_modules",
-      ".cache",
-      "effect-spacetimedb-live",
-    ),
+    logDir: path.join(packageRoot, ".tmp", "effect-spacetimedb-live"),
     versionRequirement: requiredSpacetimeCliVersion,
   })
 
@@ -572,12 +562,13 @@ export const waitForLiveServerLog = (
   logPath: string,
   expectedText: string,
   message = "SpaceTimeDB standalone log did not contain the expected text before the live test timeout",
+  options?: { readonly afterOffset?: number },
 ) =>
   Effect.gen(function* () {
-    const maxAttempts = CONVERGENCE_TIMEOUT_MS / 100
-    for (let attempt = 0; attempt < maxAttempts; attempt = attempt + 1) {
+    const attemptsMax = CONVERGENCE_TIMEOUT_MS / 100
+    for (let attempt = 0; attempt < attemptsMax; attempt = attempt + 1) {
       const text = yield* readLiveServerLog(logPath)
-      if (text.includes(expectedText)) {
+      if (text.slice(options?.afterOffset ?? 0).includes(expectedText)) {
         return text
       }
       yield* Effect.sleep(Duration.millis(100))
@@ -603,8 +594,8 @@ export const waitForRows = <Row, E>(
   message = "Rows did not converge before the live test timeout",
 ) =>
   Effect.gen(function* () {
-    const maxAttempts = CONVERGENCE_TIMEOUT_MS / 100
-    for (let attempt = 0; attempt < maxAttempts; attempt = attempt + 1) {
+    const attemptsMax = CONVERGENCE_TIMEOUT_MS / 100
+    for (let attempt = 0; attempt < attemptsMax; attempt = attempt + 1) {
       const value = yield* rows()
       if (!predicate(value)) {
         yield* Effect.sleep(Duration.millis(100))

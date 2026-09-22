@@ -1,21 +1,13 @@
 import * as AST from "effect/SchemaAST"
-import {
-  annotationInEncodedShape,
-  encodedAst,
-  StdbFieldOptionsAnnotationId,
-} from "../schema-annotations.ts"
+import { readFieldOptionsAnnotation } from "../field-options-annotation.ts"
+import { encodedAst } from "../schema-annotations.ts"
 import type { AnyNormalizedStructFieldOptions, AnyValueType } from "./core.ts"
 import { hasTypeKind, typeInfo } from "./metadata.ts"
-import type { FieldOptionsAnnotation } from "./shapes.ts"
 
 export const structFieldOptions = (
   value: AnyValueType,
 ): AnyNormalizedStructFieldOptions => ({
-  optional:
-    annotationInEncodedShape<FieldOptionsAnnotation>(
-      StdbFieldOptionsAnnotationId,
-      value.schema.ast,
-    )?.optional === true,
+  optional: readFieldOptionsAnnotation(value.schema.ast)?.optional === true,
 })
 
 export const hasOptionalFieldOption = (value: AnyValueType): boolean =>

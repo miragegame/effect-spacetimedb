@@ -3,12 +3,11 @@ import type { TableRow } from "./contract/table.ts"
 import type {
   PublicEventTables,
   PublicPersistentTables,
+  PublicViewKeys,
+  PublicViews,
+  ViewRowOf,
 } from "./module-projection.ts"
-import type {
-  ClientQueryRoot,
-  StdbPredicate,
-  StdbRowExpr,
-} from "./query/types.ts"
+import type { StdbPredicate, StdbRowExpr } from "./query/types.ts"
 import { typedEntries, typedFromEntries } from "./utils.ts"
 
 export type PublicPersistentTableKeys<Module extends AnyModuleSpec> =
@@ -18,7 +17,8 @@ export type PublicEventTableKeys<Module extends AnyModuleSpec> =
   keyof PublicEventTables<Module> & string
 
 export type PublicTableKeys<Module extends AnyModuleSpec> =
-  keyof ClientQueryRoot<Module> & string
+  | PublicPersistentTableKeys<Module>
+  | PublicEventTableKeys<Module>
 
 type ModuleBrand<Module extends AnyModuleSpec> = {
   readonly __module?: Module
@@ -53,6 +53,16 @@ export type EventTableSubscriptionTarget<
     ) => StdbPredicate<Module["tables"][Key]>,
   ): QuerySubscriptionTarget<Module, Key>
   readonly __row?: TableRow<Module["tables"][Key]>
+}
+
+export type ViewSubscriptionTarget<
+  Module extends AnyModuleSpec,
+  Key extends PublicViewKeys<Module> = PublicViewKeys<Module>,
+> = ModuleBrand<Module> & {
+  readonly kind: "view"
+  readonly key: Key
+  readonly name: string
+  readonly __row?: ViewRowOf<Module["views"][Key]>
 }
 
 export type QuerySubscriptionTarget<
@@ -104,6 +114,7 @@ export type SubscriptionTarget<Module extends AnyModuleSpec> =
       readonly name: Module["tables"][PublicEventTableKeys<Module>]["name"]
     })
   | PublicQuerySubscriptionTarget<Module>
+  | ViewSubscriptionTarget<Module>
   | AllPublicTablesSubscriptionTarget<Module>
 
 /** @internal Stable discriminant view used after the public correlated union is checked. */
@@ -124,6 +135,7 @@ export type MatchableSubscriptionTarget<Module extends AnyModuleSpec> =
       readonly name: Module["tables"][PublicTableKeys<Module>]["name"]
       readonly predicate: QuerySubscriptionPredicate<Module>
     })
+  | ViewSubscriptionTarget<Module>
   | AllPublicTablesSubscriptionTarget<Module>
 
 export type ProjectedSubscriptionTargets<Module extends AnyModuleSpec> = {
@@ -135,6 +147,12 @@ export type ProjectedSubscriptionTargets<Module extends AnyModuleSpec> = {
   }
   readonly eventTables: {
     readonly [Key in PublicEventTableKeys<Module>]: EventTableSubscriptionTarget<
+      Module,
+      Key
+    >
+  }
+  readonly views: {
+    readonly [Key in PublicViewKeys<Module>]: ViewSubscriptionTarget<
       Module,
       Key
     >
@@ -188,9 +206,23 @@ const makeEventTableTarget = <
   }
 }
 
+const makeViewTarget = <
+  Module extends AnyModuleSpec,
+  Key extends PublicViewKeys<Module>,
+>(
+  key: Key,
+  name: string,
+): ViewSubscriptionTarget<Module, Key> => ({
+  kind: "view",
+  key,
+  name,
+})
+
 export const makeTargetsFromModule = <Module extends AnyModuleSpec>(options: {
+  readonly module: Module
   readonly publicTables: PublicPersistentTables<Module>
   readonly publicEventTables: PublicEventTables<Module>
+  readonly publicViews: PublicViews<Module>
 }): ProjectedSubscriptionTargets<Module> => {
   const tables = typedFromEntries(
     typedEntries(options.publicTables).map(([key, tableSpec]) => [
@@ -205,6 +237,15 @@ export const makeTargetsFromModule = <Module extends AnyModuleSpec>(options: {
       makeEventTableTarget<Module, typeof key>(key, tableSpec.name),
     ]),
   )
+  const views = typedFromEntries(
+    typedEntries(options.publicViews).map(([key]) => [
+      key,
+      makeViewTarget<Module, typeof key>(
+        key,
+        options.module.wireNames.views[key] ?? key,
+      ),
+    ]),
+  )
 
   const publicTableKeys = [
     ...typedEntries(options.publicTables).map(([key]) => key),
@@ -215,6 +256,7 @@ export const makeTargetsFromModule = <Module extends AnyModuleSpec>(options: {
     tables: tables as unknown as ProjectedSubscriptionTargets<Module>["tables"],
     eventTables:
       eventTables as unknown as ProjectedSubscriptionTargets<Module>["eventTables"],
+    views: views as unknown as ProjectedSubscriptionTargets<Module>["views"],
     allPublicTables: () => ({
       kind: "allPublicTables",
       keys: publicTableKeys,

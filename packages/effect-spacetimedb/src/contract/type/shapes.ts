@@ -12,15 +12,6 @@ import type {
   TypeOf,
 } from "./core.ts"
 
-export type FieldOptionsAnnotation = {
-  readonly primaryKey: boolean
-  readonly autoInc: boolean
-  readonly optional: boolean
-  readonly hasDefault?: boolean
-  readonly defaultValue?: unknown
-  readonly name?: string
-}
-
 export type OptionalStructField<Field extends AnyValueType> =
   Field extends StructFieldType<
     AnyValueType,

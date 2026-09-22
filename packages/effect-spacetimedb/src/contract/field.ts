@@ -29,7 +29,7 @@ type NormalizedFieldOptions<Options extends FieldOptions = FieldOptions> = {
   readonly hasDefault: Options extends { readonly default: unknown }
     ? true
     : false
-  readonly defaultValue: Options extends { readonly default: infer Value }
+  readonly valueDefault: Options extends { readonly default: infer Value }
     ? Value
     : undefined
   readonly name: Options extends { readonly name: infer Name extends string }
@@ -44,7 +44,7 @@ export type AnyNormalizedFieldOptions = {
   readonly index: IndexAlgorithm | undefined
   readonly optional: boolean
   readonly hasDefault: boolean
-  readonly defaultValue: unknown
+  readonly valueDefault: unknown
   readonly name: string | undefined
 }
 

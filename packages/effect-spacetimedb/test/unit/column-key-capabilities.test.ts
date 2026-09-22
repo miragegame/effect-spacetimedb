@@ -32,12 +32,26 @@ describe("column key capabilities", () => {
     expect(() => Stdb.enum("Open", "Closed").primaryKey()).not.toThrow()
   })
 
-  it("rejects primary keys on payload-bearing sums", () => {
+  it("accepts primary keys and indexes on payload-bearing sums", () => {
+    const payloadSum = () =>
+      Stdb.sum({
+        Ready: Stdb.unit(),
+        Count: Stdb.u32(),
+      })
+
+    expect(() => payloadSum().primaryKey()).not.toThrow()
+    expect(() => payloadSum().index("btree")).not.toThrow()
+    expect(() => payloadSum().unique()).not.toThrow()
+  })
+
+  it("rejects auto-increment on sum primary keys", () => {
     expect(() =>
       Stdb.sum({
         Ready: Stdb.unit(),
         Count: Stdb.u32(),
-      }).primaryKey(),
-    ).toThrow("A primary key is not supported")
+      })
+        .primaryKey()
+        .autoInc(),
+    ).toThrow("autoInc is not supported")
   })
 })

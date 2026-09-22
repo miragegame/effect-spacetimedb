@@ -63,7 +63,7 @@ type RawSqlSubscriptionBuilder = {
   readonly subscribe: (sql: string) => NativeSubscriptionHandleLike
 }
 
-// SpaceTimeDB 2.6.1 includes this hint when rejecting private relation subscriptions.
+// SpaceTimeDB includes this hint when rejecting private relation subscriptions.
 const privateAuditLogPrivateViewHint = "it may be marked private"
 
 const toHexString = Effect.fn(function* (value: unknown) {

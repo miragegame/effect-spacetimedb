@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import * as FastCheck from "effect/testing/FastCheck"
+import * as FastCheck from "fast-check"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import {
   decodeHostValue,
@@ -1256,20 +1256,19 @@ describe("codec golden differential", (it) => {
         },
       }
 
+      // The recorded issues embed Effect's own schema AST, so an upstream
+      // reshaping of it moves this snapshot without any codec changing: the
+      // rc.116 rewrite of `SchemaGetter.Getter` into a tagged union turned
+      // every `{ run }` transformation holder into
+      // `{ _tag: "TransformEffect", transform }`. What this golden is for is
+      // the failure identity around it (the tags, messages and issue shapes),
+      // and none of that moved on rc.117.
       expect(snapshots).toMatchInlineSnapshot(`
         {
           "callableProtocol": {
             "badUnitPayload": {
               "issue": {
                 "_tag": "Encoding",
-                "actual": {
-                  "value": {
-                    "tag": "ok",
-                    "value": {
-                      "extra": true,
-                    },
-                  },
-                },
                 "ast": {
                   "_tag": "Unknown",
                   "annotations": {},
@@ -1288,10 +1287,12 @@ describe("codec golden differential", (it) => {
                       "transformation": {
                         "_tag": "Transformation",
                         "decode": {
-                          "run": [Function],
+                          "_tag": "TransformEffect",
+                          "transform": [Function],
                         },
                         "encode": {
-                          "run": [Function],
+                          "_tag": "TransformEffect",
+                          "transform": [Function],
                         },
                         "~effect/SchemaTransformation/Transformation": "~effect/SchemaTransformation/Transformation",
                       },
@@ -1301,16 +1302,14 @@ describe("codec golden differential", (it) => {
                 },
                 "issue": {
                   "_tag": "InvalidValue",
-                  "actual": {
-                    "value": {
-                      "tag": "ok",
-                      "value": {
-                        "extra": true,
-                      },
-                    },
-                  },
                   "annotations": {
                     "message": "Expected procedure result envelope",
+                  },
+                  "input": {
+                    "tag": "ok",
+                    "value": {
+                      "extra": true,
+                    },
                   },
                   "~effect/SchemaIssue/Issue": "~effect/SchemaIssue/Issue",
                 },
@@ -1322,13 +1321,6 @@ describe("codec golden differential", (it) => {
             "extraOkField": {
               "issue": {
                 "_tag": "Encoding",
-                "actual": {
-                  "value": {
-                    "extra": true,
-                    "tag": "ok",
-                    "value": "accepted",
-                  },
-                },
                 "ast": {
                   "_tag": "Unknown",
                   "annotations": {},
@@ -1347,10 +1339,12 @@ describe("codec golden differential", (it) => {
                       "transformation": {
                         "_tag": "Transformation",
                         "decode": {
-                          "run": [Function],
+                          "_tag": "TransformEffect",
+                          "transform": [Function],
                         },
                         "encode": {
-                          "run": [Function],
+                          "_tag": "TransformEffect",
+                          "transform": [Function],
                         },
                         "~effect/SchemaTransformation/Transformation": "~effect/SchemaTransformation/Transformation",
                       },
@@ -1360,15 +1354,13 @@ describe("codec golden differential", (it) => {
                 },
                 "issue": {
                   "_tag": "InvalidValue",
-                  "actual": {
-                    "value": {
-                      "extra": true,
-                      "tag": "ok",
-                      "value": "accepted",
-                    },
-                  },
                   "annotations": {
                     "message": "Expected procedure result envelope",
+                  },
+                  "input": {
+                    "extra": true,
+                    "tag": "ok",
+                    "value": "accepted",
                   },
                   "~effect/SchemaIssue/Issue": "~effect/SchemaIssue/Issue",
                 },
@@ -1380,11 +1372,6 @@ describe("codec golden differential", (it) => {
             "missingOkValue": {
               "issue": {
                 "_tag": "Encoding",
-                "actual": {
-                  "value": {
-                    "tag": "ok",
-                  },
-                },
                 "ast": {
                   "_tag": "Unknown",
                   "annotations": {},
@@ -1403,10 +1390,12 @@ describe("codec golden differential", (it) => {
                       "transformation": {
                         "_tag": "Transformation",
                         "decode": {
-                          "run": [Function],
+                          "_tag": "TransformEffect",
+                          "transform": [Function],
                         },
                         "encode": {
-                          "run": [Function],
+                          "_tag": "TransformEffect",
+                          "transform": [Function],
                         },
                         "~effect/SchemaTransformation/Transformation": "~effect/SchemaTransformation/Transformation",
                       },
@@ -1416,13 +1405,11 @@ describe("codec golden differential", (it) => {
                 },
                 "issue": {
                   "_tag": "InvalidValue",
-                  "actual": {
-                    "value": {
-                      "tag": "ok",
-                    },
-                  },
                   "annotations": {
                     "message": "Expected procedure result envelope",
+                  },
+                  "input": {
+                    "tag": "ok",
                   },
                   "~effect/SchemaIssue/Issue": "~effect/SchemaIssue/Issue",
                 },
@@ -1436,15 +1423,6 @@ describe("codec golden differential", (it) => {
             "decodeBadNonePayload": {
               "issue": {
                 "_tag": "Encoding",
-                "actual": {
-                  "value": {
-                    "some": {
-                      "none": {
-                        "extra": true,
-                      },
-                    },
-                  },
-                },
                 "ast": {
                   "_tag": "Unknown",
                   "annotations": {},
@@ -1463,10 +1441,12 @@ describe("codec golden differential", (it) => {
                       "transformation": {
                         "_tag": "Transformation",
                         "decode": {
-                          "run": [Function],
+                          "_tag": "TransformEffect",
+                          "transform": [Function],
                         },
                         "encode": {
-                          "run": [Function],
+                          "_tag": "TransformEffect",
+                          "transform": [Function],
                         },
                         "~effect/SchemaTransformation/Transformation": "~effect/SchemaTransformation/Transformation",
                       },
@@ -1476,13 +1456,6 @@ describe("codec golden differential", (it) => {
                 },
                 "issue": {
                   "_tag": "InvalidType",
-                  "actual": {
-                    "value": {
-                      "none": {
-                        "extra": true,
-                      },
-                    },
-                  },
                   "ast": {
                     "_tag": "String",
                     "annotations": {},
@@ -1495,7 +1468,7 @@ describe("codec golden differential", (it) => {
                 },
                 "tag": "Encoding",
               },
-              "message": "Expected string, got {"none":{"extra":true}}",
+              "message": "Expected string",
               "tag": "SchemaError",
             },
             "encodeMissingSumValue": {
@@ -1512,11 +1485,6 @@ describe("codec golden differential", (it) => {
               "cause": {
                 "issue": {
                   "_tag": "Encoding",
-                  "actual": {
-                    "value": {
-                      "tag": "err",
-                    },
-                  },
                   "ast": {
                     "_tag": "Unknown",
                     "annotations": {},
@@ -1535,10 +1503,12 @@ describe("codec golden differential", (it) => {
                         "transformation": {
                           "_tag": "Transformation",
                           "decode": {
-                            "run": [Function],
+                            "_tag": "TransformEffect",
+                            "transform": [Function],
                           },
                           "encode": {
-                            "run": [Function],
+                            "_tag": "TransformEffect",
+                            "transform": [Function],
                           },
                           "~effect/SchemaTransformation/Transformation": "~effect/SchemaTransformation/Transformation",
                         },
@@ -1548,12 +1518,10 @@ describe("codec golden differential", (it) => {
                   },
                   "issue": {
                     "_tag": "InvalidValue",
-                    "actual": {
-                      "value": {
-                        "tag": "err",
-                      },
-                    },
                     "annotations": undefined,
+                    "input": {
+                      "tag": "err",
+                    },
                     "~effect/SchemaIssue/Issue": "~effect/SchemaIssue/Issue",
                   },
                   "tag": "Encoding",
@@ -1568,13 +1536,6 @@ describe("codec golden differential", (it) => {
               "cause": {
                 "issue": {
                   "_tag": "Encoding",
-                  "actual": {
-                    "value": {
-                      "extra": true,
-                      "tag": "active",
-                      "value": "accepted",
-                    },
-                  },
                   "ast": {
                     "_tag": "Unknown",
                     "annotations": {},
@@ -1593,10 +1554,12 @@ describe("codec golden differential", (it) => {
                         "transformation": {
                           "_tag": "Transformation",
                           "decode": {
-                            "run": [Function],
+                            "_tag": "TransformEffect",
+                            "transform": [Function],
                           },
                           "encode": {
-                            "run": [Function],
+                            "_tag": "TransformEffect",
+                            "transform": [Function],
                           },
                           "~effect/SchemaTransformation/Transformation": "~effect/SchemaTransformation/Transformation",
                         },
@@ -1606,14 +1569,12 @@ describe("codec golden differential", (it) => {
                   },
                   "issue": {
                     "_tag": "InvalidValue",
-                    "actual": {
-                      "value": {
-                        "extra": true,
-                        "tag": "active",
-                        "value": "accepted",
-                      },
-                    },
                     "annotations": undefined,
+                    "input": {
+                      "extra": true,
+                      "tag": "active",
+                      "value": "accepted",
+                    },
                     "~effect/SchemaIssue/Issue": "~effect/SchemaIssue/Issue",
                   },
                   "tag": "Encoding",
@@ -1629,13 +1590,6 @@ describe("codec golden differential", (it) => {
             "badNonePayload": {
               "issue": {
                 "_tag": "Encoding",
-                "actual": {
-                  "value": {
-                    "none": {
-                      "extra": true,
-                    },
-                  },
-                },
                 "ast": {
                   "_tag": "Unknown",
                   "annotations": {},
@@ -1654,10 +1608,12 @@ describe("codec golden differential", (it) => {
                       "transformation": {
                         "_tag": "Transformation",
                         "decode": {
-                          "run": [Function],
+                          "_tag": "TransformEffect",
+                          "transform": [Function],
                         },
                         "encode": {
-                          "run": [Function],
+                          "_tag": "TransformEffect",
+                          "transform": [Function],
                         },
                         "~effect/SchemaTransformation/Transformation": "~effect/SchemaTransformation/Transformation",
                       },
@@ -1667,14 +1623,12 @@ describe("codec golden differential", (it) => {
                 },
                 "issue": {
                   "_tag": "InvalidValue",
-                  "actual": {
-                    "value": {
-                      "none": {
-                        "extra": true,
-                      },
+                  "annotations": undefined,
+                  "input": {
+                    "none": {
+                      "extra": true,
                     },
                   },
-                  "annotations": undefined,
                   "~effect/SchemaIssue/Issue": "~effect/SchemaIssue/Issue",
                 },
                 "tag": "Encoding",
@@ -1685,11 +1639,6 @@ describe("codec golden differential", (it) => {
             "resultMissingValue": {
               "issue": {
                 "_tag": "Encoding",
-                "actual": {
-                  "value": {
-                    "tag": "err",
-                  },
-                },
                 "ast": {
                   "_tag": "Unknown",
                   "annotations": {},
@@ -1708,10 +1657,12 @@ describe("codec golden differential", (it) => {
                       "transformation": {
                         "_tag": "Transformation",
                         "decode": {
-                          "run": [Function],
+                          "_tag": "TransformEffect",
+                          "transform": [Function],
                         },
                         "encode": {
-                          "run": [Function],
+                          "_tag": "TransformEffect",
+                          "transform": [Function],
                         },
                         "~effect/SchemaTransformation/Transformation": "~effect/SchemaTransformation/Transformation",
                       },
@@ -1721,12 +1672,10 @@ describe("codec golden differential", (it) => {
                 },
                 "issue": {
                   "_tag": "InvalidValue",
-                  "actual": {
-                    "value": {
-                      "tag": "err",
-                    },
-                  },
                   "annotations": undefined,
+                  "input": {
+                    "tag": "err",
+                  },
                   "~effect/SchemaIssue/Issue": "~effect/SchemaIssue/Issue",
                 },
                 "tag": "Encoding",
@@ -1737,13 +1686,6 @@ describe("codec golden differential", (it) => {
             "sumExtraField": {
               "issue": {
                 "_tag": "Encoding",
-                "actual": {
-                  "value": {
-                    "extra": true,
-                    "tag": "active",
-                    "value": "accepted",
-                  },
-                },
                 "ast": {
                   "_tag": "Unknown",
                   "annotations": {},
@@ -1762,10 +1704,12 @@ describe("codec golden differential", (it) => {
                       "transformation": {
                         "_tag": "Transformation",
                         "decode": {
-                          "run": [Function],
+                          "_tag": "TransformEffect",
+                          "transform": [Function],
                         },
                         "encode": {
-                          "run": [Function],
+                          "_tag": "TransformEffect",
+                          "transform": [Function],
                         },
                         "~effect/SchemaTransformation/Transformation": "~effect/SchemaTransformation/Transformation",
                       },
@@ -1775,14 +1719,12 @@ describe("codec golden differential", (it) => {
                 },
                 "issue": {
                   "_tag": "InvalidValue",
-                  "actual": {
-                    "value": {
-                      "extra": true,
-                      "tag": "active",
-                      "value": "accepted",
-                    },
-                  },
                   "annotations": undefined,
+                  "input": {
+                    "extra": true,
+                    "tag": "active",
+                    "value": "accepted",
+                  },
                   "~effect/SchemaIssue/Issue": "~effect/SchemaIssue/Issue",
                 },
                 "tag": "Encoding",

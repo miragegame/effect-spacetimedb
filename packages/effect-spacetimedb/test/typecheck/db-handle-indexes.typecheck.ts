@@ -218,18 +218,20 @@ const _indexUsageProgram = Effect.gen(function* () {
     "Ada",
   ])
 
-  // @ts-expect-error SpaceTimeDB 2.6.1 misroutes a full-width composite range as a point scan
-  yield* db.user.tenant_name.filterToArray(["tenant-a", nameRange])
+  const tenantFullWidthRangeRows = yield* db.user.tenant_name.filterToArray([
+    "tenant-a",
+    nameRange,
+  ])
   const tenantNamedRows = yield* db.user.tenant_name.filterToArray({
     tenant: "tenant-a",
     name: "Ada",
   })
 
-  // @ts-expect-error SpaceTimeDB 2.6.1 misroutes a full-width named composite range as a point scan
-  yield* db.user.tenant_name.filterToArray({
-    tenant: "tenant-a",
-    name: nameRange,
-  })
+  const tenantNamedFullWidthRangeRows =
+    yield* db.user.tenant_name.filterToArray({
+      tenant: "tenant-a",
+      name: nameRange,
+    })
   const tenantNameDeleted: number = yield* db.user.tenant_name.delete([
     "tenant-a",
     "Ada",
@@ -257,7 +259,9 @@ const _indexUsageProgram = Effect.gen(function* () {
   void tenantRangeRows
   void tenantNamedRangeRows
   void tenantNameRows
+  void tenantFullWidthRangeRows
   void tenantNamedRows
+  void tenantNamedFullWidthRangeRows
   void tenantNameDeleted
 
   // @ts-expect-error unique explicit indexes must not expose filterToArray

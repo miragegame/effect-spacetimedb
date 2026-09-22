@@ -1,4 +1,4 @@
-// Type-only import keeps Vitest's CLI-loaded coverage provider visible to dependency lint.
+// Type-only import keeps Vitest's CLI-loaded coverage provider visible to unused-dependency checks.
 import type {} from "@vitest/coverage-v8"
 import { defineConfig } from "vitest/config"
 

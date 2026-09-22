@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as HttpApi from "effect/unstable/httpapi/HttpApi"
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient"
+import type * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup"
 const { expect } = EffectVitest
 import * as Stdb from "effect-spacetimedb"
 import { makeMockHttpClientLayer } from "../helpers/mock-http-client"
@@ -25,19 +26,19 @@ const withWireNames = <
   diagnostics: [],
 })
 
-class TokenMissing extends Schema.TaggedErrorClass<TokenMissing>()(
+class TokenMissing extends Schema.TaggedError<TokenMissing>()(
   "TokenMissing",
   { userId: Schema.String },
   { httpApiStatus: 404 },
 ) {}
 
-class TokenInvalid extends Schema.TaggedErrorClass<TokenInvalid>()(
+class TokenInvalid extends Schema.TaggedError<TokenInvalid>()(
   "TokenInvalid",
   { reason: Schema.String },
   { httpApiStatus: 400 },
 ) {}
 
-class TokenExpired extends Schema.TaggedErrorClass<TokenExpired>()(
+class TokenExpired extends Schema.TaggedError<TokenExpired>()(
   "TokenExpired",
   { expiredAt: Schema.String },
   { httpApiStatus: 401 },
@@ -111,7 +112,12 @@ const ProjectionBuilderModule = Stdb.StdbModule.make(
 ).add(WebhooksGroup, AdminGroup, NonProjectableGroup)
 const ProjectionModule = ProjectionBuilderModule.spec
 
-const projectedShape = (api: HttpApi.AnyWithProps) => {
+const projectedShape = <
+  Id extends string,
+  Groups extends HttpApiGroup.Constraint,
+>(
+  api: HttpApi.HttpApi<Id, Groups>,
+) => {
   const groups: Record<
     string,
     { readonly topLevel: boolean; readonly endpoints: Array<string> }
@@ -124,7 +130,7 @@ const projectedShape = (api: HttpApi.AnyWithProps) => {
       }
     },
     onEndpoint: ({ endpoint, group }) => {
-      groups[group.identifier]?.endpoints.push(endpoint.name)
+      groups[group.identifier]?.endpoints.push(endpoint.identifier)
     },
   })
 

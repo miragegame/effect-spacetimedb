@@ -13,6 +13,11 @@ import type {
   TypeOf,
 } from "../contract/type.ts"
 import type { AnyViewSpec } from "../contract/view.ts"
+import type {
+  PublicEventTables,
+  PublicPersistentTables,
+  PublicViews,
+} from "../module-projection.ts"
 
 export type TypedQuery<Row = unknown> = RowTypedQuery<Row, unknown>
 
@@ -95,12 +100,28 @@ export type ServerQueryRoot<Module extends AnyModuleSpec> = {
   >
 }
 
-export type ClientQueryRoot<Module extends AnyModuleSpec> = {
-  readonly [Key in keyof Module["tables"] &
-    string as Module["tables"][Key]["public"] extends true
-    ? Key
-    : never]: QueryRelationOfTable<Module["tables"][Key]>
+type PublicClientTables<Module extends AnyModuleSpec> =
+  PublicPersistentTables<Module> & PublicEventTables<Module>
+
+export type ClientTableQueryRoot<Module extends AnyModuleSpec> = {
+  readonly [Key in keyof PublicClientTables<Module> &
+    string]: QueryRelationOfTable<PublicClientTables<Module>[Key]>
 }
+
+/**
+ * Views on the generated query-builder root, keyed the same way tables are: by
+ * contract key. See `isCamelCaseCanonical` in `../contract/canonical-name.ts`
+ * for why the contract key *is* the generated accessor key under every name
+ * policy.
+ */
+export type ClientViewQueryRoot<Module extends AnyModuleSpec> = {
+  readonly [Key in keyof PublicViews<Module> & string]: QueryRelation<
+    ViewRow<PublicViews<Module>[Key]>
+  >
+}
+
+export type ClientQueryRoot<Module extends AnyModuleSpec> =
+  ClientTableQueryRoot<Module> & ClientViewQueryRoot<Module>
 
 export type ViewQueryResult<View extends AnyViewSpec> = TypedQuery<
   QueryRowOfType<View["returns"]>

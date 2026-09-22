@@ -1,14 +1,16 @@
+import * as Data from "effect/Data"
+
 export type SatsTypeNameKind = "Struct" | "Enum" | "Sum"
 
-export class SatsTypeNameCollisionError extends Error {
-  constructor(
-    readonly typeName: string,
-    readonly existingFingerprint: string,
-    readonly fingerprint: string,
-  ) {
-    super(
-      `Generated SATS type name collision for ${typeName}; distinct structural fingerprints produced the same digest.`,
-    )
+export class SatsTypeNameCollisionError extends Data.TaggedError(
+  "SatsTypeNameCollisionError",
+)<{
+  readonly typeName: string
+  readonly existingFingerprint: string
+  readonly fingerprint: string
+}> {
+  override get message(): string {
+    return `Generated SATS type name collision for ${this.typeName}; distinct structural fingerprints produced the same digest.`
   }
 }
 
@@ -57,7 +59,11 @@ export const makeContentAddressedNameFactory = (
     const existing = fingerprintsByName.get(name)
 
     if (existing !== undefined && existing !== fingerprint) {
-      throw new SatsTypeNameCollisionError(name, existing, fingerprint)
+      throw new SatsTypeNameCollisionError({
+        typeName: name,
+        existingFingerprint: existing,
+        fingerprint,
+      })
     }
 
     fingerprintsByName.set(name, fingerprint)

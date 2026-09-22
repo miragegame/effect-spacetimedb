@@ -1,7 +1,11 @@
 import * as EffectVitest from "@effect/vitest"
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Tracer from "effect/Tracer"
-import { consoleTimerTracer } from "effect-spacetimedb/server"
+import {
+  consoleTimerTracer,
+  makeProcedureServerClock,
+} from "effect-spacetimedb/server"
 
 const { describe, expect, it } = EffectVitest
 
@@ -65,6 +69,37 @@ const withMissingConsole = <A>(body: () => A): A => {
 }
 
 describe("console timer tracer", () => {
+  it.effect(
+    "keeps the procedure wall clock independent from active reducer guards",
+    () =>
+      Effect.acquireUseRelease(
+        Effect.suspend(() => {
+          const originalNow = Date.now
+          Date.now = () => {
+            throw new Error("reducer wall-clock guard")
+          }
+          return Effect.succeed(originalNow)
+        }),
+        () =>
+          Effect.gen(function* () {
+            const clock = makeProcedureServerClock()
+            const currentTimeMillis = Clock.currentTimeMillis.pipe(
+              Effect.provideService(Clock.Clock, clock),
+            )
+            const first = yield* currentTimeMillis
+            const second = yield* currentTimeMillis
+
+            expect(Number.isFinite(first)).toBe(true)
+            expect(second).toBeGreaterThanOrEqual(first)
+          }),
+        (originalNow) =>
+          Effect.suspend(() => {
+            Date.now = originalNow
+            return Effect.void
+          }),
+      ),
+  )
+
   it("pairs unique labels across nested spans", () => {
     const starts: Array<string> = []
     const ends: Array<string> = []

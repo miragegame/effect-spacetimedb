@@ -22,19 +22,19 @@ const withWireNames = <
   diagnostics: [],
 })
 
-class ProjectionMissing extends Schema.TaggedErrorClass<ProjectionMissing>()(
+class ProjectionMissing extends Schema.TaggedError<ProjectionMissing>()(
   "ProjectionMissing",
   { id: Schema.String },
   { httpApiStatus: 404 },
 ) {}
 
-class ProjectionInvalid extends Schema.TaggedErrorClass<ProjectionInvalid>()(
+class ProjectionInvalid extends Schema.TaggedError<ProjectionInvalid>()(
   "ProjectionInvalid",
   { reason: Schema.String },
   { httpApiStatus: 400 },
 ) {}
 
-class ProjectionConflict extends Schema.TaggedErrorClass<ProjectionConflict>()(
+class ProjectionConflict extends Schema.TaggedError<ProjectionConflict>()(
   "ProjectionConflict",
   { resource: Schema.String },
   { httpApiStatus: 409 },
@@ -111,7 +111,7 @@ const ProjectionModule = Stdb.StdbModule.make(
 ).add(WebhooksGroup, AdminGroup, NonProjectableGroup).spec
 
 const api = Stdb.toHttpApi(ProjectionModule)
-const _httpApi: HttpApi.Any = api
+const _httpApi: HttpApi.Constraint = api
 const _projectedApi: Stdb.ProjectedHttpApi<typeof ProjectionModule> = api
 
 type ProjectionClient = HttpApiClient.ForApi<typeof api>

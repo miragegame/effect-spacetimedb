@@ -126,6 +126,15 @@ export const ThingFunctions = Stdb.StdbGroup.make("Things")
     }),
   )
   .add(
+    Stdb.StdbFn.procedure("thingByCountRangeExclusive", {
+      params: Stdb.struct({
+        lo: U64,
+        hi: U64,
+      }),
+      returns: Stdb.array(thing.row),
+    }),
+  )
+  .add(
     Stdb.StdbFn.procedure("thingInsertTwiceInTx", {
       params: Stdb.struct({
         firstThingId: Stdb.string(ThingId),

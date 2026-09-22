@@ -1,14 +1,12 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Schema from "effect/Schema"
-import * as FastCheck from "effect/testing/FastCheck"
+import * as FastCheck from "fast-check"
 import * as Stdb from "effect-spacetimedb"
 import { nativeBytes } from "../helpers/native-serializer"
 
 const { describe, expect, it } = EffectVitest
 
-const propertyOptions = {
-  fastCheck: { numRuns: 300, seed: 0xb017de4 },
-} as const
+const propertyParameters = { numRuns: 300, seed: 0xb017de4 }
 
 const endpointNameList = FastCheck.uniqueArray(
   FastCheck.constantFrom("alpha", "bravo", "charlie", "delta", "echo"),
@@ -113,102 +111,113 @@ const addProcedures = (
 }
 
 describe("builder canonicalization", () => {
-  it.prop(
-    "reducer declaration order is name-canonicalized",
-    [endpointNameList],
-    ([names]) => {
-      const forward = Stdb.StdbModule.make("m", {}).add(addReducers(names)).spec
-      const backward = Stdb.StdbModule.make("m", {}).add(
-        addReducers(reversed(names)),
-      ).spec
+  it("reducer declaration order is name-canonicalized", () => {
+    FastCheck.assert(
+      FastCheck.property(endpointNameList, (names) => {
+        const forward = Stdb.StdbModule.make("m", {}).add(
+          addReducers(names),
+        ).spec
+        const backward = Stdb.StdbModule.make("m", {}).add(
+          addReducers(reversed(names)),
+        ).spec
 
-      expect(Object.keys(forward.reducers)).toEqual(
-        Object.keys(backward.reducers),
-      )
-      expect(Object.keys(forward.reducers)).toEqual(sortedNames(names))
-    },
-    propertyOptions,
-  )
+        expect(Object.keys(forward.reducers)).toEqual(
+          Object.keys(backward.reducers),
+        )
+        expect(Object.keys(forward.reducers)).toEqual(sortedNames(names))
+      }),
+      propertyParameters,
+    )
+  })
 
-  it.prop(
-    "procedure declaration order is name-canonicalized",
-    [endpointNameList],
-    ([names]) => {
-      const forward = Stdb.StdbModule.make("m", {}).add(
-        addProcedures(names),
-      ).spec
-      const backward = Stdb.StdbModule.make("m", {}).add(
-        addProcedures(reversed(names)),
-      ).spec
+  it("procedure declaration order is name-canonicalized", () => {
+    FastCheck.assert(
+      FastCheck.property(endpointNameList, (names) => {
+        const forward = Stdb.StdbModule.make("m", {}).add(
+          addProcedures(names),
+        ).spec
+        const backward = Stdb.StdbModule.make("m", {}).add(
+          addProcedures(reversed(names)),
+        ).spec
 
-      expect(Object.keys(forward.procedures)).toEqual(
-        Object.keys(backward.procedures),
-      )
-      expect(Object.keys(forward.procedures)).toEqual(sortedNames(names))
-    },
-    propertyOptions,
-  )
+        expect(Object.keys(forward.procedures)).toEqual(
+          Object.keys(backward.procedures),
+        )
+        expect(Object.keys(forward.procedures)).toEqual(sortedNames(names))
+      }),
+      propertyParameters,
+    )
+  })
 
-  it.prop(
-    "table and column declaration order is preserved",
-    [columnNameList, tableNameList],
-    ([columnNames, tableNames]) => {
-      const forwardColumns = tableWithColumns("orderedTable", columnNames)
-      const backwardColumns = tableWithColumns(
-        "orderedTable",
-        reversed(columnNames),
-      )
+  it("table and column declaration order is preserved", () => {
+    FastCheck.assert(
+      FastCheck.property(
+        columnNameList,
+        tableNameList,
+        (columnNames, tableNames) => {
+          const forwardColumns = tableWithColumns("orderedTable", columnNames)
+          const backwardColumns = tableWithColumns(
+            "orderedTable",
+            reversed(columnNames),
+          )
 
-      expect(Object.keys(forwardColumns.columns)).toEqual(columnNames)
-      expect(Object.keys(backwardColumns.columns)).toEqual(
-        reversed(columnNames),
-      )
-      expect(Object.keys(forwardColumns.columns)).not.toEqual(
-        Object.keys(backwardColumns.columns),
-      )
+          expect(Object.keys(forwardColumns.columns)).toEqual(columnNames)
+          expect(Object.keys(backwardColumns.columns)).toEqual(
+            reversed(columnNames),
+          )
+          expect(Object.keys(forwardColumns.columns)).not.toEqual(
+            Object.keys(backwardColumns.columns),
+          )
 
-      const tables = tableNames.map((name) => tableWithColumns(name, ["id"]))
-      const reversedTables = reversed(tables)
-      const forwardModule = Stdb.StdbModule.make("m", {}).addTables(
-        ...tables,
-      ).spec
-      const backwardModule = Stdb.StdbModule.make("m", {}).addTables(
-        ...reversedTables,
-      ).spec
+          const tables = tableNames.map((name) =>
+            tableWithColumns(name, ["id"]),
+          )
+          const reversedTables = reversed(tables)
+          const forwardModule = Stdb.StdbModule.make("m", {}).addTables(
+            ...tables,
+          ).spec
+          const backwardModule = Stdb.StdbModule.make("m", {}).addTables(
+            ...reversedTables,
+          ).spec
 
-      expect(Object.keys(forwardModule.tables)).toEqual(tableNames)
-      expect(Object.keys(backwardModule.tables)).toEqual(reversed(tableNames))
-      expect(Object.keys(forwardModule.tables)).not.toEqual(
-        Object.keys(backwardModule.tables),
-      )
-    },
-    propertyOptions,
-  )
-
-  it.prop(
-    "authored column order reaches positional native bytes",
-    [
-      FastCheck.uniqueArray(
-        FastCheck.constantFrom("alpha", "bravo", "charlie", "delta", "echo"),
-        { minLength: 3, maxLength: 3 },
+          expect(Object.keys(forwardModule.tables)).toEqual(tableNames)
+          expect(Object.keys(backwardModule.tables)).toEqual(
+            reversed(tableNames),
+          )
+          expect(Object.keys(forwardModule.tables)).not.toEqual(
+            Object.keys(backwardModule.tables),
+          )
+        },
       ),
-    ],
-    ([columnNames]) => {
-      const permutedColumnNames = reversed(columnNames)
-      const forwardRow = Stdb.table("orderedTable", {
-        columns: u64ColumnsFor(columnNames),
-      }).row
-      const backwardRow = Stdb.table("orderedTable", {
-        columns: u64ColumnsFor(permutedColumnNames),
-      }).row
-      const values = Object.fromEntries(
-        columnNames.map((name, offset) => [name, BigInt(offset + 1)]),
-      )
+      propertyParameters,
+    )
+  })
 
-      expect(Array.from(nativeBytes(forwardRow, values))).not.toEqual(
-        Array.from(nativeBytes(backwardRow, values)),
-      )
-    },
-    propertyOptions,
-  )
+  it("authored column order reaches positional native bytes", () => {
+    FastCheck.assert(
+      FastCheck.property(
+        FastCheck.uniqueArray(
+          FastCheck.constantFrom("alpha", "bravo", "charlie", "delta", "echo"),
+          { minLength: 3, maxLength: 3 },
+        ),
+        (columnNames) => {
+          const permutedColumnNames = reversed(columnNames)
+          const forwardRow = Stdb.table("orderedTable", {
+            columns: u64ColumnsFor(columnNames),
+          }).row
+          const backwardRow = Stdb.table("orderedTable", {
+            columns: u64ColumnsFor(permutedColumnNames),
+          }).row
+          const values = Object.fromEntries(
+            columnNames.map((name, offset) => [name, BigInt(offset + 1)]),
+          )
+
+          expect(Array.from(nativeBytes(forwardRow, values))).not.toEqual(
+            Array.from(nativeBytes(backwardRow, values)),
+          )
+        },
+      ),
+      propertyParameters,
+    )
+  })
 })

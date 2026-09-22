@@ -25,7 +25,7 @@ export type DevServerOptions = {
   readonly logDir?: string
   readonly cwd?: string
   readonly clear?: {
-    readonly firstPublish?: ClearMode | undefined
+    readonly publishFirst?: ClearMode | undefined
     readonly republish?: ClearMode | undefined
   }
 }

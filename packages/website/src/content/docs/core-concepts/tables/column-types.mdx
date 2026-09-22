@@ -42,6 +42,12 @@ effect-spacetimedb wraps Effect schemas in `Stdb.*` value types, then uses those
 value types consistently for table columns, reducer/procedure params, view
 returns, and declared errors.
 
+Any value type can be a column. Which ones can carry a key or an index is a
+narrower question: see [Constraints](/core-concepts/tables/constraints) for the
+primary-key and unique-capable types and [Indexes](/core-concepts/tables/indexes)
+for the indexable ones. `Stdb.enum(...)` and `Stdb.sum(...)` columns qualify for
+both.
+
 ## Value-Type Pattern
 
 Use a plain Effect schema as the domain source of truth, then wrap it at

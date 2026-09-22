@@ -82,8 +82,8 @@ export const materializeConstraints = (
   tableSpec.constraints.map((constraint) => {
     switch (constraint.kind) {
       case "unique": {
-        const [firstColumn, ...remainingColumns] = constraint.columns
-        if (firstColumn == null) {
+        const [columnFirst, ...remainingColumns] = constraint.columns
+        if (columnFirst == null) {
           throw new Error(
             `Table ${tableSpec.name} unique constraint ${constraint.name} is missing a target column`,
           )
@@ -92,7 +92,7 @@ export const materializeConstraints = (
         return {
           name: constraint.name,
           constraint: "unique" as const,
-          columns: [firstColumn, ...remainingColumns],
+          columns: [columnFirst, ...remainingColumns],
         }
       }
       default:

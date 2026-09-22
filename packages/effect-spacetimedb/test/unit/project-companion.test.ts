@@ -80,11 +80,15 @@ describe("module project plan", (it) => {
       }),
   )
 
-  it.effect("keeps views out of the projected ws target surface", () =>
+  it.effect("projects public views as keyed subscription targets", () =>
     Effect.gen(function* () {
       const Full = Stdb.project(FullModule)
 
-      expect("views" in (Full.targets as object)).toBe(false)
+      expect(Full.targets.views.allUsers).toMatchObject({
+        kind: "view",
+        key: "allUsers",
+        name: "all_users",
+      })
     }),
   )
 })

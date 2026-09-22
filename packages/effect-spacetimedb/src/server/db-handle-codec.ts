@@ -95,7 +95,6 @@ export const tableCodecOf = (
   const context = { table: table.name, op: tableOp } as const
   const indexCodec = indexValueCodecOf(table, tableOp, {
     ...(makeRange === undefined ? {} : { makeRange }),
-    rejectFullWidthCompositeRange: true,
   })
 
   return {

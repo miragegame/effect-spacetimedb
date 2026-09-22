@@ -1,4 +1,5 @@
 import * as Stdb from "effect-spacetimedb"
+import { ConstraintEntryFunctions } from "./constraint-entries/contract"
 import { DeterminismFunctions } from "./determinism/contract"
 import { ExampleLifecycle } from "./lifecycle/contract"
 import { MembershipFunctions } from "./memberships/contract"
@@ -17,6 +18,7 @@ export const ExampleModule = Stdb.StdbModule.make(
 )
   .addTables(...exampleTables)
   .add(UserFunctions)
+  .add(ConstraintEntryFunctions)
   .add(DeterminismFunctions)
   .add(MembershipFunctions)
   .add(NativeRangeFunctions)

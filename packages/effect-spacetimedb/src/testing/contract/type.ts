@@ -95,6 +95,7 @@ export {
   ReservedSatsTypeIdentifierPattern,
   result,
   SatsTypeIdentifierPattern,
+  StdbFieldOptionsVersionError,
   StdbTypeIdentifierError,
   StdbTypeNotNameableError,
   StdbValueCodecError,

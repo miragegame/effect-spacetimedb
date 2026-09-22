@@ -90,10 +90,10 @@ const Full = Stdb.project(FullModule)
 
 const MainSession = Full.client.ws.tag("main")
 const OtherSession = Full.client.ws.tag("other")
-const DefaultSession = Full.client.ws.Session
+const SessionDefault = Full.client.ws.Session
 void MainSession
 void OtherSession
-void DefaultSession
+void SessionDefault
 
 type PublicGeneratedErrorContext = {
   readonly generatedContext: "public"

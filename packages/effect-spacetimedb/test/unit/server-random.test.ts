@@ -4,10 +4,10 @@ import { makeServerRandom } from "../../src/server/runtime-layer.ts"
 
 const { describe, expect, it } = EffectVitest
 
-const minSafe = Number.MIN_SAFE_INTEGER
-const maxSafe = Number.MAX_SAFE_INTEGER
-const minSafeBigInt = BigInt(minSafe)
-const maxSafeBigInt = BigInt(maxSafe)
+const safeMin = Number.MIN_SAFE_INTEGER
+const safeMax = Number.MAX_SAFE_INTEGER
+const safeBigIntMin = BigInt(safeMin)
+const safeBigIntMax = BigInt(safeMax)
 
 type HostRandom = {
   (): number
@@ -36,15 +36,15 @@ describe("server random precision", () => {
     const random = Object.assign(() => 0.5, {
       fill: <T>(array: T): T => array,
       uint32: () => 1,
-      integerInRange: () => minSafe,
+      integerInRange: () => safeMin,
       bigintInRange: (min: bigint, max: bigint) => {
         calls.push({ min, max })
-        return maxSafeBigInt
+        return safeBigIntMax
       },
     })
 
-    expect(makeServerRandom({ random }).nextIntUnsafe()).toBe(maxSafe)
-    expect(calls).toEqual([{ min: minSafeBigInt, max: maxSafeBigInt }])
+    expect(makeServerRandom({ random }).nextIntUnsafe()).toBe(safeMax)
+    expect(calls).toEqual([{ min: safeBigIntMin, max: safeBigIntMax }])
   })
 
   it("is deterministic and avoids the host integer reconstruction path", async () => {
@@ -62,10 +62,10 @@ describe("server random precision", () => {
       serverRandomB.nextIntUnsafe(),
     )
     const integerPathDraws = Array.from({ length: 12 }, () =>
-      integerPathRandom.integerInRange(minSafe, maxSafe),
+      integerPathRandom.integerInRange(safeMin, safeMax),
     )
     const bigintPathDraws = Array.from({ length: 12 }, () =>
-      Number(bigintPathRandom.bigintInRange(minSafeBigInt, maxSafeBigInt)),
+      Number(bigintPathRandom.bigintInRange(safeBigIntMin, safeBigIntMax)),
     )
 
     expect(drawsA).toEqual(drawsB)
@@ -74,8 +74,8 @@ describe("server random precision", () => {
     for (const draw of drawsA) {
       expect(Number.isInteger(draw)).toBe(true)
       expect(Number.isSafeInteger(draw)).toBe(true)
-      expect(draw).toBeGreaterThanOrEqual(minSafe)
-      expect(draw).toBeLessThanOrEqual(maxSafe)
+      expect(draw).toBeGreaterThanOrEqual(safeMin)
+      expect(draw).toBeLessThanOrEqual(safeMax)
     }
   })
 })

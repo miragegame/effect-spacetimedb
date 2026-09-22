@@ -1,5 +1,5 @@
 import { defineConfig } from "vitest/config"
-import { liveTestPatterns, nativePackageConfig } from "./vitest.shared"
+import { liveTestPatterns, nativePackageConfig } from "./vitest.shared.ts"
 
 // Tag definitions for this package's live tests. Tags let a runner select
 // subsets (for example only tests that need local-mode resources).
@@ -18,6 +18,7 @@ const liveTestTagDefinitions = [
 export default defineConfig({
   ...nativePackageConfig,
   test: {
+    globalSetup: ["./vitest.self-link.ts"],
     name: "effect-spacetimedb-live",
     include: liveTestPatterns,
     setupFiles: ["./test/live/vitest.setup.ts"],

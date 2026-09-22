@@ -34,3 +34,59 @@ const playerScore = Stdb.table("player_score", {
 effect-spacetimedb accepts the native algorithms
 `"btree"`, `"hash"`, and `"direct"` at both declaration sites. `hash` indexes
 are point-only; `direct` indexes are range-capable.
+
+## Indexable Column Types
+
+`btree` and `hash` index any column type the host can key, including
+`Stdb.enum(...)` and payload-carrying `Stdb.sum(...)` columns. A unit-variant
+enum is keyed by its variant tag; a payload-carrying sum is keyed by its whole
+encoded value, so `{ tag: "Chunk", value: 4 }` and `{ tag: "Chunk", value: 5 }`
+are two different keys.
+
+`direct` is the exception. It indexes exactly one column, and only `u8`, `u16`,
+`u32`, `u64`, or a unit-variant enum.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const Kind = Stdb.enum("Ping", "Chunk")
+
+const marker = Stdb.table("marker", {
+  columns: {
+    kind: Kind.index("btree"),
+    seq: Stdb.u32(),
+  },
+  indexes: (columns) => [
+    Stdb.index("marker_kind_seq_idx", [columns.kind, columns.seq], {
+      algorithm: "btree",
+    }),
+  ],
+})
+```
+
+## Composite Lookups
+
+A composite btree index is read through the accessor named after the index. Pass
+a tuple of index-column values: either a leading prefix of the columns or the
+full width. The last value you supply may be a range; every column before it is
+matched for equality.
+
+```ts
+// Equality on both columns: a point lookup.
+yield* db.marker.marker_kind_seq_idx.filterToArray([{ tag: "Chunk" }, 7])
+
+// Equality on `kind`, range over `seq` — a range in the final column of a
+// full-width tuple is a range scan, not a point lookup.
+yield* db.marker.marker_kind_seq_idx.filterToArray([
+  { tag: "Chunk" },
+  { from: { tag: "included", value: 1 }, to: { tag: "excluded", value: 9 } },
+])
+
+// A one-column prefix scans every `seq` under that `kind`.
+yield* db.marker.marker_kind_seq_idx.filterToArray([{ tag: "Chunk" }])
+```
+
+A single-column index takes the bare value or a bare `{ from, to }` range
+instead of a tuple. Bounds are `{ tag: "included" | "excluded", value }` or
+`{ tag: "unbounded" }`, and `deleteAll(...)` accepts the same inputs as
+`filterToArray(...)`.

@@ -1,7 +1,9 @@
 
 import * as EffectVitest from "@effect/vitest"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { Timestamp } from "spacetimedb"
 
@@ -423,6 +425,88 @@ describe("effect-spacetimedb value representations", (it) => {
       expect(Exit.isFailure(bareNumber)).toBe(true)
       expect(Exit.isFailure(arrayNumber)).toBe(true)
       expect(Exit.isFailure(structNumber)).toBe(true)
+    }),
+  )
+
+  // The native value constructors reject anything that is not a bigint, an
+  // integer number or a non-blank numeric string, and they signal it by
+  // throwing. Every one of those inputs is reachable from a hostile or merely
+  // broken HTTP body, so the boundary owes the caller a typed decode failure
+  // rather than a defect.
+  it.effect("fails typed on malformed native values in an HTTP body", () =>
+    Effect.gen(function* () {
+      const cases: ReadonlyArray<{
+        readonly type: StdbTesting.ContractType.AnyValueType
+        readonly body: string
+      }> = [
+        {
+          type: StdbTesting.ContractType.identity(),
+          body: '{"__identity__":""}',
+        },
+        {
+          type: StdbTesting.ContractType.identity(),
+          body: '{"__identity__":"not-hex"}',
+        },
+        {
+          type: StdbTesting.ContractType.identity(),
+          body: '{"__identity__":true}',
+        },
+        {
+          type: StdbTesting.ContractType.identity(),
+          body: '{"__identity__":[42]}',
+        },
+        {
+          type: StdbTesting.ContractType.identity(),
+          body: '{"__identity__":null}',
+        },
+        {
+          type: StdbTesting.ContractType.connectionId(),
+          body: '{"__connection_id__":""}',
+        },
+        {
+          type: StdbTesting.ContractType.connectionId(),
+          body: '{"__connection_id__":true}',
+        },
+        {
+          type: StdbTesting.ContractType.uuid(),
+          body: '{"__uuid__":"not-a-uuid"}',
+        },
+        { type: StdbTesting.ContractType.uuid(), body: '{"__uuid__":[42]}' },
+        {
+          type: StdbTesting.ContractType.timestamp(),
+          body: '{"__timestamp_micros_since_unix_epoch__":true}',
+        },
+        {
+          type: StdbTesting.ContractType.timestamp(),
+          body: '{"__timestamp_micros_since_unix_epoch__":""}',
+        },
+        {
+          type: StdbTesting.ContractType.timeDuration(),
+          body: '{"__time_duration_micros__":[42]}',
+        },
+        {
+          type: StdbTesting.ContractType.timeDuration(),
+          body: '{"__time_duration_micros__":null}',
+        },
+      ]
+
+      yield* Effect.forEach(
+        cases,
+        Effect.fn(function* ({ type, body }) {
+          const exit = yield* Effect.exit(
+            StdbTesting.ClientHttpJson.decodeHttpOutput(type, body),
+          )
+
+          expect(Exit.isFailure(exit)).toBe(true)
+          if (Exit.isFailure(exit)) {
+            expect(Cause.hasDies(exit.cause)).toBe(false)
+            expect(
+              Option.getOrUndefined(Cause.findErrorOption(exit.cause)),
+            ).toBeInstanceOf(StdbTesting.StdbDecodeError)
+          }
+        }),
+        { concurrency: 1 },
+      )
     }),
   )
 })

@@ -1,6 +1,6 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Schema from "effect/Schema"
-import * as FastCheck from "effect/testing/FastCheck"
+import * as FastCheck from "fast-check"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import { codecCorpus } from "../helpers/codec-corpus"
 
@@ -9,9 +9,7 @@ const { describe, expect, it } = EffectVitest
 const T = StdbTesting.ContractType
 const TypeName = StdbTesting.ContractTypeName
 
-const fingerprintPropertyOptions = {
-  fastCheck: { numRuns: 300, seed: 0xf16e123 },
-} as const
+const fingerprintPropertyParameters = { numRuns: 300, seed: 0xf16e123 }
 
 type Tree = {
   readonly name: string
@@ -247,17 +245,20 @@ describe("type fingerprint laws", () => {
     expect(fingerprintOf(T.array(T.u8()))).toBe(fingerprintOf(T.bytes()))
   })
 
-  it.prop(
-    "formats stable digest and decimal suffix outputs",
-    [FastCheck.string({ maxLength: 128 })],
-    ([fingerprint]) => {
-      const digest = TypeName.stableStructuralDigest(fingerprint)
+  it("formats stable digest and decimal suffix outputs", () => {
+    FastCheck.assert(
+      FastCheck.property(
+        FastCheck.string({ maxLength: 128 }),
+        (fingerprint) => {
+          const digest = TypeName.stableStructuralDigest(fingerprint)
 
-      expect(digest).toMatch(/^[0-9a-f]{32}$/)
-      expect(TypeName.decimalDigestSuffix(digest)).toMatch(/^[0-9]{40}$/)
-    },
-    fingerprintPropertyOptions,
-  )
+          expect(digest).toMatch(/^[0-9a-f]{32}$/)
+          expect(TypeName.decimalDigestSuffix(digest)).toMatch(/^[0-9]{40}$/)
+        },
+      ),
+      fingerprintPropertyParameters,
+    )
+  })
 
   it("raises on content-addressed name digest collisions only for distinct fingerprints", () => {
     const stringFingerprint = fingerprintOf(T.string())
@@ -280,19 +281,20 @@ describe("type fingerprint laws", () => {
     }).not.toThrow()
   })
 
-  it.prop(
-    "contentAddressedName is deterministic for kind and fingerprint",
-    [
-      FastCheck.constantFrom(...nameKinds),
-      FastCheck.constantFrom(
-        ...typeFactories.map(({ original }) => fingerprintOf(original)),
+  it("contentAddressedName is deterministic for kind and fingerprint", () => {
+    FastCheck.assert(
+      FastCheck.property(
+        FastCheck.constantFrom(...nameKinds),
+        FastCheck.constantFrom(
+          ...typeFactories.map(({ original }) => fingerprintOf(original)),
+        ),
+        (kind, fingerprint) => {
+          expect(TypeName.contentAddressedName(kind, fingerprint)).toBe(
+            TypeName.contentAddressedName(kind, fingerprint),
+          )
+        },
       ),
-    ],
-    ([kind, fingerprint]) => {
-      expect(TypeName.contentAddressedName(kind, fingerprint)).toBe(
-        TypeName.contentAddressedName(kind, fingerprint),
-      )
-    },
-    fingerprintPropertyOptions,
-  )
+      fingerprintPropertyParameters,
+    )
+  })
 })

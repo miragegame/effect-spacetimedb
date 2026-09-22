@@ -9,7 +9,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs"
-import { delimiter, extname, join, relative, resolve } from "node:path"
+import { delimiter, dirname, extname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { resolveInstallRootNodeModules } from "./standalone-helpers.mjs"
 
@@ -44,7 +44,7 @@ const findModernNode = () => {
   return undefined
 }
 
-const requiredSpacetimeVersion = "2.6.1"
+const requiredSpacetimeVersion = "2.10.1"
 
 const spacetimeVersionOutput = (binary) => {
   const result = spawnSync(binary, ["--version"], {
@@ -54,6 +54,19 @@ const spacetimeVersionOutput = (binary) => {
 }
 
 const findCompatibleSpacetimeCli = () => {
+  // A caller that already resolved the CLI (a build system may provide it
+  // without putting it on PATH) names it here, exactly as the other package
+  // scripts accept it; the PATH scan below is the interactive-shell fallback.
+  const configured = process.env.SPACETIME_CLI_BIN?.trim()
+  if (configured !== undefined && configured.length > 0) {
+    const output = spacetimeVersionOutput(configured)
+    if (
+      output?.includes(`spacetimedb tool version ${requiredSpacetimeVersion}`)
+    ) {
+      return { binDir: dirname(configured), cli: configured }
+    }
+    return undefined
+  }
   for (const entry of (process.env.PATH ?? "").split(delimiter)) {
     const candidate = join(entry, "spacetime")
     if (!existsSync(candidate)) {
@@ -82,7 +95,7 @@ const run = (command, args, options = {}) => {
   })
   // Throw (don't process.exit) so the caller's `finally` cleanup still runs —
   // process.exit skips finally and would leak the compiled artifact dir under
-  // node_modules/.cache (a stray `effect-spacetimedb` copy that breaks tests).
+  // package scratch (a stray `effect-spacetimedb` copy that breaks tests).
   if (result.status !== 0) {
     throw new Error(
       `Command failed: ${command} (exit code ${result.status ?? "unknown"}).`,
@@ -143,7 +156,7 @@ if (currentMajorNodeVersion() < 22) {
 const compatibleSpacetimeCli = findCompatibleSpacetimeCli()
 if (compatibleSpacetimeCli === undefined) {
   console.error(
-    `effect-spacetimedb/dev-server Node smoke requires spacetime ${requiredSpacetimeVersion} on PATH.`,
+    `effect-spacetimedb/dev-server Node smoke requires spacetime ${requiredSpacetimeVersion} on PATH or in SPACETIME_CLI_BIN.`,
   )
   process.exit(1)
 }
@@ -155,8 +168,7 @@ const packageRoot = resolve(fileURLToPath(new URL("..", import.meta.url)))
 const moduleDir = join(packageRoot, "examples", "publishable-module")
 const artifactDir = resolve(
   packageRoot,
-  "node_modules",
-  ".cache",
+  ".tmp",
   "effect-spacetimedb-dev-server-node-smoke",
   `run-${process.pid.toString()}`,
 )

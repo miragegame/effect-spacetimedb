@@ -55,16 +55,20 @@ export {
 } from "./context.ts"
 export {
   type ConstrainedServerRuntimeMode,
-  defaultServerRuntimeMode,
+  serverRuntimeModeDefault,
+  makeServerClock,
   provideConstrainedServerRuntime,
   provideConstrainedServerSupport,
+  makeProcedureServerClock,
 } from "./runtime-layer.ts"
 export type {
   DbFailure,
   DbHandleFor,
   EffectDbView,
   EffectHttpClient,
+  RawProcedureHttp,
   EffectTableHandle,
+  ProcedureHttpRequestOptions,
   ReadonlyDbHandleFor,
   ReadonlyEffectDbView,
   StdbHostFailure,

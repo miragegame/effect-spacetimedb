@@ -30,10 +30,16 @@ See `packages/effect-spacetimedb/README.md` for library usage details.
 
 ## Contributions and Releases
 
-Issues, bug reports, pull requests, and suggestions are welcome and credited when
-they lead to fixes or improvements.
+Issues, bug reports, and suggestions are welcome and credited when they lead to
+fixes or improvements. Fixes are written in the repository this package is
+developed in and reach this one with the next release, so a pull request opened
+here is usually closed in favour of the ported change — the credit is the same.
 
-Releases are cut by the maintainers.
+Releases arrive here as pull requests synced from that repository. Each one
+carries the release notes as its description and must pass CI before it is
+squash-merged. Every release is tagged `v<version>`, and its notes are published
+under [GitHub Releases](https://github.com/miragegame/effect-spacetimedb/releases);
+their source is `.github/release-notes/<version>.md`.
 
 ## License
 

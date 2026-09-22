@@ -12,8 +12,16 @@ type CallableModuleExport = ModuleExport & {
   readonly kind: "procedure" | "reducer"
   readonly params: unknown
   readonly returnType?: unknown
+  readonly onSchedule?: unknown
   readonly invoke: (ctx: unknown, rawArgs: unknown) => unknown
 }
+
+type ScheduleOptions = {
+  readonly onSchedule: unknown
+}
+
+const isScheduleOptions = (value: unknown): value is ScheduleOptions =>
+  typeof value === "object" && value !== null && "onSchedule" in value
 
 type ViewModuleExport = ModuleExport & {
   readonly invoke: (ctx: unknown) => unknown
@@ -59,8 +67,10 @@ export const CaseConversionPolicy = {
   None: "none",
 } as const
 
+// @effect-diagnostics-next-line extendsNativeError:off -- Test double of the `spacetimedb` host module's native `SenderError`; the module under test receives it through the host ABI and must see the real shape.
 export class SenderError extends Error {}
 
+// @effect-diagnostics-next-line extendsNativeError:off -- Test double of the `spacetimedb` host module's native `SpacetimeHostError`; the host-error mirroring in src/server/host-errors.ts matches it by `name`.
 export class SpacetimeHostError extends Error {
   override get name(): string {
     return "SpacetimeHostError"
@@ -194,35 +204,96 @@ class TestSchema {
       readonly exportName: string
       readonly public: boolean
     }>,
+    schedules: [] as Array<{
+      readonly tableName: string
+      readonly functionName: string
+    }>,
     explicitNames: {
       entries: [] as Array<ExplicitNameEntry>,
     },
   }
 
+  /** Mirrors the SDK's `tableSourceNames`: a handle registered twice is ambiguous. */
+  readonly tableSourceNames = new Map<unknown, Array<string>>()
+
   constructor(tables: Record<string, unknown> = {}) {
     for (const [accessorName, tableSchema] of Object.entries(tables)) {
       if (isTableSchema(tableSchema)) {
         this.moduleDef.tables.push(tableSchema.tableDef(this, accessorName))
+        const sourceNames = this.tableSourceNames.get(tableSchema)
+        if (sourceNames === undefined) {
+          this.tableSourceNames.set(tableSchema, [accessorName])
+        } else {
+          sourceNames.push(accessorName)
+        }
       }
     }
   }
 
+  resolveSchedule(table: unknown, functionName: string): void {
+    const sourceNames = this.tableSourceNames.get(table)
+    if (sourceNames !== undefined && sourceNames.length > 1) {
+      throw new TypeError(
+        "Schedule target table is registered more than once in this schema. Use a distinct table handle for each scheduled table.",
+      )
+    }
+    const tableName = sourceNames?.[0]
+    if (tableName === undefined) {
+      throw new TypeError("Schedule target table is not part of this schema.")
+    }
+    const existing = this.moduleDef.schedules.find(
+      (schedule) => schedule.tableName === tableName,
+    )
+    if (existing !== undefined) {
+      throw new TypeError(
+        `Table ${tableName} defines multiple schedules: ${existing.functionName} and ${functionName}. A schedule table can only be used by one reducer or procedure.`,
+      )
+    }
+    this.moduleDef.schedules.push({ tableName, functionName })
+  }
+
   reducer(
-    params: Record<string, unknown>,
-    handler: (ctx: unknown, rawArgs: unknown) => unknown,
+    ...args:
+      | [
+          params: Record<string, unknown>,
+          handler: (ctx: unknown, rawArgs: unknown) => unknown,
+        ]
+      | [
+          options: ScheduleOptions,
+          params: Record<string, unknown>,
+          handler: (ctx: unknown, rawArgs: unknown) => unknown,
+        ]
   ): ModuleExport {
-    return callableModuleExport(handler, { kind: "reducer", params })
+    const [options, params, handler] =
+      args.length === 2 ? [undefined, ...args] : args
+    return callableModuleExport(handler, {
+      kind: "reducer",
+      params,
+      ...(isScheduleOptions(options) ? { onSchedule: options.onSchedule } : {}),
+    })
   }
 
   procedure(
-    params: Record<string, unknown>,
-    returnType: unknown,
-    handler: (ctx: unknown, rawArgs: unknown) => unknown,
+    ...args:
+      | [
+          params: Record<string, unknown>,
+          returnType: unknown,
+          handler: (ctx: unknown, rawArgs: unknown) => unknown,
+        ]
+      | [
+          options: ScheduleOptions,
+          params: Record<string, unknown>,
+          returnType: unknown,
+          handler: (ctx: unknown, rawArgs: unknown) => unknown,
+        ]
   ): ModuleExport {
+    const [options, params, returnType, handler] =
+      args.length === 3 ? [undefined, ...args] : args
     return callableModuleExport(handler, {
       kind: "procedure",
       params,
       returnType,
+      ...(isScheduleOptions(options) ? { onSchedule: options.onSchedule } : {}),
     })
   }
 
@@ -299,6 +370,7 @@ const callableModuleExport = (
     readonly kind: CallableModuleExport["kind"]
     readonly params: unknown
     readonly returnType?: unknown
+    readonly onSchedule?: unknown
   },
 ): CallableModuleExport => ({
   ...options,
@@ -308,14 +380,17 @@ const callableModuleExport = (
         sourceName: exportName,
         params: options.params,
       })
-      return
+    } else {
+      schema.moduleDef.procedures.push({
+        sourceName: exportName,
+        params: options.params,
+        returnType: options.returnType,
+      })
     }
 
-    schema.moduleDef.procedures.push({
-      sourceName: exportName,
-      params: options.params,
-      returnType: options.returnType,
-    })
+    if (options.onSchedule !== undefined) {
+      schema.resolveSchedule(options.onSchedule, exportName)
+    }
   },
   invoke: handler,
 })
@@ -372,7 +447,7 @@ export const registerCompiledModule = (
 type TestBuilderMetadata = {
   readonly kind?: string
   readonly columnName?: string
-  readonly defaultValue?: unknown
+  readonly valueDefault?: unknown
   readonly columnMetadata?: {
     readonly isPrimaryKey?: boolean
     readonly isAutoIncrement?: boolean
@@ -386,8 +461,8 @@ type TestBuilderMetadata = {
 const makeBuilder = (metadata: TestBuilderMetadata = {}): unknown => ({
   ...metadata,
   optional: () => makeBuilder({ ...metadata, isOptional: true }),
-  default: (defaultValue: unknown) =>
-    makeBuilder({ ...metadata, defaultValue }),
+  default: (valueDefault: unknown) =>
+    makeBuilder({ ...metadata, valueDefault }),
   primaryKey: () =>
     makeBuilder({
       ...metadata,

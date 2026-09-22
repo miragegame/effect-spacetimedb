@@ -6,8 +6,8 @@ export type StringLiteralTagCollision = {
   readonly first: string
   readonly second: string
   readonly collisionTag: string
-  readonly firstGeneratedClientTag: string
-  readonly secondGeneratedClientTag: string
+  readonly generatedClientTagFirst: string
+  readonly generatedClientTagSecond: string
 }
 
 export type InvalidStringLiteralTag = {
@@ -62,8 +62,8 @@ export const findStringLiteralTagCollision = (
           first: previous.authored,
           second: authored,
           collisionTag: key,
-          firstGeneratedClientTag: previous.generatedClientTag,
-          secondGeneratedClientTag: generatedClientTag,
+          generatedClientTagFirst: previous.generatedClientTag,
+          generatedClientTagSecond: generatedClientTag,
         }
       }
 
@@ -82,8 +82,8 @@ export const findStringLiteralTagCollision = (
 export const stringLiteralTagCollisionMessage = (
   collision: StringLiteralTagCollision,
 ): string =>
-  collision.firstGeneratedClientTag === collision.secondGeneratedClientTag
-    ? `String literal values ${collision.first} and ${collision.second} both map to generated-client variant tag ${collision.firstGeneratedClientTag}`
+  collision.generatedClientTagFirst === collision.generatedClientTagSecond
+    ? `String literal values ${collision.first} and ${collision.second} both map to generated-client variant tag ${collision.generatedClientTagFirst}`
     : `String literal values ${collision.first} and ${collision.second} collide across authored/generated-client variant tag ${collision.collisionTag}`
 
 export const invalidStringLiteralTagMessage = (

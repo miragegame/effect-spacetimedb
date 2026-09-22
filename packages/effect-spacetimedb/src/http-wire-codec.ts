@@ -10,8 +10,11 @@ export const httpWireCodec = <S extends Schema.Top>(
     Schema.fromJsonString,
   ) as unknown as Schema.Codec<Schema.Schema.Type<S>, string, never, never>
 
+// Effect schemas are callable, so the `typeof` guard has to admit functions.
 const schemaAst = (schema: unknown): AST.AST | undefined =>
-  typeof schema === "object" && schema !== null && "ast" in schema
+  (typeof schema === "object" || typeof schema === "function") &&
+  schema !== null &&
+  "ast" in schema
     ? (schema as { readonly ast: AST.AST }).ast
     : undefined
 

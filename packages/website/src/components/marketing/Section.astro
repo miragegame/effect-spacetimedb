@@ -1,13 +1,13 @@
 ---
 interface Props {
-  maxWidth?: number
+  widthMax?: number
   padding?: string
   class?: string
   id?: string
 }
 
 const {
-  maxWidth = 1120,
+  widthMax = 1120,
   padding = "84px 24px",
   class: className,
   id,
@@ -15,7 +15,7 @@ const {
 ---
 
 <section class:list={["section", className]} style={`padding:${padding};`} id={id}>
-  <div class="section__inner" style={`max-width:${maxWidth}px;`}>
+  <div class="section__inner" style={`max-width:${widthMax}px;`}>
     <slot />
   </div>
 </section>

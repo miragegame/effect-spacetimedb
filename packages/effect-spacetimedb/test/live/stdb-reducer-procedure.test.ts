@@ -11,7 +11,7 @@ import {
   decodeThingId,
   decodeUserId,
   decodeUserName,
-  firstFailure,
+  failureFirst,
   LIVE_TEST_TIMEOUT_MS,
   LiveErrors,
   LiveModule,
@@ -220,7 +220,7 @@ describe("effect-spacetimedb live reducer/procedure", () => {
           )
           expect(Exit.isFailure(missingReducerExit)).toBe(true)
           if (Exit.isFailure(missingReducerExit)) {
-            const failure = firstFailure(missingReducerExit)
+            const failure = failureFirst(missingReducerExit)
             expect(failure).toBeInstanceOf(UserMissingError)
             expect(failure).toEqual(
               expect.objectContaining({

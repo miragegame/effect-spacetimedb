@@ -17,7 +17,7 @@ const groupedUser = Stdb.table("grouped_user", {
   },
 })
 
-class GroupedMissing extends Schema.TaggedErrorClass<GroupedMissing>()(
+class GroupedMissing extends Schema.TaggedError<GroupedMissing>()(
   "GroupedMissing",
   {
     userId: UserId.schema,
@@ -25,7 +25,7 @@ class GroupedMissing extends Schema.TaggedErrorClass<GroupedMissing>()(
   { httpApiStatus: 404 },
 ) {}
 
-class GroupedUnexpected extends Schema.TaggedErrorClass<GroupedUnexpected>()(
+class GroupedUnexpected extends Schema.TaggedError<GroupedUnexpected>()(
   "GroupedUnexpected",
   {},
 ) {}

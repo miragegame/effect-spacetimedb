@@ -4,19 +4,19 @@ import * as Stdb from "effect-spacetimedb"
 import * as StdbClient from "effect-spacetimedb/client"
 import type { Assert, IsEqual } from "./helpers"
 
-class GroupFailure extends Schema.TaggedErrorClass<GroupFailure>()(
+class GroupFailure extends Schema.TaggedError<GroupFailure>()(
   "GroupFailure",
   {},
   { httpApiStatus: 401 },
 ) {}
 
-class EndpointFailure extends Schema.TaggedErrorClass<EndpointFailure>()(
+class EndpointFailure extends Schema.TaggedError<EndpointFailure>()(
   "EndpointFailure",
   {},
   { httpApiStatus: 422 },
 ) {}
 
-class UndeclaredFailure extends Schema.TaggedErrorClass<UndeclaredFailure>()(
+class UndeclaredFailure extends Schema.TaggedError<UndeclaredFailure>()(
   "UndeclaredFailure",
   {},
 ) {}
