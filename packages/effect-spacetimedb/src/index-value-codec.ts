@@ -1,6 +1,7 @@
 import { type AnyTableSpec } from "./contract/table.ts"
 import * as Match from "effect/Match"
 import * as Type from "./contract/type.ts"
+import { structFieldWireType } from "./contract/type/constructors.ts"
 import { encodeHostValue } from "./contract/type/host-codec.ts"
 import type { Bound } from "./table-index-typing.ts"
 import { cloneRangeLike, isRangeLike, type RangeLike } from "./range-like.ts"
@@ -23,7 +24,6 @@ export type IndexValueCodecOptions = {
     from: Bound<unknown>,
     to: Bound<unknown>,
   ) => RangeLike<unknown>
-  readonly rejectFullWidthCompositeRange?: boolean
 }
 
 export const indexValueCodecOf = (
@@ -37,7 +37,7 @@ export const indexValueCodecOf = (
     if (schema === undefined) {
       throw new TypeError(`Unknown table column ${column} at ${op}`)
     }
-    return schema
+    return structFieldWireType(schema)
   }
   const encodeField = (column: string, value: unknown): unknown =>
     encodeHostValue(fieldSchema(column), value)
@@ -88,15 +88,6 @@ export const indexValueCodecOf = (
         if (value.length === 0 || value.length > columns.length) {
           throw new TypeError(
             `${op} expected between 1 and ${columns.length} values for a composite range lookup`,
-          )
-        }
-        if (
-          options.rejectFullWidthCompositeRange === true &&
-          value.length === columns.length &&
-          isRangeLike(value.at(-1))
-        ) {
-          throw new TypeError(
-            `${op} cannot use a range bound in the final column of a full-width composite lookup because SpaceTimeDB 2.6.1 routes that input as a point scan; use a shorter prefix range or a full point lookup`,
           )
         }
         return value.map((entry, index) =>

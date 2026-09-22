@@ -3,7 +3,7 @@ import * as Context from "effect/Context"
 import type * as Effect from "effect/Effect"
 import * as EffectRuntime from "effect/Effect"
 import * as Exit from "effect/Exit"
-import type * as Layer from "effect/Layer"
+import * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Scheduler from "effect/Scheduler"
 import { RuntimeLayerAsyncError } from "./services.ts"
@@ -27,7 +27,13 @@ export type SyncRunnerLike<RuntimeR = never> = {
 const preventSchedulerYield = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> =>
-  EffectRuntime.provideService(effect, Scheduler.PreventSchedulerYield, true)
+  effect.pipe(
+    EffectRuntime.provideService(
+      Scheduler.MaxOpsBeforeYield,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    EffectRuntime.provideService(Scheduler.PreventSchedulerYield, true),
+  )
 
 export const isSyncRunnerLike = <RuntimeR>(
   value: unknown,
@@ -55,7 +61,11 @@ export const from = <R>(
         }
   }
 
-  const context = Context.add(value, Scheduler.PreventSchedulerYield, true)
+  const context = Context.add(
+    Context.add(value, Scheduler.MaxOpsBeforeYield, Number.MAX_SAFE_INTEGER),
+    Scheduler.PreventSchedulerYield,
+    true,
+  )
 
   return {
     runSync: (effect) =>
@@ -117,4 +127,9 @@ export const fromManagedRuntime = <R>(
 
 export const fromLayer = <R>(
   layer: Layer.Layer<R, never, never>,
-): SyncRunner<R> => layer.pipe(ManagedRuntime.make, fromManagedRuntime)
+): SyncRunner<R> =>
+  Layer.mergeAll(
+    layer,
+    Layer.succeed(Scheduler.MaxOpsBeforeYield, Number.MAX_SAFE_INTEGER),
+    Layer.succeed(Scheduler.PreventSchedulerYield, true),
+  ).pipe(ManagedRuntime.make, fromManagedRuntime)

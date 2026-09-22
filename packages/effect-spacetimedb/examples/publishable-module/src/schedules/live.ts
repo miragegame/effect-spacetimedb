@@ -37,12 +37,41 @@ export const ScheduleFunctionsLive = Stdb.StdbBuilder.group(
         note,
       })
     }),
+    scheduleDeleteCandidate: Effect.fn(function* ({ note }) {
+      const db = yield* Db
+      const ctx = yield* MutationCtx
+      yield* db.reducerSchedule.schedule({
+        scheduledAt: Stdb.ScheduleAt.after(ctx.timestamp, "30 seconds"),
+        note,
+      })
+    }),
+    replaceScheduledReducerNote: Effect.fn(function* ({
+      existingNote,
+      replacementNote,
+    }) {
+      const db = yield* Db
+      const ctx = yield* MutationCtx
+      const schedules = yield* db.reducerSchedule.toArray()
+      yield* Effect.forEach(
+        schedules.filter((row) => row.note === existingNote),
+        (row) => db.reducerSchedule.scheduledId.delete(row.scheduledId),
+        { discard: true },
+      )
+      yield* db.reducerSchedule.schedule({
+        scheduledAt: Stdb.ScheduleAt.after(ctx.timestamp, "2 seconds"),
+        note: replacementNote,
+      })
+    }),
     reminderFireReducer: Effect.fn(function* ({ data }) {
       const db = yield* Db
+      const ctx = yield* MutationCtx
       yield* db.scheduledResult.insert({
         id: 0n,
         target: "reducer",
         note: data.note,
+        sender: ctx.sender.toHexString(),
+        identity: ctx.identity.toHexString(),
+        databaseIdentity: ctx.databaseIdentity.toHexString(),
       })
     }),
     reminderFireProcedure: Effect.fn(function* ({ data }) {
@@ -50,11 +79,15 @@ export const ScheduleFunctionsLive = Stdb.StdbBuilder.group(
       return yield* tx.run(
         Effect.gen(function* () {
           const db = yield* Db
+          const ctx = yield* MutationCtx
           yield* db.scheduledResult
             .insert({
               id: 0n,
               target: "procedure",
               note: data.note,
+              sender: ctx.sender.toHexString(),
+              identity: ctx.identity.toHexString(),
+              databaseIdentity: ctx.databaseIdentity.toHexString(),
             })
             .pipe(Effect.asVoid)
 

@@ -1,4 +1,4 @@
-// Type-only import keeps the dynamically loaded optional peer visible to dependency lint.
+// Type-only import keeps the dynamically loaded optional peer visible to unused-dependency checks.
 import type {} from "esbuild"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
@@ -12,9 +12,9 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
 // Repository codegen requires an exact CLI/SDK match because the module-def
-// format is patch-version coupled. The package peer remains ~2.6.1 so external
-// consumers may use any compatible 2.6.x SDK without invoking repo codegen.
-export const requiredSpacetimeCliVersion = "2.6.1" as const
+// format is patch-version coupled. The package peer remains ~2.10.1 so external
+// consumers may use any compatible 2.10.x SDK without invoking repo codegen.
+export const requiredSpacetimeCliVersion = "2.10.1" as const
 
 export interface CodegenTarget {
   readonly moduleBundlePath: string

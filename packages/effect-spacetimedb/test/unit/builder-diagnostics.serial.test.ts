@@ -60,7 +60,7 @@ const withTempProject = <A, E>(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const tmpRoot = path.join(packageRoot, "node_modules", ".tmp")
+    const tmpRoot = path.join(packageRoot, ".tmp")
 
     yield* fs.makeDirectory(tmpRoot, { recursive: true })
     const root = yield* fs.makeTempDirectoryScoped({
@@ -145,12 +145,12 @@ import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 import { build } from "effect-spacetimedb/server-compiler"
 
-class DeclaredFailure extends Schema.TaggedErrorClass<DeclaredFailure>()(
+class DeclaredFailure extends Schema.TaggedError<DeclaredFailure>()(
   "DeclaredFailure",
   {},
 ) {}
 
-class UndeclaredFailure extends Schema.TaggedErrorClass<UndeclaredFailure>()(
+class UndeclaredFailure extends Schema.TaggedError<UndeclaredFailure>()(
   "UndeclaredFailure",
   {},
 ) {}
@@ -451,12 +451,12 @@ import {
   type RemoteModule,
 } from "spacetimedb"
 
-class DeclaredFailure extends Schema.TaggedErrorClass<DeclaredFailure>()(
+class DeclaredFailure extends Schema.TaggedError<DeclaredFailure>()(
   "DeclaredFailure",
   {},
 ) {}
 
-class UndeclaredFailure extends Schema.TaggedErrorClass<UndeclaredFailure>()(
+class UndeclaredFailure extends Schema.TaggedError<UndeclaredFailure>()(
   "UndeclaredFailure",
   {},
 ) {}
@@ -552,7 +552,7 @@ declare const REMOTE_MODULE: RemoteModule<
   GeneratedSchema,
   GeneratedReducers,
   GeneratedProcedures,
-  "2.6.1"
+  "2.10.1"
 >
 type ErrorContext = ErrorContextInterface<typeof REMOTE_MODULE>
 declare class DbConnection extends DbConnectionImpl<typeof REMOTE_MODULE> {
@@ -769,12 +769,13 @@ describe("builder misuse diagnostics", (it) => {
             expect(result.output).not.toContain("StdbUniqueAlreadyExistsError")
             expect(result.output).not.toContain("effect(missingEffectError)")
 
-            // This baseline covers the public plan shape plus ResultValuesOf
-            // over the sixty-procedure result module above.
-            const declareOnceBaseline = 626_472
-            const maxInstantiations = Math.ceil(declareOnceBaseline * 1.1)
+            // This baseline covers the public plan shape, exact generated-view
+            // wire-name projection, and ResultValuesOf over the sixty-procedure
+            // result module above.
+            const declareOnceBaseline = 704_263
+            const instantiationsMax = Math.ceil(declareOnceBaseline * 1.1)
             expect(instantiationsFrom(result.output)).toBeLessThanOrEqual(
-              maxInstantiations,
+              instantiationsMax,
             )
           }),
       ),
@@ -802,14 +803,16 @@ describe("builder misuse diagnostics", (it) => {
           // Recorded from the genuinely flat-only form of this exact 19 × 42
           // endpoint fixture. The grouped arm selects a group namespace from
           // the full client type, which carries all nineteen group properties.
-          const flatClientBaseline = 760_781
-          const maxGroupedInstantiations = Math.ceil(flatClientBaseline * 1.1)
+          // Re-recorded on Effect 4.0.0-rc.110, whose HttpApi type rewrite
+          // moved the flat control up from 760_781.
+          const flatClientBaseline = 840_647
+          const groupedInstantiationsMax = Math.ceil(flatClientBaseline * 1.1)
           const baselineInstantiations = instantiationsFrom(
             baselineResult.output,
           )
           const groupedInstantiations = instantiationsFrom(groupedResult.output)
           expect(baselineInstantiations).toBeLessThanOrEqual(
-            maxGroupedInstantiations,
+            groupedInstantiationsMax,
           )
           // Keep the flat fixture on the recorded absolute budget, then judge
           // grouped projection overhead against that same-run flat control.

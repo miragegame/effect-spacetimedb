@@ -16,7 +16,7 @@ const decodeJson = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Unknown),
 )
 
-class MissingThing extends Schema.TaggedErrorClass<MissingThing>()(
+class MissingThing extends Schema.TaggedError<MissingThing>()(
   "MissingThing",
   { id: Schema.String },
   { httpApiStatus: 404 },
@@ -31,7 +31,7 @@ const httpHandler = (options: {
   readonly errors?: Stdb.AnyErrorDefinition
 }) => rawHttpHandlerSpec(options)
 
-class DeclaredEncodeBroken extends Schema.TaggedErrorClass<DeclaredEncodeBroken>()(
+class DeclaredEncodeBroken extends Schema.TaggedError<DeclaredEncodeBroken>()(
   "DeclaredEncodeBroken",
   { code: Schema.String },
   { httpApiStatus: 409 },

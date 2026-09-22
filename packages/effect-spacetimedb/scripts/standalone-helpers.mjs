@@ -10,7 +10,7 @@ import {
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
-export const requiredSpacetimeCliVersion = "2.6.1"
+export const requiredSpacetimeCliVersion = "2.10.1"
 
 const configuredPackageRoot =
   process.env.EFFECT_SPACETIMEDB_PACKAGE_ROOT?.trim()
@@ -45,8 +45,7 @@ export const migrationFixtureRoot = join(
 )
 const migrationGeneratedRoot = join(
   packageRoot,
-  "node_modules",
-  ".cache",
+  ".tmp",
   "effect-spacetimedb-migration-generated",
 )
 
@@ -94,14 +93,24 @@ export const parseSpacetimeCliVersion = (output) =>
 
 export const runCommand = (command, args = [], options = {}) => {
   const rendered = [command, ...args].join(" ")
-  const result = spawnSync(command, args, {
-    cwd: options.cwd ?? packageRoot,
-    encoding: "utf8",
-    env: options.env ?? process.env,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
+  const result = spawnSync(
+    command,
+    args,
+    options.stdio === "inherit"
+      ? {
+          cwd: options.cwd ?? packageRoot,
+          env: options.env ?? process.env,
+          stdio: "inherit",
+        }
+      : {
+          cwd: options.cwd ?? packageRoot,
+          encoding: "utf8",
+          env: options.env ?? process.env,
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+  )
 
   if (result.error !== undefined) {
     throw new StandaloneCommandError({

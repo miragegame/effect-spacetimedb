@@ -15,11 +15,8 @@ import {
   seedCompilerNamedTypeBuilder,
   setCompilerTypeBuilderName,
   toCompilerTypeBuilder,
-  withCompilerScheduledTarget,
 } from "./compiler-interop.ts"
 import { materializeTableOptions } from "./table-options.ts"
-
-type ScheduledResolver = (targetKey: string) => unknown
 
 type MaterializedField = {
   readonly builder: unknown
@@ -52,7 +49,7 @@ export const materializeParamsObject = (
 
 const encodedDefaultValue = (field: AnyFieldType): unknown => {
   const options = fieldOptions(field)
-  return encodeHostValue(field, options.defaultValue)
+  return encodeHostValue(field, options.valueDefault)
 }
 
 const materializeTypeBuilder = (
@@ -73,7 +70,7 @@ const materializeField = (
 
   if (options.hasDefault) {
     // Optional columns with no authored value intentionally remain defaultless.
-    if (!(options.optional && options.defaultValue === undefined)) {
+    if (!(options.optional && options.valueDefault === undefined)) {
       const encodedDefault = encodedDefaultValue(field)
       builder = applyCompilerDefault(builder, encodedDefault)
     }
@@ -116,8 +113,6 @@ const materializeRow = (
 const materializeTable = (
   tableSpec: AnyTableSpec,
   policy: AnyModuleSpec["settings"]["caseConversionPolicy"],
-  scheduledTargetKey: string | undefined,
-  resolveScheduledTarget: ScheduledResolver,
 ): unknown => {
   const options = materializeTableOptions(tableSpec, policy)
   const fields = materializeFields(tableSpec)
@@ -131,16 +126,11 @@ const materializeTable = (
     row,
   )
 
-  // Upstream TS helper types still narrow explicit scheduled targets and
-  // constraint columns more tightly than the raw schema builder accepts.
-  const tableOptions =
-    scheduledTargetKey === undefined
-      ? options
-      : withCompilerScheduledTarget(options, () =>
-          resolveScheduledTarget(scheduledTargetKey),
-        )
-
-  return defineCompilerTable(tableOptions, row)
+  // Schedules are registered on the reducer/procedure side (`onSchedule`), so
+  // the table itself carries no schedule option. Upstream still derives the
+  // table's `ScheduleAt` column unconditionally, which is what schedule
+  // resolution consumes.
+  return defineCompilerTable(options, row)
 }
 
 const collectRowDependencies = (
@@ -293,28 +283,15 @@ const tableEntriesInDependencyOrder = (
 
 export const materializeTables = <Module extends AnyModuleSpec>(options: {
   readonly module: Module
-  readonly scheduleBindings: ReadonlyArray<{
-    readonly tableKey: string
-    readonly targetKey: string
-  }>
-  readonly resolveScheduledTarget: ScheduledResolver
 }): Record<string, unknown> =>
   Object.fromEntries(
     tableEntriesInDependencyOrder(options.module.tables).map(
-      ([tableKey, tableSpec]) => {
-        const scheduleBinding = options.scheduleBindings.find(
-          (binding) => binding.tableKey === tableKey,
-        )
-
-        return [
-          tableKey,
-          materializeTable(
-            tableSpec,
-            options.module.settings.caseConversionPolicy,
-            scheduleBinding?.targetKey,
-            options.resolveScheduledTarget,
-          ),
-        ]
-      },
+      ([tableKey, tableSpec]) => [
+        tableKey,
+        materializeTable(
+          tableSpec,
+          options.module.settings.caseConversionPolicy,
+        ),
+      ],
     ),
   )

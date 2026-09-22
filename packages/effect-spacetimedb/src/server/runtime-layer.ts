@@ -1,3 +1,4 @@
+import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
@@ -24,7 +25,7 @@ type RandomCtx = {
   readonly random: ServerRandom
 }
 
-type TimedRuntimeCtx = TimestampCtx & RandomCtx
+export type TimedRuntimeCtx = TimestampCtx & RandomCtx
 
 class ServerPolyfillInstallError extends Data.TaggedError(
   "ServerPolyfillInstallError",
@@ -113,6 +114,12 @@ export type ConstrainedServerRuntimeMode = "runtime" | "dev-guarded"
 
 let devGuardState: DevGuardState | undefined
 
+// Capture the host wall clock when the runtime module loads, before any
+// reducer can install process-global development guards. Procedure invocations
+// may overlap reducer transactions in tests, so capturing at invocation time
+// can accidentally retain the guarded Date.now implementation.
+const procedureWallClockNow = Date.now.bind(Date)
+
 const hostLogger = Logger.withLeveledConsole(Logger.formatSimple)
 
 const hostLoggers: ReadonlySet<Logger.Logger<unknown, unknown>> = new Set([
@@ -137,7 +144,7 @@ const shouldUseDevGuards = (): boolean => {
   return env.VITEST !== undefined || env.NODE_ENV === "test"
 }
 
-export const defaultServerRuntimeMode: ConstrainedServerRuntimeMode =
+export const serverRuntimeModeDefault: ConstrainedServerRuntimeMode =
   shouldUseDevGuards() ? "dev-guarded" : "runtime"
 
 const restoreDevGuardTarget = (
@@ -341,7 +348,10 @@ const installDevGuardsScoped = Effect.acquireRelease(
 const providePreventSchedulerYield = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> =>
-  Effect.provideService(effect, Scheduler.PreventSchedulerYield, true)
+  effect.pipe(
+    Effect.provideService(Scheduler.MaxOpsBeforeYield, Number.MAX_SAFE_INTEGER),
+    Effect.provideService(Scheduler.PreventSchedulerYield, true),
+  )
 
 const withServerPolyfills = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -369,6 +379,16 @@ const makeFixedServerClock = (microsSinceUnixEpoch: bigint): Clock.Clock => {
     currentTimeNanosUnsafe: () => nanos,
     currentTimeMillis: Effect.succeed(millis),
     currentTimeNanos: Effect.succeed(nanos),
+    // A reducer runs at exactly one logical instant: SpacetimeDB hands it a
+    // single transaction timestamp and replays must reproduce it. So the
+    // monotonic source is that same frozen instant rather than a real
+    // monotonic reading — every elapsed-time measurement inside a reducer is
+    // therefore 0, which is the deterministic answer. Reading host monotonic
+    // time here would be the one place nondeterminism could leak back in.
+    // Effect only ever subtracts two readings from the same clock, and the
+    // contract permits an arbitrary origin, so a constant satisfies it.
+    monotonicTimeNanosUnsafe: () => nanos,
+    monotonicTimeNanos: Effect.succeed(nanos),
     // Clock.sleep cannot carry the typed async-not-allowed error through the
     // Clock service signature, so bind.ts translates this failure at the edge.
     sleep: () =>
@@ -381,6 +401,38 @@ const makeFixedServerClock = (microsSinceUnixEpoch: bigint): Clock.Clock => {
 export const makeServerClock = (ctx: TimestampCtx): Clock.Clock =>
   makeFixedServerClock(ctx.timestamp.microsSinceUnixEpoch)
 
+export const makeProcedureServerClock = (
+  wallClockNow: () => number = procedureWallClockNow,
+): Clock.Clock => {
+  const currentTimeNanos = () => BigInt(wallClockNow()) * 1_000_000n
+  // Procedures are the one server context allowed to read wall time, and the
+  // guarded host clock is the only time source they have. Elapsed-time callers
+  // must never see time run backwards, though, and a wall clock can be
+  // corrected — so the monotonic reading is the guarded clock clamped to its
+  // own high-water mark. The origin is arbitrary (the contract allows that);
+  // what this buys is that differences are never negative.
+  let monotonicHighWaterNanos = 0n
+  const monotonicTimeNanos = () => {
+    const observed = currentTimeNanos()
+    if (observed > monotonicHighWaterNanos) monotonicHighWaterNanos = observed
+    return monotonicHighWaterNanos
+  }
+  return {
+    currentTimeMillisUnsafe: wallClockNow,
+    currentTimeNanosUnsafe: currentTimeNanos,
+    currentTimeMillis: Effect.suspend(() => Effect.succeed(wallClockNow())),
+    currentTimeNanos: Effect.suspend(() => Effect.succeed(currentTimeNanos())),
+    monotonicTimeNanosUnsafe: monotonicTimeNanos,
+    monotonicTimeNanos: Effect.suspend(() =>
+      Effect.succeed(monotonicTimeNanos()),
+    ),
+    sleep: () =>
+      Effect.fail(
+        new ReducerAsyncNotAllowedError(),
+      ) as unknown as Effect.Effect<void>,
+  }
+}
+
 // Views have no transaction timestamp. A fixed epoch clock keeps Effect's
 // tracing/logging internals deterministic without consulting guarded wall time.
 export const makeUntimedServerClock = (): Clock.Clock => ({
@@ -388,15 +440,20 @@ export const makeUntimedServerClock = (): Clock.Clock => ({
   currentTimeNanosUnsafe: () => 0n,
   currentTimeMillis: Effect.die(new ReducerWallClockNotAllowedError()),
   currentTimeNanos: Effect.die(new ReducerWallClockNotAllowedError()),
+  // Same split as the wall-clock members above, and for the same reason: the
+  // unsafe reader returns a fixed value so Effect's own tracing/logging
+  // internals keep working inside a view, while the Effect-visible reader is a
+  // defect so user code asking a view what time it is fails loudly. A view has
+  // no timestamp at all, so a constant is the only deterministic answer.
+  monotonicTimeNanosUnsafe: () => 0n,
+  monotonicTimeNanos: Effect.die(new ReducerWallClockNotAllowedError()),
   sleep: () =>
     Effect.fail(
       new ReducerAsyncNotAllowedError(),
     ) as unknown as Effect.Effect<void>,
 })
 
-export const makeServerRandom = (
-  ctx: RandomCtx,
-): (typeof Random.Random)["Service"] => ({
+export const makeServerRandom = (ctx: RandomCtx): Random.Random => ({
   nextIntUnsafe: () =>
     Number(
       ctx.random.bigintInRange(
@@ -407,15 +464,39 @@ export const makeServerRandom = (
   nextDoubleUnsafe: () => ctx.random(),
 })
 
+/**
+ * Report an escaping defect to the host, without handling it.
+ *
+ * A die inside a handler is an invariant violation, not a failure the caller
+ * can act on, and the host only ever sees the thrown boundary error. An
+ * observer hook lets an embedder — a fault-injection harness, a metrics sink —
+ * see the cause itself. The tap re-raises the original cause, so the reducer
+ * still throws and its transaction still aborts.
+ */
+const withDefectObserver = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  onDefect: (cause: Cause.Cause<unknown>) => void,
+): Effect.Effect<A, E, R> =>
+  Effect.tapCause(effect, (cause) => {
+    // A typed failure is a handled outcome, never a defect: only a die reason
+    // is reported. `Cause.isDieReason` rather than `cause.defects` so an
+    // interrupt-plus-die cause is still seen.
+    if (cause.reasons.some(Cause.isDieReason)) onDefect(cause)
+    return Effect.void
+  })
+
 export const provideConstrainedServerSupport = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
-  mode: ConstrainedServerRuntimeMode = defaultServerRuntimeMode,
+  mode: ConstrainedServerRuntimeMode = serverRuntimeModeDefault,
+  onDefect?: ((cause: Cause.Cause<unknown>) => void) | undefined,
 ) => {
+  const observed =
+    onDefect === undefined ? effect : withDefectObserver(effect, onDefect)
   const provided = Match.value(mode).pipe(
     Match.when("dev-guarded", () =>
-      effect.pipe(withDevGuards, withServerPolyfills),
+      observed.pipe(withDevGuards, withServerPolyfills),
     ),
-    Match.when("runtime", () => withServerPolyfills(effect)),
+    Match.when("runtime", () => withServerPolyfills(observed)),
     Match.exhaustive,
   )
 
@@ -429,12 +510,15 @@ export const provideConstrainedServerSupport = <A, E, R>(
 export const provideConstrainedServerRuntime = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   ctx: TimedRuntimeCtx,
-  mode: ConstrainedServerRuntimeMode = defaultServerRuntimeMode,
+  mode: ConstrainedServerRuntimeMode = serverRuntimeModeDefault,
+  clock: Clock.Clock = makeServerClock(ctx),
+  onDefect?: ((cause: Cause.Cause<unknown>) => void) | undefined,
 ) =>
   provideConstrainedServerSupport(
     effect.pipe(
-      Effect.provideService(Clock.Clock, makeServerClock(ctx)),
+      Effect.provideService(Clock.Clock, clock),
       Effect.provideService(Random.Random, makeServerRandom(ctx)),
     ),
     mode,
+    onDefect,
   )

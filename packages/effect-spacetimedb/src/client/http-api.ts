@@ -41,6 +41,19 @@ type HttpApiMethod<Method extends ProjectableHttpMethod> =
 type DeclaredErrorSchema<Errors extends AnyErrorDefinition | undefined> =
   Errors extends AnyErrorDefinition ? Errors["errors"][number] : never
 
+/**
+ * Mirrors the internal `ToJsonCodec` that `HttpApiEndpoint.post`/`put`/`patch`
+ * apply to their payload and error schemas. Effect stopped exporting the old
+ * `HttpApiEndpoint.Json` wrapper once endpoint codecs moved onto
+ * `Schema.toCodecJson`, and the helper is not re-exported, so the projection
+ * keeps its own copy of the mapping it has to agree with.
+ */
+type JsonCodec<S> = [S] extends [never]
+  ? never
+  : [S] extends [Schema.Constraint]
+    ? Schema.toCodecJson<S>
+    : never
+
 type ProjectedEndpoint<
   Name extends string,
   Spec,
@@ -58,10 +71,10 @@ type ProjectedEndpoint<
         Path,
         never,
         never,
-        HttpApiEndpoint.Json<Request>,
+        JsonCodec<Request>,
         never,
-        HttpApiEndpoint.Json<Response>,
-        HttpApiEndpoint.Json<DeclaredErrorSchema<Errors>>
+        JsonCodec<Response>,
+        JsonCodec<DeclaredErrorSchema<Errors>>
       >
     : never
   : never
@@ -151,7 +164,7 @@ const endpointOptions = (spec: ProjectableTypedHttpHandlerSpec) => {
 const makeEndpoint = (
   name: string,
   spec: ProjectableTypedHttpHandlerSpec,
-): HttpApiEndpoint.AnyWithProps => {
+): HttpApiEndpoint.Constraint => {
   const path = spec.path as `/${string}`
 
   return Match.value(spec.method).pipe(
@@ -166,6 +179,17 @@ const makeEndpoint = (
     ),
     Match.exhaustive,
   )
+}
+
+const makeGroup = (
+  groupName: string,
+  endpoints: ReadonlyArray<HttpApiEndpoint.Constraint>,
+): HttpApiGroup.Constraint => {
+  const [first, ...rest] = endpoints
+
+  return first === undefined
+    ? HttpApiGroup.make(groupName)
+    : HttpApiGroup.make(groupName).add(first, ...rest)
 }
 
 /**
@@ -195,7 +219,7 @@ export const toHttpApi = <const Input extends ModuleSpecInput>(
   input: Input,
 ): ProjectedHttpApi<SpecOf<Input>> => {
   const moduleSpec = moduleSpecOf(input)
-  const byGroup = new Map<string, Array<HttpApiEndpoint.AnyWithProps>>()
+  const byGroup = new Map<string, Array<HttpApiEndpoint.Constraint>>()
   const httpGroups: Partial<Record<string, string>> = Object.hasOwn(
     moduleSpec,
     "httpGroups",
@@ -218,18 +242,20 @@ export const toHttpApi = <const Input extends ModuleSpecInput>(
     byGroup.set(groupName, endpoints)
   }
 
-  let api = HttpApi.make(moduleSpec.name) as HttpApi.AnyWithProps
+  const groups = [...byGroup.keys()]
+    .sort()
+    .map((groupName) => makeGroup(groupName, byGroup.get(groupName) ?? []))
 
-  for (const groupName of [...byGroup.keys()].sort()) {
-    let group = HttpApiGroup.make(groupName) as HttpApiGroup.AnyWithProps
-    for (const endpoint of byGroup.get(groupName) ?? []) {
-      group = group.add(endpoint)
-    }
-    api = api.add(group)
-  }
+  const [firstGroup, ...restGroups] = groups
+  const api =
+    firstGroup === undefined
+      ? HttpApi.make(moduleSpec.name)
+      : HttpApi.make(moduleSpec.name).add(firstGroup, ...restGroups)
 
-  // Object.entries erases the literal route and group names kept by the type.
-  return api as ProjectedHttpApi<SpecOf<Input>>
+  // Object.entries erases the literal route and group names kept by the type,
+  // and the builders above are driven by runtime values, so the projected shape
+  // is only recoverable from the module spec type.
+  return api as unknown as ProjectedHttpApi<SpecOf<Input>>
 }
 
 /**

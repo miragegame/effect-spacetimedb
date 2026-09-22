@@ -1,6 +1,5 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
-import * as Match from "effect/Match"
 import * as Schema from "effect/Schema"
 import * as SpacetimeDB from "spacetimedb"
 import type {
@@ -8,12 +7,16 @@ import type {
   FieldOptions as TableFieldOptions,
   FieldType as TableFieldType,
 } from "../field.ts"
+import {
+  readFieldOptionsAnnotation,
+  StdbFieldOptionsAnnotationId,
+  StdbFieldOptionsAnnotationVersion,
+} from "../field-options-annotation.ts"
 import { validateSatsTypeIdentifier } from "../sats-identifier-validation.ts"
 import {
   annotateSchema,
   annotationInEncodedShape,
   type SchemaAnnotationId,
-  StdbFieldOptionsAnnotationId,
   StdbTypeInfoAnnotationId,
 } from "../schema-annotations.ts"
 import type { IndexAlgorithm } from "../table-index.ts"
@@ -127,6 +130,7 @@ export const U16Max = 0xffff
 
 export const I32Min = -(2 ** 31)
 export const I32Max = 2 ** 31 - 1
+export const U32Max = 2 ** 32 - 1
 
 export const I64Min = -(1n << 63n)
 
@@ -488,14 +492,14 @@ export const makeValueCodec = <A, Encoded>(
   decodeUnknownSync: Schema.decodeUnknownSync(schema),
 })
 
-export const DefaultTableFieldOptions: AnyNormalizedFieldOptions = {
+export const TableFieldOptionsDefault: AnyNormalizedFieldOptions = {
   primaryKey: false,
   autoInc: false,
   unique: false,
   index: undefined,
   optional: false,
   hasDefault: false,
-  defaultValue: undefined,
+  valueDefault: undefined,
   name: undefined,
 }
 
@@ -507,7 +511,7 @@ export const fieldOptionsObject = (
   ...(options.unique ? { unique: true as const } : {}),
   ...(options.index !== undefined ? { index: options.index } : {}),
   ...(options.optional ? { optional: true as const } : {}),
-  ...(options.hasDefault ? { default: options.defaultValue } : {}),
+  ...(options.hasDefault ? { default: options.valueDefault } : {}),
   ...(options.name !== undefined ? { name: options.name } : {}),
 })
 
@@ -632,9 +636,6 @@ export const literalSupportsPrimaryKey = (
   return typeof first === "string" || typeof first === "boolean"
 }
 
-const hasUnitKind = (value: AnyValueType): boolean =>
-  typeInfo(value)?.kind === "unit"
-
 export const supportsPrimaryKey = (
   value: AnyValueType,
   seen = new WeakSet<object>(),
@@ -659,8 +660,10 @@ export const supportsPrimaryKey = (
   }
 
   if (info.kind === "sum") {
-    const variants = Object.values(info.variants ?? {})
-    return variants.length > 0 && variants.every(hasUnitKind)
+    // Sums key an index by their whole BSATN encoding: a plain enum uses the
+    // host's native tag index, and a payload-carrying sum falls back to the
+    // host's byte-key / AlgebraicValue index. Both are primary-key capable.
+    return true
   }
 
   return PrimaryKeyColumnKinds.has(info.kind)
@@ -752,25 +755,22 @@ export function namedValueType<Type extends AnyValueType>(
 export const tableFieldOptions = (
   value: AnyValueType,
 ): AnyNormalizedFieldOptions => {
-  const annotation =
-    annotationInEncodedShape<Partial<AnyNormalizedFieldOptions>>(
-      StdbFieldOptionsAnnotationId,
-      value.schema.ast,
-    ) ?? {}
-  const index = Match.value(annotation.index).pipe(
-    Match.when("btree", () => "btree" as const),
-    Match.when("hash", () => "hash" as const),
-    Match.when("direct", () => "direct" as const),
-    Match.when(undefined, () => undefined),
-    Match.exhaustive,
-  )
+  const annotation = readFieldOptionsAnnotation(value.schema.ast)
+  if (annotation === undefined) {
+    return TableFieldOptionsDefault
+  }
 
+  // Rebuilt member by member rather than spread, so the annotation's `version`
+  // can never leak into the normalized options.
   return {
-    ...DefaultTableFieldOptions,
-    ...annotation,
-    index,
-    unique: annotation.unique === true,
-    hasDefault: annotation.hasDefault === true,
+    primaryKey: annotation.primaryKey,
+    autoInc: annotation.autoInc,
+    unique: annotation.unique,
+    index: annotation.index,
+    optional: annotation.optional,
+    hasDefault: annotation.hasDefault,
+    valueDefault: annotation.valueDefault,
+    name: annotation.name,
   }
 }
 
@@ -831,13 +831,14 @@ export const applyFieldOptions = <
   }
 
   return annotateValueTypeSchema(type, StdbFieldOptionsAnnotationId, {
+    version: StdbFieldOptionsAnnotationVersion,
     primaryKey: options?.primaryKey === true,
     autoInc: options?.autoInc === true,
     unique: options?.unique === true,
     index: options?.index,
     optional: options?.optional === true,
     hasDefault,
-    defaultValue: options?.default,
+    valueDefault: options?.default,
     name: options?.name,
   }) as TableFieldType<Type, Options>
 }
@@ -947,14 +948,21 @@ export const preserveValueTypeExtensions = <Value extends AnyValueType>(
   return target as Value
 }
 
+// Effect schemas are callable, so `schema` is a function rather than a plain
+// object; both shapes are accepted because only the presence of an `ast` says
+// whether this is really a schema.
+const isSchemaLike = (value: unknown): value is { readonly ast: unknown } =>
+  (typeof value === "object" || typeof value === "function") &&
+  value !== null &&
+  "ast" in value &&
+  (value as { readonly ast?: unknown }).ast !== undefined
+
 export const isValueType = (value: unknown): value is AnyValueType =>
   (typeof value === "object" || typeof value === "function") &&
   value !== null &&
   StdbValueTypeId in value &&
   "schema" in value &&
-  typeof (value as { readonly schema?: unknown }).schema === "object" &&
-  (value as { readonly schema?: { readonly ast?: unknown } }).schema?.ast !==
-    undefined
+  isSchemaLike((value as { readonly schema?: unknown }).schema)
 
 export const annotateValueTypeSchema = <Value extends AnyValueType>(
   value: Value,

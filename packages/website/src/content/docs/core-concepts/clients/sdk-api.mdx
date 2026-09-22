@@ -48,6 +48,12 @@ effect-spacetimedb's client surface uses Effect services and
 typed errors. It does not replace the native generated WebSocket cache; it wraps
 it with scoped resources, projected callables, and subscription helpers.
 
+Every key in the projection — table, event-table, and view keys passed to
+`subscribe`, `streamTable`, `targets`, and the session's `db` — is the
+**contract key** you declared, which is also the camelCase accessor key
+`spacetime generate` emits. The wire name appears only inside SQL and
+subscription text. See [Codegen](/core-concepts/clients/codegen).
+
 ## Group-Scoped HTTP Clients
 
 The HTTP client keeps its flat `reducers`, `procedures`, and `httpHandlers`
@@ -133,9 +139,10 @@ The exported failure model is:
 
 | Type | Meaning |
 | --- | --- |
-| `CallFailure<E>` | Typed call error union: declared errors, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
-| `RawCallFailure<E>` | Raw call error union: `DomainCallError<E>`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
+| `CallFailure<E>` | Typed call error union: declared errors, `ConnectionLostError`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
+| `RawCallFailure<E>` | Raw call error union: `DomainCallError<E>`, `ConnectionLostError`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
 | `DomainCallError<E>` | Declared error preserved as a wrapper by `.raw`. |
+| `ConnectionLostError` | The session was invalidated before a terminal response arrived; the call's outcome is unknown. |
 | `RemoteRejectedError` | The remote side rejected the call without a decodable declared error. |
 | `TransportError` | The HTTP or WebSocket transport failed before a typed response arrived. |
 | `StdbDecodeError` | A response, row, event, or payload could not be decoded with the module contract. |

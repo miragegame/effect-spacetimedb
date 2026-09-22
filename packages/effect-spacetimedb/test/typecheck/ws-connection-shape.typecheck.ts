@@ -7,6 +7,7 @@ import {
   makeStaticRelationHandle,
   makeUnexpectedSubscriptionBuilder,
 } from "../helpers/ws-fixtures"
+import type { Assert, IsEqual } from "./helpers"
 
 void StdbTesting.ClientWs.make({
   module: FullModule,
@@ -21,11 +22,52 @@ const presenceRelation =
   makeStaticRelationHandle<
     StdbTesting.ClientWs.WsTableRow<typeof FullModule.tables.presenceEvent>
   >()
+const allUsersRelation =
+  makeStaticRelationHandle<
+    StdbTesting.ClientWs.WsTableRow<typeof FullModule.tables.user>
+  >()
+
+const NonePolicyModule = Stdb.StdbModule.make("none_policy_views", {
+  settings: { caseConversionPolicy: "none" },
+}).add(
+  Stdb.StdbGroup.make("Views").add(
+    Stdb.StdbFn.anonymousView("allUsers", {
+      returns: Stdb.array(FullModule.tables.user.row),
+    }),
+  ),
+).spec
+
+const validNonePolicyDb = {
+  allUsers: allUsersRelation,
+} satisfies StdbTesting.ClientWs.WsDbShape<typeof NonePolicyModule>
+
+void validNonePolicyDb
+
+// The query-builder root is keyed by contract key under either name policy,
+// matching the camelCase accessors the generated client emits.
+type _snakePolicyViewQueryRootKeys = Assert<
+  IsEqual<keyof StdbTesting.ClientViewQueryRoot<typeof FullModule>, "allUsers">
+>
+type _nonePolicyViewQueryRootKeys = Assert<
+  IsEqual<
+    keyof StdbTesting.ClientViewQueryRoot<typeof NonePolicyModule>,
+    "allUsers"
+  >
+>
+type _viewQueryRootRejectsWireName = Assert<
+  IsEqual<
+    "all_users" extends keyof StdbTesting.ClientViewQueryRoot<typeof FullModule>
+      ? true
+      : false,
+    false
+  >
+>
 
 const validConnection = {
   db: {
     user: userRelation,
     presenceEvent: presenceRelation,
+    allUsers: allUsersRelation,
   },
   subscriptionBuilder: () => makeUnexpectedSubscriptionBuilder(),
 } satisfies StdbTesting.ClientWs.WsConnectionLike<typeof FullModule, unknown>
@@ -40,12 +82,9 @@ void StdbTesting.ClientWs.make({
   connection: {
     db: {
       user: userRelation,
-      // @ts-expect-error public view relations are no longer part of the exact ws connection contract
-      allUsers: makeStaticRelationHandle<{
-        readonly id: string
-        readonly name: string
-      }>(),
       presenceEvent: presenceRelation,
+      // @ts-expect-error public view relation keys are exact
+      allUsersMissing: allUsersRelation,
     },
     subscriptionBuilder: () => makeUnexpectedSubscriptionBuilder(),
   },
@@ -61,6 +100,7 @@ void StdbTesting.ClientWs.make({
         readonly name: string
       }>(),
       presenceEvent: presenceRelation,
+      allUsers: allUsersRelation,
     },
     subscriptionBuilder: () => makeUnexpectedSubscriptionBuilder(),
   },

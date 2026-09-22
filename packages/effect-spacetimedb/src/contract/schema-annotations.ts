@@ -7,9 +7,8 @@ export const StdbTypeAnnotationId = Symbol.for("effect-spacetimedb/StdbType")
 export const StdbTypeInfoAnnotationId = Symbol.for(
   "effect-spacetimedb/StdbTypeInfo",
 )
-export const StdbFieldOptionsAnnotationId = Symbol.for(
-  "effect-spacetimedb/StdbFieldOptions",
-)
+// The field-options annotation keys, their payload schema and their version
+// boundary live in `./field-options-annotation.ts`.
 
 export const annotateSchema = <A, Encoded, Annotation>(
   schema: Schema.Codec<A, Encoded, never, never>,
@@ -27,7 +26,7 @@ export const annotateSchema = <A, Encoded, Annotation>(
   } as never)
 }
 
-const ownAnnotation = <Annotation>(
+export const ownAnnotation = <Annotation>(
   annotationId: SchemaAnnotationId,
   ast: AST.AST,
 ): Annotation | undefined =>

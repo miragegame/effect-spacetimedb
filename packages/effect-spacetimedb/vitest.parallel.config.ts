@@ -3,11 +3,12 @@ import {
   baseConfig,
   liveTestPatterns,
   nativePackageTestPatterns,
-} from "./vitest.shared"
+} from "./vitest.shared.ts"
 
 export default defineProject({
   ...baseConfig,
   test: {
+    globalSetup: ["./vitest.self-link.ts"],
     name: "parallel",
     hookTimeout: 10_000,
     testTimeout: 5_000,

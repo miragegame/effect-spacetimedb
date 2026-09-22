@@ -26,7 +26,7 @@ declare const REMOTE_MODULE: RemoteModule<
   GeneratedSchema,
   GeneratedReducers,
   GeneratedProcedures,
-  "2.6.1"
+  "2.10.1"
 >
 type ErrorContext = ErrorContextInterface<typeof REMOTE_MODULE>
 

@@ -36,3 +36,34 @@ Column-level `.unique()` also creates the backing index when one
 is not already implied by a primary key or explicit index. A default value cannot
 be combined with a unique constraint because SpacetimeDB would materialize the
 same default for more than one row.
+
+## Key-Capable Column Types
+
+A key column has to be something the host can order and compare: the integer
+widths, `bool`, `string`, `Stdb.bigint()`, `Stdb.identity()`,
+`Stdb.connectionId()`, `Stdb.timestamp()`, `Stdb.timeDuration()`,
+`Stdb.uuid()`, and any `Stdb.enum(...)` or `Stdb.sum(...)`. A sum keys on its
+whole encoded value, so a payload variant is a distinct key per payload:
+`{ tag: "Retrying", value: 7 }` and `{ tag: "Retrying", value: 9 }` are two
+rows under a sum primary key.
+
+```typescript twoslash
+import * as Stdb from "effect-spacetimedb"
+
+const Status = Stdb.sum({
+  Ready: Stdb.unit(),
+  Retrying: Stdb.u32(),
+})
+
+const progress = Stdb.table("progress", {
+  columns: {
+    status: Status.primaryKey(),
+    note: Stdb.string(),
+  },
+})
+```
+
+Arrays, structs, `Stdb.f32()`/`f64()`, and numeric `Stdb.literal(...)` (which
+lowers to `f64`) are rejected as primary keys at declaration time. `.autoInc()`
+stays narrower still: it applies only to the integer widths, so a sum, string,
+or identity primary key cannot be auto-incremented.

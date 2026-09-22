@@ -5,9 +5,10 @@ import * as AST from "effect/SchemaAST"
 import { typedFromEntries } from "../../utils.ts"
 
 import {
-  encodedAst,
   StdbFieldOptionsAnnotationId,
-} from "../schema-annotations.ts"
+  StdbFieldOptionsAnnotationVersion,
+} from "../field-options-annotation.ts"
+import { encodedAst } from "../schema-annotations.ts"
 import {
   arrayRestAst,
   literalValuesFromAst,
@@ -94,8 +95,8 @@ export const literal = <
 >(
   ...values: Values
 ): LiteralValueType<Values> => {
-  const firstKind = typeof values[0]
-  if (values.some((value) => typeof value !== firstKind)) {
+  const kindFirst = typeof values[0]
+  if (values.some((value) => typeof value !== kindFirst)) {
     throw new TypeError(
       "Stdb.literal(...) values must all have the same primitive kind",
     )
@@ -178,10 +179,18 @@ export const field = <
       "Nested SpaceTimeDB options are not representable; wrap the inner option in a struct or sum type",
     )
   }
+  // The whole payload is written, not just the three members a struct field
+  // uses, so every annotation under this key decodes through one schema.
   return annotateValueTypeSchema(value, StdbFieldOptionsAnnotationId, {
+    version: StdbFieldOptionsAnnotationVersion,
     primaryKey: false,
     autoInc: false,
+    unique: false,
+    index: undefined,
     optional: options?.optional === true,
+    hasDefault: false,
+    valueDefault: undefined,
+    name: undefined,
   }) as StructFieldType<Value, Options>
 }
 

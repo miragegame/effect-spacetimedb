@@ -19,7 +19,7 @@ const devOnlyExports = exportKeys(sourceExports).filter(
   (key) => !(key in builtExports),
 )
 
-const defaultTarget = (entry) => {
+const targetDefault = (entry) => {
   if (typeof entry === "string") {
     return entry
   }
@@ -34,7 +34,7 @@ const builtEntrypoints = Object.entries(builtExports)
     if (subpath === "./package.json") {
       return []
     }
-    const target = defaultTarget(entry)
+    const target = targetDefault(entry)
     if (target === undefined) {
       throw new Error(`Export ${subpath} is missing a default target.`)
     }

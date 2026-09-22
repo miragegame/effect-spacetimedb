@@ -27,3 +27,6 @@ const profile = Stdb.table("profile", {
 Defaults use the authored TypeScript value for the wrapped
 `Stdb.*` value type. The library rejects defaults on primary keys,
 auto-increment columns, unique columns, and unsupported native metadata shapes.
+
+A default is also what makes a column appendable to a table that already holds
+rows — see [Migrations](/core-concepts/databases/migrations).

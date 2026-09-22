@@ -813,7 +813,7 @@ describe("module validation diagnostics", (it) => {
   it.effect("reports duplicate declared error tags with errors paths", () =>
     Effect.gen(function* () {
       const SharedDeclaredOne = (() => {
-        class SharedDeclared extends Schema.TaggedErrorClass<SharedDeclared>()(
+        class SharedDeclared extends Schema.TaggedError<SharedDeclared>()(
           "SharedDeclared",
           {},
         ) {}
@@ -821,7 +821,7 @@ describe("module validation diagnostics", (it) => {
         return SharedDeclared
       })()
       const SharedDeclaredTwo = (() => {
-        class SharedDeclared extends Schema.TaggedErrorClass<SharedDeclared>()(
+        class SharedDeclared extends Schema.TaggedError<SharedDeclared>()(
           "SharedDeclared",
           {},
         ) {}
@@ -933,7 +933,7 @@ describe("module validation diagnostics", (it) => {
 
   it.effect("requires declared HTTP route errors to carry statuses", () =>
     Effect.gen(function* () {
-      class StatuslessRouteError extends Schema.TaggedErrorClass<StatuslessRouteError>()(
+      class StatuslessRouteError extends Schema.TaggedError<StatuslessRouteError>()(
         "StatuslessRouteError",
         {},
       ) {}
@@ -972,7 +972,7 @@ describe("module validation diagnostics", (it) => {
 
   it.effect("allows statusless declared errors outside typed HTTP routes", () =>
     Effect.gen(function* () {
-      class ReducerOnlyStatuslessError extends Schema.TaggedErrorClass<ReducerOnlyStatuslessError>()(
+      class ReducerOnlyStatuslessError extends Schema.TaggedError<ReducerOnlyStatuslessError>()(
         "ReducerOnlyStatuslessError",
         {},
       ) {}
@@ -995,7 +995,7 @@ describe("module validation diagnostics", (it) => {
 
   it.effect("accepts typed HTTP route errors with complete statuses", () =>
     Effect.gen(function* () {
-      class FullyStatusedError extends Schema.TaggedErrorClass<FullyStatusedError>()(
+      class FullyStatusedError extends Schema.TaggedError<FullyStatusedError>()(
         "FullyStatusedError",
         {},
         { httpApiStatus: 409 },
@@ -1019,12 +1019,12 @@ describe("module validation diagnostics", (it) => {
     "requires statuses for a shared definition reachable from HTTP",
     () =>
       Effect.gen(function* () {
-        class SharedStatusedError extends Schema.TaggedErrorClass<SharedStatusedError>()(
+        class SharedStatusedError extends Schema.TaggedError<SharedStatusedError>()(
           "SharedStatusedError",
           {},
           { httpApiStatus: 409 },
         ) {}
-        class SharedStatuslessError extends Schema.TaggedErrorClass<SharedStatuslessError>()(
+        class SharedStatuslessError extends Schema.TaggedError<SharedStatuslessError>()(
           "SharedStatuslessError",
           {},
         ) {}

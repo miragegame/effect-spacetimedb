@@ -145,34 +145,21 @@ type RangeInput<Mode extends IndexRangeMode, Value> = Mode extends "structural"
 type CompositeIndexRangeBounds<
   Tuple extends readonly unknown[],
   Mode extends IndexRangeMode,
-  AllowFullWidthRange extends boolean,
   Prefix extends readonly unknown[] = readonly [],
 > = Tuple extends readonly [infer Head, ...infer Tail]
   ? Tail extends readonly []
-    ? readonly [
-        ...Prefix,
-        (
-          | Head
-          | (AllowFullWidthRange extends true ? RangeInput<Mode, Head> : never)
-        ),
-      ]
+    ? readonly [...Prefix, Head | RangeInput<Mode, Head>]
     :
         | readonly [...Prefix, Head | RangeInput<Mode, Head>]
-        | CompositeIndexRangeBounds<
-            Tail,
-            Mode,
-            AllowFullWidthRange,
-            readonly [...Prefix, Head]
-          >
+        | CompositeIndexRangeBounds<Tail, Mode, readonly [...Prefix, Head]>
   : never
 
 type IndexRangeBounds<
   Tuple extends readonly unknown[],
   Mode extends IndexRangeMode,
-  AllowFullWidthRange extends boolean,
 > = Tuple extends readonly [infer Term]
   ? Term | RangeInput<Mode, Term>
-  : CompositeIndexRangeBounds<Tuple, Mode, AllowFullWidthRange>
+  : CompositeIndexRangeBounds<Tuple, Mode>
 
 type Expand<T> = {
   readonly [K in keyof T]: T[K]
@@ -182,7 +169,6 @@ type CompositeIndexRangeObject<
   Table extends AnyTableSpec,
   Columns extends readonly ColumnKey<Table>[],
   Mode extends IndexRangeMode,
-  AllowFullWidthRange extends boolean,
   Prefix extends Record<string, unknown> = {},
 > = Columns extends readonly [
   infer Head extends ColumnKey<Table>,
@@ -193,9 +179,7 @@ type CompositeIndexRangeObject<
         Prefix & {
           readonly [Key in Head]:
             | FieldValue<Table["columns"][Head]>
-            | (AllowFullWidthRange extends true
-                ? RangeInput<Mode, FieldValue<Table["columns"][Head]>>
-                : never)
+            | RangeInput<Mode, FieldValue<Table["columns"][Head]>>
         }
       >
     :
@@ -210,7 +194,6 @@ type CompositeIndexRangeObject<
             Table,
             Tail,
             Mode,
-            AllowFullWidthRange,
             Prefix & {
               readonly [Key in Head]: FieldValue<Table["columns"][Head]>
             }
@@ -222,19 +205,10 @@ export type IndexRange<
   Columns extends readonly ColumnKey<Table>[],
   Mode extends IndexRangeMode,
   IncludeObjectInputs extends boolean,
-  AllowFullWidthRange extends boolean = true,
 > = Columns extends readonly [ColumnKey<Table>]
-  ? IndexRangeBounds<IndexPointTuple<Table, Columns>, Mode, true>
+  ? IndexRangeBounds<IndexPointTuple<Table, Columns>, Mode>
   : IncludeObjectInputs extends true
     ?
-        | IndexRangeBounds<
-            IndexPointTuple<Table, Columns>,
-            Mode,
-            AllowFullWidthRange
-          >
-        | CompositeIndexRangeObject<Table, Columns, Mode, AllowFullWidthRange>
-    : IndexRangeBounds<
-        IndexPointTuple<Table, Columns>,
-        Mode,
-        AllowFullWidthRange
-      >
+        | IndexRangeBounds<IndexPointTuple<Table, Columns>, Mode>
+        | CompositeIndexRangeObject<Table, Columns, Mode>
+    : IndexRangeBounds<IndexPointTuple<Table, Columns>, Mode>

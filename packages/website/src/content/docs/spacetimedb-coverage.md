@@ -6,8 +6,8 @@ sidebar:
   order: 98
 ---
 
-This map tracks the latest SpacetimeDB Core Concepts taxonomy against these docs.
-Every upstream topic should have exactly one row.
+This map tracks the SpacetimeDB Core Concepts taxonomy against these docs, as of
+SpacetimeDB 2.10.1. Every upstream topic has exactly one row.
 
 | Upstream Core Concept topic | Upstream link | Our status | Our page / note |
 | --- | --- | --- | --- |
@@ -19,6 +19,7 @@ Every upstream topic should have exactly one row.
 | Databases / Cheat Sheet | [SpacetimeDB -> Cheat Sheet](https://spacetimedb.com/docs/databases/cheat-sheet) | mirrored | Covered by [Getting Started](/getting-started) and [Reference](/reference); no separate Effect delta. |
 | Databases / Migrations / Automatic Migrations | [SpacetimeDB -> Automatic Migrations](https://spacetimedb.com/docs/databases/automatic-migrations) | mirrored | [Migrations](/core-concepts/databases/migrations) |
 | Databases / Migrations / Incremental Migrations | [SpacetimeDB -> Incremental Migrations](https://spacetimedb.com/docs/databases/incremental-migrations) | mirrored | [Migrations](/core-concepts/databases/migrations) |
+| Databases / Submodules | [SpacetimeDB -> Submodules](https://spacetimedb.com/docs/submodules) | not covered | Upstream 2.8.0 lets a TypeScript module mount another module under a namespace (`schema({ tbl, lib })`, `ctx.db.<ns>`, `ctx.as.<ns>`). The contract DSL does not expose it yet; the runtime tolerates the SDK's always-present namespaces. |
 | Functions | [SpacetimeDB -> Functions](https://spacetimedb.com/docs/functions) | mirrored | Section root represented by the Functions sidebar group. |
 | Functions / Reducers | [SpacetimeDB -> Reducers](https://spacetimedb.com/docs/functions/reducers) | mirrored | [Reducers](/core-concepts/functions/reducers) |
 | Functions / Reducers / Reducer Context | [SpacetimeDB -> Reducer Context](https://spacetimedb.com/docs/functions/reducers/reducer-context) | mirrored | [Reducer Context](/core-concepts/functions/reducer-context) |
@@ -26,7 +27,7 @@ Every upstream topic should have exactly one row.
 | Functions / Reducers / Error Handling | [SpacetimeDB -> Error Handling](https://spacetimedb.com/docs/functions/reducers/error-handling) | mirrored | [Error Handling](/core-concepts/functions/error-handling) |
 | Functions / Procedures | [SpacetimeDB -> Procedures](https://spacetimedb.com/docs/functions/procedures) | mirrored | [Procedures](/core-concepts/functions/procedures) |
 | Functions / Views | [SpacetimeDB -> Views](https://spacetimedb.com/docs/functions/views) | mirrored | [Views](/core-concepts/functions/views) |
-| Functions / HTTP Handlers | [SpacetimeDB -> Functions](https://spacetimedb.com/docs/functions) | mirrored | [HTTP Handlers](/core-concepts/functions/http-handlers); a dedicated upstream HTTP handlers page is not published yet. |
+| Functions / HTTP Handlers | [SpacetimeDB -> HTTP Handlers](https://spacetimedb.com/docs/functions/http-handlers) | mirrored | [HTTP Handlers](/core-concepts/functions/http-handlers) |
 | Tables | [SpacetimeDB -> Tables](https://spacetimedb.com/docs/tables) | mirrored | Section root represented by the Tables sidebar group. |
 | Tables / Column Types | [SpacetimeDB -> Column Types](https://spacetimedb.com/docs/tables/column-types) | mirrored | [Column Types](/core-concepts/tables/column-types) |
 | Tables / File Storage | [SpacetimeDB -> File Storage](https://spacetimedb.com/docs/tables/file-storage) | mirrored | [File Storage](/core-concepts/tables/file-storage) |
@@ -49,7 +50,7 @@ Every upstream topic should have exactly one row.
 | Authentication / SpacetimeAuth / Steam | [SpacetimeDB -> Steam](https://spacetimedb.com/docs/core-concepts/authentication/spacetimeauth/steam) | not-supported | No Effect-specific API. |
 | Authentication / Auth0 | [SpacetimeDB -> Auth0](https://spacetimedb.com/docs/core-concepts/authentication/Auth0) | not-supported | No Effect-specific API. |
 | Authentication / Clerk | [SpacetimeDB -> Clerk](https://spacetimedb.com/docs/core-concepts/authentication/Clerk) | not-supported | No Effect-specific API. |
-| Authentication / BetterAuth | [SpacetimeDB -> Authentication](https://spacetimedb.com/docs/core-concepts/authentication) | not-supported | No dedicated upstream BetterAuth page is present in the live sitemap; no Effect-specific API. |
+| Authentication / BetterAuth | [SpacetimeDB -> Better Auth](https://spacetimedb.com/docs/core-concepts/authentication/BetterAuth) | not-supported | No Effect-specific API. |
 | Authentication / Usage | [SpacetimeDB -> Usage](https://spacetimedb.com/docs/core-concepts/authentication/usage) | not-supported | No Effect-specific API. |
 | Clients | [SpacetimeDB -> Clients](https://spacetimedb.com/docs/clients) | mirrored | Section root represented by the Clients sidebar group. |
 | Clients / Codegen | [SpacetimeDB -> Codegen](https://spacetimedb.com/docs/clients/codegen) | mirrored | [Codegen](/core-concepts/clients/codegen) |

@@ -1,17 +1,24 @@
 import * as Cause from "effect/Cause"
+import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
+import * as Scheduler from "effect/Scheduler"
 import * as EffectVitest from "@effect/vitest"
 import {
   ReducerAsyncNotAllowedError,
   RuntimeLayerAsyncError,
   type SyncRunner,
+  fromLayer,
   fromManagedRuntime,
 } from "effect-spacetimedb/server"
 import { toReducerThrow } from "../../src/server/callable-runtime.ts"
+import {
+  makeUntimedServerClock,
+  provideConstrainedServerSupport,
+} from "../../src/server/runtime-layer.ts"
 
 const { describe, expect, it } = EffectVitest
 
@@ -77,5 +84,48 @@ describe("managed synchronous runner robustness", () => {
       expect(Cause.squash(exit.cause)).toBe(defect)
     }
     expect(() => runSync(runner, Effect.succeed(1))).toThrow(defect)
+  })
+
+  it("prevents cooperative scheduler yields in large nested transactions", () => {
+    const runner = fromLayer(Layer.empty)
+    // The dev guards make wall-clock reads throw, and Effect stamps span start
+    // times from the ambient clock, so a guarded scope needs the same
+    // timestamp-less clock a real handler is given.
+    const guarded = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      provideConstrainedServerSupport(
+        Effect.provideService(effect, Clock.Clock, makeUntimedServerClock()),
+        "dev-guarded",
+      )
+    const namedWork = Effect.fn("namedSynchronousWork")(function* () {
+      expect(yield* Scheduler.PreventSchedulerYield).toBe(true)
+      expect(yield* Scheduler.MaxOpsBeforeYield).toBe(Number.MAX_SAFE_INTEGER)
+      yield* Effect.forEach(
+        Array.from({ length: 300 }),
+        () =>
+          Effect.try({
+            try: () => undefined,
+            catch: () => undefined,
+          }),
+        { discard: true },
+      )
+      expect(yield* Scheduler.PreventSchedulerYield).toBe(true)
+      expect(yield* Scheduler.MaxOpsBeforeYield).toBe(Number.MAX_SAFE_INTEGER)
+    })
+    const transaction = Effect.gen(function* () {
+      expect(yield* Scheduler.PreventSchedulerYield).toBe(true)
+      expect(yield* Scheduler.MaxOpsBeforeYield).toBe(Number.MAX_SAFE_INTEGER)
+      yield* Effect.forEach(Array.from({ length: 40 }), namedWork, {
+        discard: true,
+      })
+    })
+    const nested = Effect.suspend(() =>
+      Effect.succeed(runner.runSyncExit(guarded(transaction))),
+    )
+    const exit = runner.runSyncExit(guarded(nested))
+
+    expect(Exit.isSuccess(exit)).toBe(true)
+    if (Exit.isSuccess(exit)) {
+      expect(exit.value).toEqual(Exit.void)
+    }
   })
 })

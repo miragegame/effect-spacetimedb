@@ -1,13 +1,11 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Schema from "effect/Schema"
-import * as FastCheck from "effect/testing/FastCheck"
+import * as FastCheck from "fast-check"
 import * as Stdb from "effect-spacetimedb"
 
 const { describe, expect, it } = EffectVitest
 
-const propertyOptions = {
-  fastCheck: { numRuns: 300, seed: 0x51dbda7 },
-} as const
+const propertyParameters = { numRuns: 300, seed: 0x51dbda7 }
 
 const emptyWireNames: Stdb.AnyModuleSpec["wireNames"] = {
   tables: {},
@@ -128,30 +126,30 @@ const validEndpointGroup = (options: {
 }
 
 describe("module validation properties", () => {
-  it.prop(
-    "generated valid modules produce no diagnostics",
-    [validInput],
-    ([input]) => {
-      const tables = input.tableNames.map(validTable)
-      const reducerNames = input.endpointNames.filter((name) =>
-        name.endsWith("Reducer"),
-      )
-      const procedureNames = input.endpointNames.filter((name) =>
-        name.endsWith("Procedure"),
-      )
-      const spec = Stdb.StdbModule.make("validGenerated", {})
-        .addTables(...tables)
-        .add(
-          validEndpointGroup({
-            reducers: reducerNames,
-            procedures: procedureNames,
-          }),
-        ).spec
+  it("generated valid modules produce no diagnostics", () => {
+    FastCheck.assert(
+      FastCheck.property(validInput, (input) => {
+        const tables = input.tableNames.map(validTable)
+        const reducerNames = input.endpointNames.filter((name) =>
+          name.endsWith("Reducer"),
+        )
+        const procedureNames = input.endpointNames.filter((name) =>
+          name.endsWith("Procedure"),
+        )
+        const spec = Stdb.StdbModule.make("validGenerated", {})
+          .addTables(...tables)
+          .add(
+            validEndpointGroup({
+              reducers: reducerNames,
+              procedures: procedureNames,
+            }),
+          ).spec
 
-      expect(Stdb.validate(spec)).toEqual([])
-    },
-    propertyOptions,
-  )
+        expect(Stdb.validate(spec)).toEqual([])
+      }),
+      propertyParameters,
+    )
+  })
 
   it("reports exactly DuplicateRelationName for duplicate table names", () => {
     const diagnostics = Stdb.validate(

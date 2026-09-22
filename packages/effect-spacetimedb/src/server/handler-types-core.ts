@@ -1,3 +1,5 @@
+import type * as Cause from "effect/Cause"
+
 import type * as Effect from "effect/Effect"
 
 import type * as Schema from "effect/Schema"
@@ -342,6 +344,13 @@ export type HandlerWithoutForbiddenRequirements<
 
 export type MakeOptions<Module extends AnyModuleSpec, RuntimeR = never> = {
   readonly module: Module
+  /**
+   * Called synchronously, before the host boundary rethrows, with the cause of
+   * any handler that died. Typed failures never reach it. The cause is
+   * observed and re-raised, never consumed: the handler still throws and its
+   * transaction still aborts.
+   */
+  readonly onDefect?: ((cause: Cause.Cause<unknown>) => void) | undefined
   readonly runtime?: SyncRunner<RuntimeR> | SyncRunnerLike<RuntimeR>
   readonly runtimeMode?: ConstrainedServerRuntimeMode
 }

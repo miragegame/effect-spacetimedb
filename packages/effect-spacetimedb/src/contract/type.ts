@@ -91,6 +91,10 @@ export {
   StdbTypeNotNameableError,
 } from "./type/core.ts"
 export {
+  type FieldOptionsAnnotationOrigin,
+  StdbFieldOptionsVersionError,
+} from "./field-options-annotation.ts"
+export {
   ReservedSatsTypeIdentifierPattern,
   SatsTypeIdentifierPattern,
   StdbTypeIdentifierError,

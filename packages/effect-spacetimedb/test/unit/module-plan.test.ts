@@ -33,6 +33,7 @@ describe("module plan", (it) => {
         ])
         expect(Object.keys(plan.publicTables)).toEqual(["user"])
         expect(Object.keys(plan.publicEventTables)).toEqual(["presenceEvent"])
+        expect(Object.keys(plan.publicViews)).toEqual(["allUsers"])
         expect(Object.keys(plan.publicReducers)).toEqual([
           "userRequire",
           "userUpsert",
@@ -75,6 +76,11 @@ describe("module plan", (it) => {
           kind: "eventTable",
           key: "presenceEvent",
           name: "presenceEvent",
+        })
+        expect(plan.targets.views.allUsers).toMatchObject({
+          kind: "view",
+          key: "allUsers",
+          name: "all_users",
         })
         expect(plan.targets.tables.user.where).toBeTypeOf("function")
         expect(plan.targets.eventTables.presenceEvent.where).toBeTypeOf(

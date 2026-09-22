@@ -47,6 +47,16 @@ export class TransportError extends Data.TaggedError("TransportError")<{
   static is = hasErrorTypeId<TransportError>(TransportErrorTypeId)
 }
 
+const ConnectionLostErrorTypeId = errorTypeId("ConnectionLostError")
+export class ConnectionLostError extends Data.TaggedError(
+  "ConnectionLostError",
+)<{
+  readonly raw: string
+}> {
+  readonly [ConnectionLostErrorTypeId] = ConnectionLostErrorTypeId
+  static is = hasErrorTypeId<ConnectionLostError>(ConnectionLostErrorTypeId)
+}
+
 const WsRpcInvokeErrorTypeId = errorTypeId("WsRpcInvokeError")
 export class WsRpcInvokeError extends Data.TaggedError("WsRpcInvokeError")<{
   readonly cause: unknown
@@ -57,12 +67,14 @@ export class WsRpcInvokeError extends Data.TaggedError("WsRpcInvokeError")<{
 
 export type CallFailure<E> =
   | E
+  | ConnectionLostError
   | RemoteRejectedError
   | TransportError
   | StdbDecodeError
 
 export type RawCallFailure<E> =
   | DomainCallError<E>
+  | ConnectionLostError
   | RemoteRejectedError
   | TransportError
   | StdbDecodeError
@@ -339,11 +351,13 @@ export const remoteRejectedFromRaw = (
 }
 
 export const classifyRawCallFailure = <E>(cause: unknown): CallFailure<E> =>
-  WsRpcInvokeError.is(cause)
-    ? classifyRawCallFailure(cause.cause)
-    : RemoteRejectedBody.is(cause) || typeof cause === "string"
-      ? (remoteRejectedFromRaw(
-          RemoteRejectedBody.is(cause) ? cause.raw : cause,
-          RemoteRejectedBody.is(cause) ? cause.status : undefined,
-        ) as CallFailure<E>)
-      : (new TransportError({ cause }) as CallFailure<E>)
+  ConnectionLostError.is(cause)
+    ? (cause as CallFailure<E>)
+    : WsRpcInvokeError.is(cause)
+      ? classifyRawCallFailure(cause.cause)
+      : RemoteRejectedBody.is(cause) || typeof cause === "string"
+        ? (remoteRejectedFromRaw(
+            RemoteRejectedBody.is(cause) ? cause.raw : cause,
+            RemoteRejectedBody.is(cause) ? cause.status : undefined,
+          ) as CallFailure<E>)
+        : (new TransportError({ cause }) as CallFailure<E>)

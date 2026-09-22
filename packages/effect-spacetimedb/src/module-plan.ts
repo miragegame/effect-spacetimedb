@@ -14,11 +14,13 @@ import {
   type PublicPersistentTables,
   type PublicProcedures,
   type PublicReducers,
+  type PublicViews,
   projectHttpHandlers,
   projectPublicEventTables,
   projectPublicPersistentTables,
   projectPublicProcedures,
   projectPublicReducers,
+  projectPublicViews,
   resolveScheduleBindings,
   type ScheduleBinding,
 } from "./module-projection.ts"
@@ -48,6 +50,7 @@ export type ModulePlan<Module extends AnyModuleSpec = AnyModuleSpec> = {
   readonly scheduleBindings: ReadonlyArray<ScheduleBinding>
   readonly publicTables: PublicPersistentTables<Module>
   readonly publicEventTables: PublicEventTables<Module>
+  readonly publicViews: PublicViews<Module>
   readonly publicReducers: PublicReducers<Module>
   readonly publicProcedures: PublicProcedures<Module>
   readonly projectedHttpHandlers: HttpHandlers<Module>
@@ -61,6 +64,7 @@ export const makeModulePlan = <Module extends AnyModuleSpec>(
 
   const publicTables = projectPublicPersistentTables(module)
   const publicEventTables = projectPublicEventTables(module)
+  const publicViews = projectPublicViews(module)
   const reducerCallables: Array<readonly [string, unknown]> = []
   const procedureCallables: Array<readonly [string, unknown]> = []
   const httpHandlerCallables: Array<readonly [string, unknown]> = []
@@ -109,12 +113,15 @@ export const makeModulePlan = <Module extends AnyModuleSpec>(
     scheduleBindings: resolveScheduleBindings(module),
     publicTables,
     publicEventTables,
+    publicViews,
     publicReducers: projectPublicReducers(module),
     publicProcedures: projectPublicProcedures(module),
     projectedHttpHandlers: projectHttpHandlers(module),
     targets: makeTargetsFromModule({
+      module,
       publicTables,
       publicEventTables,
+      publicViews,
     }),
   }
 }

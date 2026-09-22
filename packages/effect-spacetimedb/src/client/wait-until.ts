@@ -13,7 +13,7 @@ export class WaitUntilTimeoutError extends Data.TaggedError(
 )<{
   readonly table: string
   readonly timeoutMillis: number
-  readonly lastSnapshotSize: number
+  readonly snapshotSizeLast: number
 }> {}
 
 export type WaitUntilOptions = {

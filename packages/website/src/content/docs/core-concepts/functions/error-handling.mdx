@@ -133,6 +133,12 @@ const rotateToken = Effect.gen(function* () {
 Use `.raw(...)` only when you need remote rejection metadata in addition to the
 decoded declared error.
 
+A failing reducer aborts its transaction and rejects the caller's call with the
+declared error's payload intact. That rejection is the only place the payload
+appears: the host does not copy it into the module's server log, so
+`spacetime logs` is not a channel for observing which declared error aborted a
+transaction. Log deliberately from the handler when an operator needs to see it.
+
 Subscription and stream APIs report subscription, transport, invalidation, and
 row-decode failures. They do not carry declared domain errors because declared
 errors are emitted by reducer, procedure, and typed HTTP route calls.

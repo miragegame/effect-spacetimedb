@@ -285,13 +285,13 @@ class NodeSmokeRoundTripMismatch extends Data.TaggedError(
   }
 }
 
-const requiredSpacetimeVersion = "2.6.1"
+const requiredSpacetimeVersion = "2.10.1"
 const spacetimeVersionRequirement =
   `spacetimedb tool version ${requiredSpacetimeVersion}` as const
 
 const program = Effect.gen(function* () {
   const path = yield* Path.Path
-  const packageRoot = yield* Config.string(
+  const packageRoot = yield* Config.String(
     "EFFECT_SPACETIMEDB_PACKAGE_ROOT",
   ).pipe(Effect.orElseSucceed(() => process.cwd()))
   const runtime = yield* makeDevServer({

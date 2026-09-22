@@ -14,6 +14,7 @@ import type {
   IsUniqueIndexColumns,
   TableRow,
 } from "../table-index-typing.ts"
+import type { ProcedureHttpRequestOptions } from "./services.ts"
 
 export type { TableRow } from "../table-index-typing.ts"
 
@@ -54,10 +55,10 @@ type RangeAccessorFromColumns<
   Columns extends readonly ColumnKey<Table>[],
 > = {
   readonly filter: (
-    range: IndexRange<Table, Columns, "native", false, false>,
+    range: IndexRange<Table, Columns, "native", false>,
   ) => Iterable<TableRow<Table>>
   readonly delete: (
-    range: IndexRange<Table, Columns, "native", false, false>,
+    range: IndexRange<Table, Columns, "native", false>,
   ) => number
 }
 
@@ -156,6 +157,14 @@ export type ServerRandom = {
   bigintInRange(min: bigint, max: bigint): bigint
 }
 
+/**
+ * Internal testing seam for procedure contexts. Native contexts omit it, so
+ * production procedures retain the guarded host wall clock.
+ */
+export const ProcedureClockNow = Symbol.for(
+  "effect-spacetimedb/ProcedureClockNow",
+)
+
 type BaseCallableCtx = {
   readonly sender: ServerSender
   readonly databaseIdentity: ServerDatabaseIdentity
@@ -176,8 +185,9 @@ export type BaseReducerCtx<Module extends AnyModuleSpec> = BaseCallableCtx & {
 type NativeProcedureHttp = {
   readonly fetch: (
     url: string,
-    init?: unknown,
+    init?: ProcedureHttpRequestOptions,
   ) => {
+    readonly status: number
     readonly text: () => string
     readonly json: () => unknown
     readonly bytes: () => Uint8Array
@@ -185,6 +195,7 @@ type NativeProcedureHttp = {
 }
 
 export type ProcedureCtxLike<Module extends AnyModuleSpec> = BaseCallableCtx & {
+  readonly [ProcedureClockNow]?: (() => number) | undefined
   readonly http: NativeProcedureHttp
   readonly withTx: <A>(body: (ctx: BaseReducerCtx<Module>) => A) => A
 }

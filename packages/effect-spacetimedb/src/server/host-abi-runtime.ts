@@ -39,8 +39,28 @@ export const senderErrorMessage = (cause: unknown): string | undefined =>
     ? cause.message
     : undefined
 
-export const identityKey = (value: unknown): string | undefined =>
-  Result.getOrUndefined(normalizeIdentity(value))
+export const identityKey = (value: unknown): string | undefined => {
+  const normalized = normalizeIdentity(value)
+  if (Result.isSuccess(normalized)) {
+    return normalized.success
+  }
+
+  // The compiler bundle contains distinct public and server-runtime Identity
+  // constructors. Reducer contexts therefore fail a nominal instanceof check
+  // even though both native values carry the same U256 host representation.
+  const hostIdentity =
+    typeof value === "object" &&
+    value !== null &&
+    Object.hasOwn(value, "__identity__") &&
+    typeof (value as { readonly __identity__?: unknown }).__identity__ ===
+      "bigint"
+      ? (value as { readonly __identity__: bigint }).__identity__
+      : undefined
+
+  return hostIdentity === undefined
+    ? undefined
+    : Result.getOrUndefined(normalizeIdentity(hostIdentity))
+}
 
 export const isHostRecord = (
   value: unknown,

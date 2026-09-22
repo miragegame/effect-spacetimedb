@@ -167,22 +167,13 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
     throw new StdbValidationError({ diagnostics: typeNameDiagnostics })
   }
 
-  const scheduledTargets = new Map<string, ModuleExport>()
-
-  const materializedTables = materializeTables({
-    module,
-    scheduleBindings: server.scheduleBindings,
-    resolveScheduledTarget: (targetKey) => {
-      const target = scheduledTargets.get(targetKey)
-      if (target == null) {
-        throw new Error(`Scheduled target ${targetKey} was not registered`)
-      }
-      return target
-    },
-  })
+  const materializedTables = materializeTables({ module })
 
   const scheduledRowTypeOverrides = new Map<string, unknown>()
   const scheduledRowValueTypes = new Map<string, Type.AnyValueType>()
+  // Each scheduled target carries the native table handle that `schema()`
+  // registers, which is what upstream's `onSchedule` option resolves against.
+  const scheduledTargetTables = new Map<string, unknown>()
   const scheduledTargetBindings = new Map<
     string,
     {
@@ -190,11 +181,10 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
     }
   >()
   for (const binding of server.scheduleBindings) {
-    const rowType = (
-      materializedTables[binding.tableKey] as {
-        readonly rowType?: unknown
-      }
-    ).rowType
+    const materializedTable = materializedTables[binding.tableKey] as
+      | { readonly rowType?: unknown }
+      | undefined
+    const rowType = materializedTable?.rowType
 
     if (rowType == null) {
       throw new Error(
@@ -203,6 +193,7 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
     }
 
     scheduledRowTypeOverrides.set(binding.targetKey, { data: rowType })
+    scheduledTargetTables.set(binding.targetKey, materializedTable)
     const table = module.tables[binding.tableKey]
     if (table != null) {
       scheduledRowValueTypes.set(binding.targetKey, table.row)
@@ -400,10 +391,10 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
             throw asCompilerSenderError(cause) ?? cause
           }
         },
+        scheduledTargetTables.get(key),
       )
 
       setCompiledExport(callableExportName(key), reducerExport)
-      scheduledTargets.set(key, reducerExport)
     }
   }
 
@@ -443,10 +434,10 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
             () => encodeOrThrow(returnType, value),
           )
         },
+        scheduledTargetTables.get(key),
       )
 
       setCompiledExport(callableExportName(key), compiledProcedure)
-      scheduledTargets.set(key, compiledProcedure)
     }
   }
 

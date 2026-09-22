@@ -6,7 +6,7 @@ sidebar:
   order: 4
 ---
 
-<a class="upstream-doc" href="https://spacetimedb.com/docs/functions" target="_blank" rel="noopener noreferrer">SpacetimeDB: HTTP Handlers ↗</a>
+<a class="upstream-doc" href="https://spacetimedb.com/docs/functions/http-handlers" target="_blank" rel="noopener noreferrer">SpacetimeDB: HTTP Handlers ↗</a>
 
 HTTP routes are server-to-server routes, not caller-authenticated reducers. Their
 context exposes the module database identity, timestamp, HTTP request data,
@@ -69,6 +69,10 @@ const WebhooksLive = Stdb.StdbBuilder.group(Module, "Webhooks", {
 Use raw routes for GET or HEAD, query strings, custom auth headers, webhooks, and
 non-JSON bodies. Keep external side effects outside HTTP transaction bodies, just
 as you would for procedures.
+
+These are inbound routes the module serves. They are unrelated to the
+`[module-http]` server setting, which governs requests a module *makes* — see
+[Procedures](/core-concepts/functions/procedures).
 
 effect-spacetimedb uses `StdbHttpGroup` plus
 `StdbBuilder.group(...)` instead of exporting handler functions directly. Typed

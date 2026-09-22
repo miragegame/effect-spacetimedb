@@ -13,7 +13,7 @@ import * as Server from "../server/bind.ts"
 
 import type { HandlerInputDefinitions } from "../server/handler-types.ts"
 
-import { defaultServerRuntimeMode } from "../server/runtime-layer.ts"
+import { serverRuntimeModeDefault } from "../server/runtime-layer.ts"
 
 import {
   group,
@@ -183,7 +183,7 @@ function handlersOf(
   return Object.freeze(flatHandlerDefinitions(unsealed.definitions))
 }
 
-const defaultLifecycleSpecs = {
+const lifecycleSpecsDefault = {
   init: defineLifecycle("init"),
   clientConnected: defineLifecycle("clientConnected"),
   clientDisconnected: defineLifecycle("clientDisconnected"),
@@ -199,13 +199,13 @@ const collectLifecycleSpecs = (
   const lifecycleSpecsByName: Readonly<
     Record<string, LifecycleSpec | undefined>
   > = {
-    init: existingLifecycle.init ?? defaultLifecycleSpecs.init,
+    init: existingLifecycle.init ?? lifecycleSpecsDefault.init,
     clientConnected:
       existingLifecycle.clientConnected ??
-      defaultLifecycleSpecs.clientConnected,
+      lifecycleSpecsDefault.clientConnected,
     clientDisconnected:
       existingLifecycle.clientDisconnected ??
-      defaultLifecycleSpecs.clientDisconnected,
+      lifecycleSpecsDefault.clientDisconnected,
   }
 
   const addImplementation = (name: string, spec: LifecycleSpec): void => {
@@ -357,15 +357,18 @@ function planModule<
     options?.runtime === undefined
       ? undefined
       : normalizeRuntime(options.runtime)
-  const runtimeMode = options?.runtimeMode ?? defaultServerRuntimeMode
+  const runtimeMode = options?.runtimeMode ?? serverRuntimeModeDefault
+  const onDefect = options?.onDefect
   const server =
     runtime === undefined
       ? Server.make({
           module: spec,
+          onDefect,
           runtimeMode,
         })
       : Server.make({
           module: spec,
+          onDefect,
           runtime,
           runtimeMode,
         })

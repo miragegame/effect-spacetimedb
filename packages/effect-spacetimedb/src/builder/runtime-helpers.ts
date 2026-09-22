@@ -569,7 +569,7 @@ const assembleSpec = <
     reducerGroups: sortedRecord(reducerGroupEntries),
     procedureGroups: sortedRecord(procedureGroupEntries),
     // Cast seam: runtime assembly is validated above; ModuleSpecFor reads the
-    // groups' eager section-record phantoms. Platform structure snapshots pin
+    // groups' eager section-record phantoms. The structure typecheck fixtures pin
     // this boundary against a wrong derived type.
   }) as unknown as ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs>
 }
@@ -606,11 +606,38 @@ export const makeModule = <
     makeAccessors<
       ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs>
     >()
+  /*
+   * `spec` is a getter, and every builder method returns a *new* module over a
+   * new state object, so `state` is immutable for the lifetime of this module
+   * and `assembleSpec` is a pure function of it. Without this memo the whole
+   * spec — every table, group, endpoint and the uniqueness validation over them
+   * — was re-assembled on each property read, which is O(module size) per
+   * access. That is invisible at build time (one read) and brutal at call time:
+   * routing code reads `module.spec.procedureGroups` once per request, and a
+   * platform-sized module measured ~32ms per read, so a single in-process
+   * request paid hundreds of milliseconds in nothing but re-assembly.
+   *
+   * Assembly failures are deliberately not cached: `assembleSpec` throws on a
+   * duplicate export or relation name, and a caller that catches and re-reads
+   * must observe the same error rather than a silently-empty memo.
+   */
+  let assembledSpec:
+    | ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs>
+    | undefined
   const module = {
     ...state,
     ...accessors,
     get spec() {
-      return assembleSpec<Id, Tables, Groups, Lifecycle, HttpGroupPairs>(state)
+      if (assembledSpec === undefined) {
+        assembledSpec = assembleSpec<
+          Id,
+          Tables,
+          Groups,
+          Lifecycle,
+          HttpGroupPairs
+        >(state)
+      }
+      return assembledSpec
     },
     addTables: (...tables: ReadonlyArray<AnyTableSpec>) => {
       const added = tableRecordFromList(tables)

@@ -85,13 +85,13 @@ export const makeDeterministicNativeSpanFactory = (): NativeSpanFactory => {
 const makeDeterministicNativeTracer = (): Tracer.Tracer =>
   Tracer.make({ span: makeDeterministicNativeSpanFactory() })
 
-const defaultEffectTracer = Context.get(Context.empty(), Tracer.Tracer)
+const effectTracerDefault = Context.get(Context.empty(), Tracer.Tracer)
 
 export const withDeterministicDefaultTracer = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> =>
   EffectRuntime.flatMap(EffectRuntime.tracer, (tracer) =>
-    tracer === defaultEffectTracer
+    tracer === effectTracerDefault
       ? EffectRuntime.withTracer(effect, makeDeterministicNativeTracer())
       : effect,
   )

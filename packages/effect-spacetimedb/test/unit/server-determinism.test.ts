@@ -4,7 +4,7 @@ import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import * as FastCheck from "effect/testing/FastCheck"
+import * as FastCheck from "fast-check"
 import {
   type ConstrainedServerRuntimeMode,
   provideConstrainedServerSupport,
@@ -18,12 +18,11 @@ import {
   makeServerRandom,
   makeUntimedServerClock,
 } from "../../src/server/runtime-layer.ts"
+import { effectProperty } from "../helpers/effect-property"
 
 const { describe, expect, it } = EffectVitest
 
-const propertyOptions = {
-  fastCheck: { numRuns: 300, seed: 0x5eede11 },
-} as const
+const propertyParameters = { numRuns: 300, seed: 0x5eede11 }
 
 class GuardedGlobalCallError extends Data.TaggedError(
   "GuardedGlobalCallError",
@@ -99,22 +98,27 @@ describe("server determinism", () => {
     }
   })
 
-  it.effect.prop(
+  it.effect(
     "keeps server clock millis and nanos derived from the same timestamp",
-    [FastCheck.bigInt({ min: -(2n ** 62n), max: 2n ** 62n })],
-    ([micros]) =>
-      Effect.gen(function* () {
-        const clock = makeServerClock({ timestamp: new Timestamp(micros) })
-        const nanos = clock.currentTimeNanosUnsafe()
+    () =>
+      effectProperty(
+        FastCheck.bigInt({ min: -(2n ** 62n), max: 2n ** 62n }),
+        (micros) =>
+          Effect.gen(function* () {
+            const clock = makeServerClock({ timestamp: new Timestamp(micros) })
+            const nanos = clock.currentTimeNanosUnsafe()
 
-        expect(nanos).toBe(micros * 1000n)
-        expect(Number(nanos / 1_000_000n)).toBe(clock.currentTimeMillisUnsafe())
-        expect(yield* clock.currentTimeMillis).toBe(
-          clock.currentTimeMillisUnsafe(),
-        )
-        expect(yield* clock.currentTimeNanos).toBe(nanos)
-      }),
-    propertyOptions,
+            expect(nanos).toBe(micros * 1000n)
+            expect(Number(nanos / 1_000_000n)).toBe(
+              clock.currentTimeMillisUnsafe(),
+            )
+            expect(yield* clock.currentTimeMillis).toBe(
+              clock.currentTimeMillisUnsafe(),
+            )
+            expect(yield* clock.currentTimeNanos).toBe(nanos)
+          }),
+        propertyParameters,
+      ),
   )
 
   it.effect("server clock forbids sleeping", () =>
@@ -225,26 +229,29 @@ describe("server determinism", () => {
       }),
   )
 
-  it.prop(
-    "server random is a deterministic, in-range function of its seed",
-    [FastCheck.bigInt({ min: 1n, max: 2n ** 53n })],
-    ([seedMicros]) => {
-      const a = makeServerRandom({
-        random: makeRandom(new Timestamp(seedMicros)),
-      })
-      const b = makeServerRandom({
-        random: makeRandom(new Timestamp(seedMicros)),
-      })
-      const drawsA = Array.from({ length: 16 }, () => a.nextIntUnsafe())
-      const drawsB = Array.from({ length: 16 }, () => b.nextIntUnsafe())
+  it("server random is a deterministic, in-range function of its seed", () => {
+    FastCheck.assert(
+      FastCheck.property(
+        FastCheck.bigInt({ min: 1n, max: 2n ** 53n }),
+        (seedMicros) => {
+          const a = makeServerRandom({
+            random: makeRandom(new Timestamp(seedMicros)),
+          })
+          const b = makeServerRandom({
+            random: makeRandom(new Timestamp(seedMicros)),
+          })
+          const drawsA = Array.from({ length: 16 }, () => a.nextIntUnsafe())
+          const drawsB = Array.from({ length: 16 }, () => b.nextIntUnsafe())
 
-      expect(drawsA).toEqual(drawsB)
-      for (const draw of drawsA) {
-        expect(Number.isSafeInteger(draw)).toBe(true)
-        expect(draw).toBeGreaterThanOrEqual(Number.MIN_SAFE_INTEGER)
-        expect(draw).toBeLessThanOrEqual(Number.MAX_SAFE_INTEGER)
-      }
-    },
-    propertyOptions,
-  )
+          expect(drawsA).toEqual(drawsB)
+          for (const draw of drawsA) {
+            expect(Number.isSafeInteger(draw)).toBe(true)
+            expect(draw).toBeGreaterThanOrEqual(Number.MIN_SAFE_INTEGER)
+            expect(draw).toBeLessThanOrEqual(Number.MAX_SAFE_INTEGER)
+          }
+        },
+      ),
+      propertyParameters,
+    )
+  })
 })

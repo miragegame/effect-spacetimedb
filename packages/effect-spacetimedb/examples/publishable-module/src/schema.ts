@@ -71,9 +71,39 @@ export const uniqueMembership = Stdb.table("uniqueMembership", {
       columns.email,
       columns.tenantId,
     ]),
+    Stdb.index(
+      "uniqueMembershipTenantEmailNoteIdx",
+      [columns.tenantId, columns.email, columns.note],
+      { algorithm: "btree" },
+    ),
   ],
   constraints: (columns) => [
     Stdb.unique("uniqueMembershipTenantEmailUnique", [
+      columns.tenantId,
+      columns.email,
+    ]),
+  ],
+})
+
+export const constraintEntry = Stdb.table("constraintEntry", {
+  public: false,
+  columns: {
+    id: String255.primaryKey(),
+    slug: String255,
+    tenantId: String255,
+    email: String255,
+    note: String255,
+  },
+  indexes: (columns) => [
+    Stdb.index("constraintEntrySlugIdx", [columns.slug]),
+    Stdb.index("constraintEntryTenantEmailIdx", [
+      columns.tenantId,
+      columns.email,
+    ]),
+  ],
+  constraints: (columns) => [
+    Stdb.unique("constraintEntrySlugUnique", [columns.slug]),
+    Stdb.unique("constraintEntryTenantEmailUnique", [
       columns.tenantId,
       columns.email,
     ]),
@@ -110,12 +140,29 @@ export const nativeRangeEntry = Stdb.table("nativeRangeEntry", {
   ],
 })
 
+export const optionalRangeEntry = Stdb.table("optionalRangeEntry", {
+  public: false,
+  columns: {
+    id: U64.primaryKey().autoInc(),
+    rank: Stdb.option(U64),
+    label: String255,
+  },
+  indexes: (columns) => [
+    Stdb.index("optionalRangeEntryRankIdx", [columns.rank], {
+      algorithm: "btree",
+    }),
+  ],
+})
+
 export const scheduledResult = Stdb.table("scheduledResult", {
   public: true,
   columns: {
     id: U64.primaryKey().autoInc(),
     target: Stdb.literal("reducer", "procedure"),
     note: String255,
+    sender: String255,
+    identity: String255,
+    databaseIdentity: String255,
   },
 })
 
@@ -140,8 +187,10 @@ export const exampleTables = [
   presenceEvent,
   auditLog,
   uniqueMembership,
+  constraintEntry,
   thing,
   nativeRangeEntry,
+  optionalRangeEntry,
   scheduledResult,
   reducerSchedule,
   procedureSchedule,

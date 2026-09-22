@@ -6,7 +6,7 @@ export type ModuleProject = {
   readonly version?: string
 }
 
-export const requiredSpacetimeCliVersion: "2.6.1"
+export const requiredSpacetimeCliVersion: "2.10.1"
 export const packageRoot: string
 export const exampleModuleRoot: string
 export const exampleBundlePath: string
@@ -45,6 +45,7 @@ export function runCommand(
   options?: {
     readonly cwd?: string
     readonly env?: NodeJS.ProcessEnv
+    readonly stdio?: "inherit"
   },
 ): string
 export function resolveSpacetimeCliCommand(): ReadonlyArray<string>

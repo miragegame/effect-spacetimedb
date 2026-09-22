@@ -3,12 +3,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
+import { packPublishArchive } from "./pack.mjs"
 import {
   ensureModuleCanResolveInstallRoot,
   exampleBundlePath,
@@ -48,7 +48,11 @@ const packageJson = JSON.parse(
 const smokeRoot = mkdtempSync(
   path.join(tmpdir(), "effect-spacetimedb-packed-codegen-smoke-"),
 )
-const packDir = path.join(smokeRoot, "pack")
+const packageScratchRoot = path.join(packageRoot, ".tmp")
+mkdirSync(packageScratchRoot, { recursive: true })
+const packDir = mkdtempSync(
+  path.join(packageScratchRoot, "packed-codegen-smoke-"),
+)
 const consumerDir = path.join(smokeRoot, "consumer")
 
 const exactDependency = (name) => {
@@ -59,7 +63,6 @@ const exactDependency = (name) => {
   return `${name}@${version}`
 }
 
-mkdirSync(packDir, { recursive: true })
 mkdirSync(consumerDir, { recursive: true })
 
 try {
@@ -79,19 +82,7 @@ try {
     "spacetime:sys@2.1",
   ])
 
-  runCommand("npm", ["pack", "--pack-destination", packDir], {
-    cwd: packageRoot,
-  })
-  const tarballs = readdirSync(packDir).filter((entry) =>
-    entry.endsWith(".tgz"),
-  )
-  if (tarballs.length !== 1) {
-    throw new Error(
-      `Expected one packed tarball, found ${tarballs.length.toString()}`,
-    )
-  }
-
-  const tarball = path.join(packDir, tarballs[0])
+  const tarball = await packPublishArchive(packDir)
   writeFileSync(
     path.join(consumerDir, "package.json"),
     `${JSON.stringify({ name: "packed-codegen-smoke", private: true, type: "module" }, null, 2)}\n`,
@@ -106,6 +97,10 @@ try {
       "--save-exact",
       tarball,
       exactDependency("@effect/platform-node"),
+      // platform-node depends on platform-node-shared through a caret range,
+      // so a newer registry publish can pair a shared package built against
+      // a later effect with the exact effect pinned here. Pin it explicitly.
+      exactDependency("@effect/platform-node-shared"),
       exactDependency("effect"),
       exactDependency("spacetimedb"),
     ],
@@ -204,7 +199,7 @@ try {
 }
 await writeFile(
   "spacetime-prerelease.mjs",
-  'process.stdout.write("spacetimedb tool version 2.6.1-beta.1\\\\n")\\n',
+  'process.stdout.write("spacetimedb tool version ${requiredSpacetimeCliVersion}-beta.1\\\\n")\\n',
 )
 try {
   await Effect.runPromise(
@@ -262,4 +257,5 @@ if (!existsSync("unrelated/keep.txt")) {
   )
 } finally {
   rmSync(smokeRoot, { force: true, recursive: true })
+  rmSync(packDir, { force: true, recursive: true })
 }

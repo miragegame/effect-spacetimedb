@@ -12,14 +12,13 @@
     "typecheck": "bun --cwd=packages/effect-spacetimedb run typecheck",
     "test": "bun --cwd=packages/effect-spacetimedb run test",
     "test:coverage": "bun --cwd=packages/effect-spacetimedb run test:coverage",
-    "test:mutation": "bun --cwd=packages/effect-spacetimedb run test:mutation",
     "test:live": "bun --cwd=packages/effect-spacetimedb run test:live",
     "check:exports": "bun --cwd=packages/effect-spacetimedb run check:exports",
     "codegen": "bun --cwd=packages/effect-spacetimedb run codegen",
     "codegen:check": "bun --cwd=packages/effect-spacetimedb run codegen:check"
   },
   "patchedDependencies": {
-    "spacetimedb@2.6.1": "patches/spacetimedb@2.6.1.patch"
+    "spacetimedb@2.10.1": "patches/spacetimedb@2.10.1.patch"
   },
   "trustedDependencies": [
     "esbuild"

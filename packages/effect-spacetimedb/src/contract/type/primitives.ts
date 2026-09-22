@@ -61,6 +61,7 @@ import {
   Timestamp,
   U8Max,
   U16Max,
+  U32Max,
   U64Max,
   U128Max,
   U256Max,
@@ -540,7 +541,7 @@ export function u32<A extends number, Encoded extends number>(
 export function u32<A extends number, Encoded extends number>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<number | A, number | Encoded> {
-  const schema = boundedNumberSchema(domain, 0, 0xffffffff)
+  const schema = boundedNumberSchema(domain, 0, U32Max)
 
   return attachStdbType(schema, (factories) => factories.u32(), {
     kind: "u32",

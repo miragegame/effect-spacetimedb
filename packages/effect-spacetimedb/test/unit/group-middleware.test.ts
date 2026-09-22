@@ -8,7 +8,7 @@ import { TestLayer } from "../helpers/test-layer"
 const { expect } = EffectVitest
 const describe = EffectVitest.layer(TestLayer)
 
-class MiddlewareFailure extends Schema.TaggedErrorClass<MiddlewareFailure>()(
+class MiddlewareFailure extends Schema.TaggedError<MiddlewareFailure>()(
   "MiddlewareFailure",
   {},
 ) {}

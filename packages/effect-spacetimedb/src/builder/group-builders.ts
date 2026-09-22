@@ -16,6 +16,7 @@ import {
   GroupImplTypeId,
   LifecycleImplTypeId,
   type AnyStdbModule,
+  type GroupCheckedHandlers,
   type GroupHandlersRecord,
   type GroupImpl,
   type GroupMiddleware,
@@ -139,8 +140,20 @@ export function groupChecked<
   return makeGroupImpl(module, name, handlers, options)
 }
 
-// Prechecked handlers are already shape-validated at their declaration site;
-// this erased entrypoint does not infer additional runtime requirements.
+/**
+ * Fast path for a complete handler record already checked at its declaration
+ * site. Avoiding a second mapped validation keeps very wide groups within the
+ * compiler's type-instantiation budget.
+ */
+export function groupPrechecked<
+  Module extends AnyStdbModule,
+  const Name extends GroupNames<Module>,
+>(
+  module: Module,
+  name: Name,
+  handlers: GroupCheckedHandlers<Module, Name>,
+): GroupImpl<Name, never, ModuleNameOf<Module>>
+
 export function groupPrechecked<
   Module extends AnyStdbModule,
   const Name extends GroupNames<Module>,

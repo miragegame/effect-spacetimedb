@@ -1,4 +1,11 @@
 import type { AnyModuleSpec } from "./contract/module.ts"
+import type { AnyViewSpec } from "./contract/view.ts"
+import type {
+  ArrayValueType,
+  EncodedOf,
+  OptionValueType,
+  TypeOf,
+} from "./contract/type.ts"
 import { typedEntries, typedFromEntries } from "./utils.ts"
 
 export type ScheduleBinding = {
@@ -26,6 +33,27 @@ export type PublicEventTables<Module extends AnyModuleSpec> = {
       : never
     : never]: Module["tables"][Key]
 }
+
+export type PublicViews<Module extends AnyModuleSpec> = {
+  readonly [Key in keyof Module["views"] &
+    string as Module["views"][Key]["public"] extends true
+    ? Key
+    : never]: Module["views"][Key]
+}
+
+export type PublicViewKeys<Module extends AnyModuleSpec> =
+  keyof PublicViews<Module> & string
+
+type ViewItemOf<View extends AnyViewSpec> =
+  View["returns"] extends ArrayValueType<infer Item>
+    ? Item
+    : View["returns"] extends OptionValueType<infer Item>
+      ? Item
+      : never
+
+export type ViewRowOf<View extends AnyViewSpec> = TypeOf<ViewItemOf<View>>
+
+export type WsViewRowOf<View extends AnyViewSpec> = EncodedOf<ViewItemOf<View>>
 
 export type PublicReducers<Module extends AnyModuleSpec> = {
   readonly [Key in keyof Module["reducers"] &
@@ -149,6 +177,15 @@ export const projectPublicEventTables = <Module extends AnyModuleSpec>(
       tableSpec.public && tableSpec.event ? ([[key, tableSpec]] as const) : [],
     ),
   ) as PublicEventTables<Module>
+
+export const projectPublicViews = <Module extends AnyModuleSpec>(
+  module: Module,
+): PublicViews<Module> =>
+  typedFromEntries(
+    typedEntries(module.views).flatMap(([key, viewSpec]) =>
+      viewSpec.public ? ([[key, viewSpec]] as const) : [],
+    ),
+  ) as PublicViews<Module>
 
 export const projectPublicReducers = <Module extends AnyModuleSpec>(
   module: Module,

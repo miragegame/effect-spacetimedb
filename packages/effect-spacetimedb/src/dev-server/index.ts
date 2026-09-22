@@ -28,8 +28,8 @@ import {
   DevServerJsonDecodeError,
   type DevServerOptions,
   DevServerPortError,
-  DevServerResponseError,
   DevServerResetVerificationError,
+  DevServerResponseError,
   type ModuleLifecycle,
   type ModuleLifecycleOptions,
   type PublishedModuleRuntime,
@@ -81,7 +81,7 @@ const standaloneCandidatesForCli = (cliPath: string) => {
   ]
 }
 
-const firstWorkingCommand = Effect.fn(function* (
+const workingCommandFirst = Effect.fn(function* (
   candidates: ReadonlyArray<ReadonlyArray<string>>,
   options: ChildProcess.CommandOptions,
 ) {
@@ -102,7 +102,7 @@ const firstWorkingCommand = Effect.fn(function* (
 
 const resolveDefaultBinaries = Effect.fn(function* (cwd: string) {
   const configuredCliConfig = yield* Config.option(
-    Config.string("SPACETIME_CLI_BIN"),
+    Config.String("SPACETIME_CLI_BIN"),
   ).pipe(Effect.orElseSucceed(() => Option.none()))
   const configuredCli = Option.getOrUndefined(configuredCliConfig)?.trim()
   const cli =
@@ -110,7 +110,7 @@ const resolveDefaultBinaries = Effect.fn(function* (cwd: string) {
       ? (["spacetime"] as const)
       : ([configuredCli] as const)
   const cliPath = yield* resolveCommandPath(cli[0])
-  const standalone = yield* firstWorkingCommand(
+  const standalone = yield* workingCommandFirst(
     standaloneCandidatesForCli(cliPath).map((candidate) => [candidate]),
     { cwd },
   )
@@ -218,7 +218,7 @@ const reservePort = Effect.callback<number, DevServerPortError>((resume) => {
 const packageRoot = Effect.fn(function* () {
   const path = yield* Path.Path
   const configuredRoot = yield* Config.option(
-    Config.string("EFFECT_SPACETIMEDB_PACKAGE_ROOT"),
+    Config.String("EFFECT_SPACETIMEDB_PACKAGE_ROOT"),
   ).pipe(Effect.orElseSucceed(() => Option.none()))
   const root = Option.getOrUndefined(configuredRoot)?.trim()
   if (root !== undefined && root.length > 0) {
@@ -241,13 +241,7 @@ const makePackageCacheDirectory = Effect.fn(function* (name: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const root = yield* packageRoot()
-  const cacheRoot = path.join(
-    root,
-    "node_modules",
-    ".cache",
-    "effect-spacetimedb",
-    name,
-  )
+  const cacheRoot = path.join(root, ".tmp", "effect-spacetimedb", name)
 
   yield* fs
     .makeDirectory(cacheRoot, { recursive: true })
@@ -413,6 +407,9 @@ const startStandaloneServer = Effect.fn(function* (params: {
   return handle
 })
 
+const cliConfigArg = (cliRootDir: string): string =>
+  `--config-path=${cliRootDir.replace(/[\\/]+$/u, "")}/cli.toml`
+
 const publishModule = Effect.fn(function* (params: {
   readonly baseUrl: string
   readonly binaries: SpacetimeBinaries
@@ -425,8 +422,7 @@ const publishModule = Effect.fn(function* (params: {
   yield* runCommand(
     params.binaries.cli,
     [
-      "--root-dir",
-      params.cliRootDir,
+      cliConfigArg(params.cliRootDir),
       "publish",
       params.databaseName,
       "--server",
@@ -580,8 +576,7 @@ export const makeModuleLifecycle = (
     yield* runCommand(
       binaries.cli,
       [
-        "--root-dir",
-        cliRootDir,
+        cliConfigArg(cliRootDir),
         "delete",
         "--yes",
         "--server",
@@ -631,12 +626,11 @@ const loginCliToDevServer = Effect.fn(function* (params: {
 }) {
   yield* runCommand(
     params.binaries.cli,
-    ["--root-dir", params.cliRootDir, "login", "--token", params.token],
+    [cliConfigArg(params.cliRootDir), "login", "--token", params.token],
     { cwd: params.cwd },
     {
       displayArgs: [
-        "--root-dir",
-        params.cliRootDir,
+        cliConfigArg(params.cliRootDir),
         "login",
         "--token",
         "<redacted>",
@@ -703,7 +697,7 @@ export const makeDevServer: (options: DevServerOptions) => DevServerEffect =
           cliRootDir,
           cwd,
           databaseName,
-          clearMode: options.clear?.firstPublish ?? "always",
+          clearMode: options.clear?.publishFirst ?? "always",
         })
 
         const lifecycle = makeModuleLifecycle({

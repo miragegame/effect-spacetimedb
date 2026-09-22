@@ -13,7 +13,7 @@ import {
   decodeCall,
   decodeSync,
   encodeCall,
-  firstIteratorValue,
+  iteratorValueFirst,
   hostCall,
   normalizeFindResult,
   streamIterator,
@@ -256,7 +256,7 @@ export const buildBaseTable = (
         callHostMethod(rawTable, "iter", `${plan.op}.iter`, []),
       )
 
-      return yield* firstIteratorValue(iterator, `${plan.op}.iter`, (row) =>
+      return yield* iteratorValueFirst(iterator, `${plan.op}.iter`, (row) =>
         decodeSync(() => plan.codec.decodeRow(row), {
           ...plan.codec.context,
           op: `${plan.op}.iter`,

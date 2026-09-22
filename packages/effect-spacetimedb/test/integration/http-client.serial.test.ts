@@ -39,9 +39,9 @@ const HttpConfig = {
   token: "example-token",
 } as const
 const JsonDate = new Date("2026-04-24T00:00:00.000Z")
-const MinI64 = -9223372036854775808n
+const I64Min = -9223372036854775808n
 const WideU64 = 18446744073709551615n
-const MinI128 = -170141183460469231731687303715884105728n
+const I128Min = -170141183460469231731687303715884105728n
 const WideValue = 340282366920938463463374607431768211455n
 
 const BigIntHttpModule = moduleFromSections({
@@ -722,8 +722,8 @@ describe("http client", (it) => {
           .wireSet({
             count: 42n,
             wide: WideValue,
-            signed: MinI64,
-            signedWide: MinI128,
+            signed: I64Min,
+            signedWide: I128Min,
             at: new Timestamp(1234n),
             duration: TimeDuration.fromMillis(5),
             identity: Identity.zero(),
@@ -748,10 +748,10 @@ describe("http client", (it) => {
 
         expect(capturedBodyText).toContain(WideValue.toString())
         expect(capturedBodyText).not.toContain(`"${WideValue.toString()}"`)
-        expect(capturedBodyText).toContain(MinI64.toString())
-        expect(capturedBodyText).not.toContain(`"${MinI64.toString()}"`)
-        expect(capturedBodyText).toContain(MinI128.toString())
-        expect(capturedBodyText).not.toContain(`"${MinI128.toString()}"`)
+        expect(capturedBodyText).toContain(I64Min.toString())
+        expect(capturedBodyText).not.toContain(`"${I64Min.toString()}"`)
+        expect(capturedBodyText).toContain(I128Min.toString())
+        expect(capturedBodyText).not.toContain(`"${I128Min.toString()}"`)
         expect(capturedBodyText).toContain(
           `"__timestamp_micros_since_unix_epoch__":1234`,
         )
@@ -764,7 +764,7 @@ describe("http client", (it) => {
           Effect.provide(
             makeMockHttpClientLayer(() =>
               Effect.succeed({
-                body: `[42,${WideValue},${MinI64},${MinI128},[1234],[5000],[0],[17],[18]]`,
+                body: `[42,${WideValue},${I64Min},${I128Min},[1234],[5000],[0],[17],[18]]`,
               }),
             ),
           ),
@@ -772,8 +772,8 @@ describe("http client", (it) => {
 
         expect(result.count).toBe(42n)
         expect(result.wide).toBe(WideValue)
-        expect(result.signed).toBe(MinI64)
-        expect(result.signedWide).toBe(MinI128)
+        expect(result.signed).toBe(I64Min)
+        expect(result.signedWide).toBe(I128Min)
         expect(result.at.microsSinceUnixEpoch).toBe(1234n)
         expect(result.duration.micros).toBe(5000n)
         expect(result.identity.equals(Identity.zero())).toBe(true)

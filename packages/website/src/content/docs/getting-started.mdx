@@ -18,21 +18,21 @@ then build native module exports and generated clients from the same contract.
   <TabItem label="npm">
 
     ```sh
-    npm install effect-spacetimedb effect@4.0.0-beta.93 spacetimedb@2.6.1
+    npm install effect-spacetimedb effect@4.0.0-rc.117 spacetimedb@2.10.1
     ```
 
   </TabItem>
   <TabItem label="pnpm">
 
     ```sh
-    pnpm add effect-spacetimedb effect@4.0.0-beta.93 spacetimedb@2.6.1
+    pnpm add effect-spacetimedb effect@4.0.0-rc.117 spacetimedb@2.10.1
     ```
 
   </TabItem>
   <TabItem label="bun">
 
     ```sh
-    bun add effect-spacetimedb effect@4.0.0-beta.93 spacetimedb@2.6.1
+    bun add effect-spacetimedb effect@4.0.0-rc.117 spacetimedb@2.10.1
     ```
 
   </TabItem>
@@ -124,8 +124,8 @@ const spacetime = schema({
   ),
 })
 
+// The exported binding's name is the reducer name.
 export const user_upsert = spacetime.reducer(
-  "user_upsert",
   { id: t.string(), name: t.string() },
   (ctx, { id, name }) => {
     ctx.db.user.insert({ id, name })

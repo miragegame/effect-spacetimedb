@@ -47,6 +47,7 @@ export const generatedArtifactShapeError = <
   const expectedKeys = [
     ...Object.keys(plan.publicTables),
     ...Object.keys(plan.publicEventTables),
+    ...Object.keys(plan.publicViews),
   ]
   if (typeof db !== "object" || db === null) {
     return new GeneratedArtifactShapeError({

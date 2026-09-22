@@ -13,21 +13,21 @@ const describe = EffectVitest.layer(TestLayer)
 describe("server service tags", (it) => {
   it.effect("projects module-specific services from package-global tags", () =>
     Effect.gen(function* () {
-      const firstServer = makeServer({
+      const serverFirst = makeServer({
         module: FullModule,
         runtime: TestSyncRunner,
       })
-      const secondServer = makeServer({
+      const serverSecond = makeServer({
         module: FullModule,
         runtime: TestSyncRunner,
       })
 
-      const sameServerExit = yield* firstServer.db.pipe(
+      const sameServerExit = yield* serverFirst.db.pipe(
         Effect.asVoid,
         Effect.provideService(Server.Db, {}),
         Effect.exit,
       )
-      const crossServerExit = yield* secondServer.db.pipe(
+      const crossServerExit = yield* serverSecond.db.pipe(
         Effect.asVoid,
         Effect.provideService(Server.Db, {}),
         Effect.exit,
@@ -35,7 +35,7 @@ describe("server service tags", (it) => {
 
       expect(Exit.isSuccess(sameServerExit)).toBe(true)
       expect(Exit.isSuccess(crossServerExit)).toBe(true)
-      expect(firstServer.db).not.toBe(secondServer.db)
+      expect(serverFirst.db).not.toBe(serverSecond.db)
     }),
   )
 })

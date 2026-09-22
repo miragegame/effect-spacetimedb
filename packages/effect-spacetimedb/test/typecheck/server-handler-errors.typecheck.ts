@@ -14,7 +14,7 @@ import {
 } from "../fixtures/full-module"
 import { TestSyncRunner } from "../helpers/sync-runner"
 
-class UndeclaredProcedureError extends Schema.TaggedErrorClass<UndeclaredProcedureError>()(
+class UndeclaredProcedureError extends Schema.TaggedError<UndeclaredProcedureError>()(
   "UndeclaredProcedureError",
   {},
 ) {}

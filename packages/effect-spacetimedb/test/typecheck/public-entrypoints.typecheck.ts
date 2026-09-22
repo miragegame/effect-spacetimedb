@@ -122,12 +122,12 @@ void PublicEntrypointString.name("display_name")
 // @ts-expect-error column defaults must match the authored Stdb type
 void Stdb.u32(PublicEntrypointU32).default("0")
 
-class PublicMissing extends Schema.TaggedErrorClass<PublicMissing>()(
+class PublicMissing extends Schema.TaggedError<PublicMissing>()(
   "PublicMissing",
   {},
 ) {}
 
-class PublicConflict extends Schema.TaggedErrorClass<PublicConflict>()(
+class PublicConflict extends Schema.TaggedError<PublicConflict>()(
   "PublicConflict",
   {},
 ) {}
@@ -182,6 +182,9 @@ void publicEntrypointIndexAlgorithm
 void Stdb.StdbHttpProjectionError
 void Stdb.httpApiBaseUrl({ uri: "http://localhost:3000/", databaseName: "db" })
 void StdbClient.makeWsClient
+void StdbClient.wsSupervisor
+void StdbClient.wsSupervisorFromModulePlan
+void StdbClient.wsSupervisorGenerated
 void StdbClient.DomainCallError
 void Stdb.describe(PublicEntrypointString)
 void Stdb.validate(Module)

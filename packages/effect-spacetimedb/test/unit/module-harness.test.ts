@@ -11,7 +11,7 @@ import { Identity, Timestamp } from "spacetimedb"
 
 const { describe, expect, it } = EffectVitest
 
-class ReducerRollbackProbe extends Schema.TaggedErrorClass<ReducerRollbackProbe>()(
+class ReducerRollbackProbe extends Schema.TaggedError<ReducerRollbackProbe>()(
   "ReducerRollbackProbe",
   {},
 ) {}
@@ -47,6 +47,13 @@ const structuredRangeRecord = Stdb.table("structuredRangeRecord", {
   },
   indexes: [Stdb.index("byCoordinates", ["coordinates"])],
 })
+const optionalRangeRecord = Stdb.table("optionalRangeRecord", {
+  columns: {
+    id: Stdb.u64().primaryKey().autoInc(),
+    retryAt: Stdb.timestamp().optional(),
+  },
+  indexes: [Stdb.index("byRetryAt", ["retryAt"])],
+})
 const harnessEvent = Stdb.table("harnessEvent", {
   event: true,
   columns: {
@@ -61,7 +68,13 @@ const Mutations = Stdb.StdbGroup.make("Mutations", {
   Stdb.StdbFn.reducer("emitEvent", {}),
 )
 const HarnessModuleBuilder = Stdb.StdbModule.make("test_harness")
-  .addTables(record, nativeRangeRecord, structuredRangeRecord, harnessEvent)
+  .addTables(
+    record,
+    nativeRangeRecord,
+    structuredRangeRecord,
+    optionalRangeRecord,
+    harnessEvent,
+  )
   .add(Mutations)
 const HarnessModule = HarnessModuleBuilder.spec
 const MutationsLive = Stdb.StdbBuilder.group(
@@ -215,6 +228,43 @@ describe("test module harness", () => {
           },
         ])
       expect(rows.map((row) => row.sequence)).toEqual([1n, 2n, 3n])
+    }),
+  )
+
+  it.effect("orders present optional values before absent values", () =>
+    Effect.gen(function* () {
+      const harness = StdbTesting.makeTestModuleHarness(HarnessModule)
+      const absent = yield* harness.effectDb.optionalRangeRecord.insert({
+        id: 0n,
+        retryAt: undefined,
+      })
+      const later = yield* harness.effectDb.optionalRangeRecord.insert({
+        id: 0n,
+        retryAt: new Timestamp(3_000n),
+      })
+      const early = yield* harness.effectDb.optionalRangeRecord.insert({
+        id: 0n,
+        retryAt: new Timestamp(1_000n),
+      })
+
+      expect(
+        yield* harness.effectDb.optionalRangeRecord.byRetryAt.filterToArray({
+          from: { tag: "unbounded" },
+          to: { tag: "unbounded" },
+        }),
+      ).toEqual([early, later, absent])
+      expect(
+        yield* harness.effectDb.optionalRangeRecord.byRetryAt.filterToArray({
+          from: { tag: "unbounded" },
+          to: { tag: "included", value: new Timestamp(2_000n) },
+        }),
+      ).toEqual([early])
+      expect(
+        yield* harness.effectDb.optionalRangeRecord.byRetryAt.filterToArray({
+          from: { tag: "unbounded" },
+          to: { tag: "excluded", value: undefined },
+        }),
+      ).toEqual([early, later])
     }),
   )
 

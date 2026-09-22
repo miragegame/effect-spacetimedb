@@ -18,10 +18,10 @@ export const transformOrFail = <From extends Schema.Top, To extends Schema.Top>(
 ) =>
   from.pipe(
     Schema.decodeTo(to, {
-      decode: SchemaGetter.transformOrFail((value: From["Type"]) =>
+      decode: SchemaGetter.transformEffect((value: From["Type"]) =>
         options.decode(value),
       ),
-      encode: SchemaGetter.transformOrFail((value: To["Encoded"]) =>
+      encode: SchemaGetter.transformEffect((value: To["Encoded"]) =>
         options.encode(value),
       ),
     }),

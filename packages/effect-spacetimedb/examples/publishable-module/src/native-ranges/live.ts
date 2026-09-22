@@ -49,5 +49,29 @@ export const NativeRangeFunctionsLive = Stdb.StdbBuilder.group(
         }),
       )
     }),
+    optionalRangeClear: Effect.fn(function* () {
+      const db = yield* Db
+      yield* db.optionalRangeEntry.clear()
+    }),
+    optionalRangeInsert: Effect.fn(function* ({ rank, label }) {
+      const db = yield* Db
+      yield* db.optionalRangeEntry.insert({ id: 0n, rank, label })
+    }),
+    optionalRangeAfterUnset: Effect.fn(function* () {
+      const tx = yield* Tx
+      return yield* tx.run(
+        Effect.gen(function* () {
+          const db = yield* Db
+          const rows =
+            yield* db.optionalRangeEntry.optionalRangeEntryRankIdx.filterToArray(
+              {
+                from: { tag: "excluded", value: undefined },
+                to: { tag: "unbounded" },
+              },
+            )
+          return rows.map((row) => row.label)
+        }),
+      )
+    }),
   },
 )

@@ -25,7 +25,7 @@ import {
   type TypeOf,
   unit,
 } from "../contract/type.ts"
-import { type AnyViewSpec } from "../contract/view.ts"
+import { type AnyViewSpec, type ViewSpec } from "../contract/view.ts"
 import type { StdbDecodeError } from "../decode-error.ts"
 
 import * as ServerContext from "../server/context.ts"
@@ -143,25 +143,21 @@ export type ScheduledProcedureDecl<
 export type SenderViewDecl<
   Name extends string = string,
   Returns extends AnyValueType = AnyValueType,
+  Public extends boolean = boolean,
 > = {
   readonly declKind: "view"
   readonly name: Name
-  readonly spec: AnyViewSpec & {
-    readonly context: "sender"
-    readonly returns: Returns
-  }
+  readonly spec: ViewSpec<"sender", Returns, Public>
 }
 
 export type AnonymousViewDecl<
   Name extends string = string,
   Returns extends AnyValueType = AnyValueType,
+  Public extends boolean = boolean,
 > = {
   readonly declKind: "view"
   readonly name: Name
-  readonly spec: AnyViewSpec & {
-    readonly context: "anonymous"
-    readonly returns: Returns
-  }
+  readonly spec: ViewSpec<"anonymous", Returns, Public>
 }
 
 export type LifecycleDecl<Name extends LifecycleName = LifecycleName> = {

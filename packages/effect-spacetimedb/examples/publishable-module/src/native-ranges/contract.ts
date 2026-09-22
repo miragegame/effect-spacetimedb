@@ -1,5 +1,5 @@
 import * as Stdb from "effect-spacetimedb"
-import { String255 } from "../schema"
+import { String255, U64 } from "../schema"
 
 export const NativeRangeFunctions = Stdb.StdbGroup.make("NativeRanges")
   .add(
@@ -31,6 +31,25 @@ export const NativeRangeFunctions = Stdb.StdbGroup.make("NativeRanges")
         lo: Stdb.timestamp(),
         hi: Stdb.timestamp(),
       }),
+      returns: Stdb.array(String255),
+    }),
+  )
+  .add(
+    Stdb.StdbFn.reducer("optionalRangeClear", {
+      params: Stdb.struct({}),
+    }),
+  )
+  .add(
+    Stdb.StdbFn.reducer("optionalRangeInsert", {
+      params: Stdb.struct({
+        rank: Stdb.option(U64),
+        label: String255,
+      }),
+    }),
+  )
+  .add(
+    Stdb.StdbFn.procedure("optionalRangeAfterUnset", {
+      params: Stdb.struct({}),
       returns: Stdb.array(String255),
     }),
   )

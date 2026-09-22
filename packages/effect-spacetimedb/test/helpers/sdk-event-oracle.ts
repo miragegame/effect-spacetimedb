@@ -104,8 +104,10 @@ export const eventContext = (event: SdkEvent): SdkEventContext => ({
   event,
 })
 
-// Mirrors spacetimedb@2.6.1 sdk/db_connection_impl.ts:881-907 and :964-995,
-// sdk/event.ts:11-18, sdk/reducer_event.ts:5-20, and sdk/client_api/types.ts:143-151.
+// Mirrors spacetimedb@2.10.1 sdk/db_connection_impl.ts:518-534 (the event
+// context every emit carries), :962-988 and :1045-1076 (the subscription,
+// transaction and reducer event shapes), sdk/event.ts:11-18,
+// sdk/reducer_event.ts:5-20, and sdk/client_api/types.ts:143-151.
 // Re-verify these source-cited hand mirrors when the pinned SpaceTimeDB SDK changes.
 export const reducerEventContext = (options: {
   readonly outcome: SdkReducerOutcome

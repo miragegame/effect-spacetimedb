@@ -160,7 +160,7 @@ describe("effect-spacetimedb live ws cache", () => {
             name: decodeUserName("Margaret"),
           })
           const ref = yield* session.subscribeTableRef("user")
-          const firstRows = yield* waitForRows(
+          const rowsFirst = yield* waitForRows(
             () =>
               SubscriptionRef.get(ref).pipe(
                 Effect.map((result) =>
@@ -175,7 +175,7 @@ describe("effect-spacetimedb live ws cache", () => {
               ),
           )
           expect(
-            firstRows.some(
+            rowsFirst.some(
               (row) =>
                 row.id === decodeUserId("cache-ref-user-1") &&
                 row.name === decodeUserName("Margaret"),

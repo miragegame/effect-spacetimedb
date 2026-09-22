@@ -357,8 +357,8 @@ describe("compat", (it) => {
     () =>
       Effect.gen(function* () {
         const originalSetTimeout = globalThis.setTimeout
-        const firstReady = yield* Deferred.make<void>()
-        const secondReady = yield* Deferred.make<void>()
+        const readyFirst = yield* Deferred.make<void>()
+        const readySecond = yield* Deferred.make<void>()
         const releaseFirst = yield* Deferred.make<void>()
         const releaseSecond = yield* Deferred.make<void>()
 
@@ -374,26 +374,26 @@ describe("compat", (it) => {
             "dev-guarded",
           )
 
-        const firstFiber = yield* Effect.forkDetach(
-          guardedRegion(firstReady, releaseFirst),
+        const fiberFirst = yield* Effect.forkDetach(
+          guardedRegion(readyFirst, releaseFirst),
           { startImmediately: true },
         )
-        yield* Deferred.await(firstReady)
+        yield* Deferred.await(readyFirst)
         expect(globalThis.setTimeout).not.toBe(originalSetTimeout)
 
-        const secondFiber = yield* Effect.forkDetach(
-          guardedRegion(secondReady, releaseSecond),
+        const fiberSecond = yield* Effect.forkDetach(
+          guardedRegion(readySecond, releaseSecond),
           { startImmediately: true },
         )
-        yield* Deferred.await(secondReady)
+        yield* Deferred.await(readySecond)
         expect(globalThis.setTimeout).not.toBe(originalSetTimeout)
 
         yield* Deferred.succeed(releaseFirst, undefined)
-        expect(Exit.isSuccess(yield* Fiber.await(firstFiber))).toBe(true)
+        expect(Exit.isSuccess(yield* Fiber.await(fiberFirst))).toBe(true)
         expect(globalThis.setTimeout).not.toBe(originalSetTimeout)
 
         yield* Deferred.succeed(releaseSecond, undefined)
-        expect(Exit.isSuccess(yield* Fiber.await(secondFiber))).toBe(true)
+        expect(Exit.isSuccess(yield* Fiber.await(fiberSecond))).toBe(true)
         expect(globalThis.setTimeout).toBe(originalSetTimeout)
       }),
   )

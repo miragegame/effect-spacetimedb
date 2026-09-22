@@ -1,4 +1,4 @@
-// Type-only imports keep Stryker's CLI-loaded packages visible to dependency lint.
+// Type-only imports keep Stryker's CLI-loaded packages visible to unused-dependency checks.
 import type {} from "@stryker-mutator/core"
 import type {} from "@stryker-mutator/vitest-runner"
 import { configDefaults, defineConfig } from "vitest/config"
@@ -6,11 +6,12 @@ import {
   baseConfig,
   liveTestPatterns,
   nativePackageTestPatterns,
-} from "./vitest.shared"
+} from "./vitest.shared.ts"
 
 export default defineConfig({
   ...baseConfig,
   test: {
+    globalSetup: ["./vitest.self-link.ts"],
     name: "mutation",
     hookTimeout: 10_000,
     testTimeout: 5_000,

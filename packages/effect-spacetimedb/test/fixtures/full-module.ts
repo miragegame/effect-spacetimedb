@@ -8,13 +8,13 @@ export type UserId = typeof UserId.Type
 export const UserName = Schema.String.pipe(Schema.brand("UserName"))
 export type UserName = typeof UserName.Type
 
-export class MissingAuth extends Schema.TaggedErrorClass<MissingAuth>()(
+export class MissingAuth extends Schema.TaggedError<MissingAuth>()(
   "MissingAuth",
   {},
   { httpApiStatus: 401 },
 ) {}
 
-export class UserMissing extends Schema.TaggedErrorClass<UserMissing>()(
+export class UserMissing extends Schema.TaggedError<UserMissing>()(
   "UserMissing",
   { userId: UserId },
   { httpApiStatus: 404 },

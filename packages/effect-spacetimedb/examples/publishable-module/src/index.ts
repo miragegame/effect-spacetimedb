@@ -1,4 +1,5 @@
 import { build } from "effect-spacetimedb/server-compiler"
+import { ConstraintEntryFunctionsLive } from "./constraint-entries/live"
 import { DeterminismFunctionsLive } from "./determinism/live"
 import { LifecycleFunctionsLive } from "./lifecycle/live"
 import { MembershipFunctionsLive } from "./memberships/live"
@@ -12,6 +13,7 @@ import { WebhookRoutesLive } from "./webhooks/live"
 const compiled = build(
   ExampleModule,
   [
+    ConstraintEntryFunctionsLive,
     UserFunctionsLive,
     DeterminismFunctionsLive,
     LifecycleFunctionsLive,

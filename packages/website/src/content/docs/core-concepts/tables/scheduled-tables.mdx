@@ -67,16 +67,78 @@ yield* db.reminderSchedule.schedule({
 
 | Schedule form | Host behavior |
 | --- | --- |
-| `Stdb.ScheduleAt.at(...)` or `after(...)` | One-shot row. Reducers consume it after execution; procedures consume it before execution. |
+| `Stdb.ScheduleAt.at(...)` or `after(...)` | One-shot row. Reducers consume it after execution; procedures consume it before, so a scheduled procedure can no longer find or update its own row. |
 | `Stdb.ScheduleAt.interval(...)` | Row persists and re-fires until deleted. |
 
-For fixed wall-clock or tick alignment, prefer self-rescheduling one-shot rows:
-handle a `Time` row, insert the next `Time` row, then return. Use `Interval`
-when simple persistent re-fire spacing is enough.
+`Interval` covers plain re-fire spacing. Reach for self-rescheduling one-shot
+rows when the target is a wall-clock or cron alignment an interval cannot
+express: handle a `Time` row, insert the next one with
+`Stdb.ScheduleAt.nextCron(cron, ctx.timestamp)` or `at(...)`, then return.
 
 `Stdb.scheduledTable(...)` creates the reserved
 `scheduled_id`/`scheduled_at` columns and `StdbFn.scheduledReducer(...)` or
 `StdbFn.scheduledProcedure(...)` binds exactly one typed handler to the table.
+The binding is registered on the function, which is where SpacetimeDB expects
+it; the table itself carries no schedule option.
+
+## Host Scheduling Semantics
+
+These are SpacetimeDB host behaviours, not something this library adds.
+
+**Dispatch is concurrent.** The scheduler does not wait for one due function to
+finish before dispatching the next, so a slow scheduled procedure does not
+delay unrelated scheduled work. Execution is bounded further down: scheduled
+reducers share the module's single reducer lane and still run one at a time,
+serialized with client-invoked reducers, while scheduled procedures take an
+instance from a bounded pool — one per available CPU by default — and genuinely
+run in parallel.
+
+**Already-expired work has no order.** When several schedules are past due at
+once, after a restart, a backlog, or an overrunning run, they are not guaranteed
+to run in `scheduled_at` order. Never encode ordering between two schedule rows:
+chain them, or carry an explicit sequence number in the row.
+
+**A row does not normally overlap itself.** Each row is an independent schedule
+identified by its `scheduledId`, and the host does not queue that row's next
+invocation until the current one has returned. Two different rows in the same
+table are separate schedules and may run at the same time. The exception is
+re-arming: writing a schedule row registers its timer entry immediately, so a
+procedure that updates its own row to an already-due time can be re-entered
+while it is still running. Treat self-exclusion as the normal case, never as a
+mutual-exclusion primitive.
+
+**Intervals do not drift.** The next fire time is the previous *intended* time
+plus the interval, not the time the last run started or finished, so timer
+jitter and slow runs never accumulate. Ticks missed while the database was busy
+or down are skipped rather than replayed back to back. The first fire of a newly
+inserted `Interval` row is one interval away, not immediate.
+
+**A scheduled reducer is still one transaction.** Its whole body commits or
+rolls back atomically, exactly like a client-invoked reducer. For a one-shot
+row, the host's deletion of that row is a separate transaction committed
+immediately afterwards — subscribers see two updates — and it happens whether
+the reducer succeeded or failed. Failed invocations are logged and never
+retried; re-insert a schedule row from the handler if retry is part of the
+domain.
+
+## Scheduled Procedures Must Claim Their Work
+
+A procedure has no ambient transaction: each `Tx.run(...)` is its own
+transaction, and external work such as an HTTP call necessarily happens between
+two of them. The host holds nothing across that gap — no row locks, no snapshot,
+no exclusion. Combined with concurrent dispatch, a procedure that selects
+pending rows in one transaction, calls out, and marks them done in a later
+transaction will hand the same rows to a second invocation that starts in the
+window between the two.
+
+Claim the work in the same transaction that selects it: flip a status column, or
+stamp an attempt id and a lease expiry, so the selecting transaction is what
+makes those rows invisible to everyone else. Do the external call afterwards and
+record its outcome against that claim.
+
+Keep transaction bodies idempotent and free of captured mutable state for the
+same reason procedures generally require it: the runtime may re-run a
+transaction body after a commit conflict.
 
 ## Validation Boundaries
 

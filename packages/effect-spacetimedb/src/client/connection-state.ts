@@ -11,6 +11,7 @@ export type ConnectionInvalidation = {
 
 export type WsConnectionState = {
   readonly assertActive: () => Effect.Effect<void, SubscriptionFailure>
+  readonly awaitInvalidation: () => Effect.Effect<ConnectionInvalidation>
   readonly invalidateFromTransport: (message: string) => void
   readonly invalidation: () => ConnectionInvalidation | undefined
   readonly isInvalidated: () => boolean
@@ -32,6 +33,22 @@ const makeWsConnectionState = (): WsConnectionState => {
             }),
           )
         : Effect.void,
+    awaitInvalidation: () =>
+      Effect.callback<ConnectionInvalidation>((resume) => {
+        if (invalidation != null) {
+          resume(Effect.succeed(invalidation))
+          return
+        }
+
+        const listener = (next: ConnectionInvalidation) => {
+          resume(Effect.succeed(next))
+        }
+        listeners.add(listener)
+        return Effect.suspend(() => {
+          listeners.delete(listener)
+          return Effect.void
+        })
+      }),
     invalidateFromTransport: (message) => {
       if (invalidation != null) {
         return

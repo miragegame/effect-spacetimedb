@@ -35,3 +35,13 @@ export const MembershipFunctions = Stdb.StdbGroup.make("Memberships")
       returns: Stdb.option(MembershipView),
     }),
   )
+  .add(
+    Stdb.StdbFn.procedure("membershipByTenantEmailRange", {
+      params: Stdb.struct({
+        tenantId: String255,
+        emailLo: String255,
+        emailHi: String255,
+      }),
+      returns: Stdb.array(MembershipView),
+    }),
+  )

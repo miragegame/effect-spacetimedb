@@ -31,8 +31,8 @@ export const withGroupDefaultErrors = <
   const ownErrors = spec.errors
   const conflictingClass = ownErrors?.errors.find((ownClass) =>
     groupErrors.errors.some(
-      (defaultClass) =>
-        defaultClass !== ownClass && tagOf(defaultClass) === tagOf(ownClass),
+      (classDefault) =>
+        classDefault !== ownClass && tagOf(classDefault) === tagOf(ownClass),
     ),
   )
   if (conflictingClass !== undefined) {

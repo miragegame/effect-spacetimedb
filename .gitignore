@@ -1,8 +1,10 @@
 node_modules/
+.tmp/
 .cache/
 dist/
 dist-types/
 packages/*/node_modules/
+packages/*/.tmp/
 coverage/
 packages/*/coverage/
 /.stryker-tmp/

@@ -49,6 +49,56 @@ Procedure handlers cannot yield `Db` directly. Use the module's
 `Tx` runner and keep transaction bodies pure database work because the native
 runtime may retry them after optimistic commit conflicts.
 
+## Outbound HTTP
+
+A procedure is the only place a module can make an outbound request. Yield the
+module's `Http` accessor outside any transaction — the host refuses a request
+while a transaction is open, so fetch first, then open the transaction that
+records the result.
+
+```ts
+const { Http, Tx, Db } = Module
+
+const syncLive = Stdb.StdbBuilder.group(Module, "Sync", {
+  sync_profile: Effect.fn(function* ({ userId }) {
+    const http = yield* Http
+    const response = yield* http.fetch(`https://example.test/users/${userId}`)
+    const profile = yield* http.json<{ readonly name: string }>(response)
+
+    const tx = yield* Tx
+    return yield* tx.run(
+      Effect.gen(function* () {
+        const db = yield* Db
+        yield* db.user.userId.replace({ userId, name: profile.name })
+      }),
+    )
+  }),
+})
+```
+
+Failures arrive as `StdbHostCallError` in the error channel, tagged with the
+operation (`http.fetch`, `http.json`, and so on).
+
+Two host policies decide whether a request is allowed at all, and both are the
+operator's, not the module's:
+
+- **Egress filtering.** Requests to loopback, link-local, and private or
+  otherwise special-purpose addresses are refused — `127.0.0.1`, `10/8`,
+  `172.16/12`, `192.168/16`, the IPv6 equivalents, and the rest of the
+  special-purpose registry. Ordinary server builds enforce this; only a
+  purpose-built test binary relaxes it for loopback. A module cannot reach a
+  service on its own host or elsewhere inside a private network. Where a
+  hostname resolves to both a blocked and a routable address, the routable one
+  is used.
+- **A global off switch.** A standalone operator can disable module-originated
+  HTTP entirely with `[module-http] enabled = false` in the server's
+  `config.toml`. It defaults to enabled and takes a server restart to change.
+  With it off, every request fails with `module outbound HTTP requests are
+  disabled`.
+
+Requests time out after 30 seconds unless you pass a shorter one, and the host
+clamps any requested timeout to 180 seconds.
+
 ## Scheduling
 
 Scheduled reducers and procedures are declared with the callable group API and
@@ -99,4 +149,6 @@ Use `Stdb.ScheduleAt.interval(...)` for persistent re-fire rows,
 `Stdb.ScheduleAt.after(ctx.timestamp, duration)` for one-shot relative work, and
 `Stdb.ScheduleAt.nextCron(cron, ctx.timestamp)` for cron-derived one-shots.
 See [Scheduled Tables](/core-concepts/tables/scheduled-tables) for the table
-side of the contract.
+side of the contract, the host's dispatch semantics, and why a scheduled
+procedure that does external work between transactions has to claim its work
+rows in the transaction that selects them.

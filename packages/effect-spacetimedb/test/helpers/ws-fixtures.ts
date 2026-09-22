@@ -16,6 +16,7 @@ type FullUserRow = StdbTesting.WsTableRow<typeof FullModule.tables.user>
 type FullPresenceEventRow = StdbTesting.WsTableRow<
   typeof FullModule.tables.presenceEvent
 >
+type FullAllUsersRow = StdbTesting.WsTableRow<typeof FullModule.tables.user>
 
 const unexpected = (path: string): never => {
   throw new Error(`unexpected ${path}`)
@@ -62,6 +63,7 @@ export const makeFullModuleWsDb: <RelationContext = unknown>(
     FullPresenceEventRow,
     RelationContext
   >(),
+  allUsers: makeStaticRelationHandle<FullAllUsersRow, RelationContext>(),
   ...overrides,
 })
 

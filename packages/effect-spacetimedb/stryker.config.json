@@ -6,6 +6,7 @@
   },
   "checkers": [],
   "coverageAnalysis": "perTest",
+  "ignorePatterns": [".tmp"],
   "mutate": [
     "src/contract/type/codec.ts",
     "src/contract/type/envelope.ts",

@@ -7,6 +7,7 @@ import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import type { Identity } from "spacetimedb"
 import type { AnyModuleSpec } from "../contract/module.ts"
+import { readTaggedErrorTag } from "../error-identity.ts"
 import type { ModulePlan } from "../module-plan.ts"
 import { makeModulePlan } from "../module-plan.ts"
 import { prefixId } from "../utils.ts"
@@ -159,13 +160,16 @@ const sessionTagForModule = <
     WsSession<Module, ErrorContext, RelationContext>
   >(sessionTagIdForModule(module, name))
 
-const disconnectMessage = (context: unknown, error?: Error): string => {
-  const message =
-    error != null && error.message.length > 0
-      ? error.message
-      : (messageFromUnknown(context) ?? String(context))
-
-  return message.length > 0 ? message : "WebSocket connection disconnected"
+// The native disconnect context is the connection object itself, never a
+// carrier of human-readable text, so only the cause can name the reason. A
+// terminal close with no socket error (a clean close, or the decompress
+// failure that closes the socket) legitimately has no cause and gets the
+// stable fallback.
+const disconnectMessage = (cause: unknown): string => {
+  const message = messageFromUnknown(cause)
+  return message !== undefined && message.length > 0
+    ? message
+    : (readTaggedErrorTag(cause) ?? "WebSocket connection disconnected")
 }
 
 const disconnectManagedConnection = <
@@ -208,7 +212,7 @@ const invalidateDisconnected = <
   error: WsConnectError,
 ) => {
   connectionStateFor(connection).invalidateFromTransport(
-    disconnectMessage(error.context, error.cause as Error | undefined),
+    disconnectMessage(error.cause),
   )
 }
 
@@ -580,11 +584,13 @@ export const makeScopedFromModulePlan = <
                 connection,
               )
             })
+            // A socket error raised after the handshake never reaches
+            // `onConnectError`: the SDK stashes it, closes the socket, and
+            // delivers it here as the second argument. Keep it as the cause so
+            // connection loss stays distinguishable from a close with no
+            // reported error, which arrives with `error` undefined.
             .onDisconnect((context, error) => {
-              connectError(error ?? context, context).pipe(
-                failAcquire,
-                runCallbackEffect,
-              )
+              connectError(error, context).pipe(failAcquire, runCallbackEffect)
             })
             .onConnectError((context, error) => {
               connectError(error, context).pipe(failAcquire, runCallbackEffect)

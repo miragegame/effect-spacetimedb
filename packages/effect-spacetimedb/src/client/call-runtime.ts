@@ -15,6 +15,7 @@ import type { AnyValueType } from "../contract/type.ts"
 import {
   type CallFailure,
   classifyRawCallFailure,
+  ConnectionLostError,
   DomainCallError,
   type RawCallFailure,
   RemoteRejectedBody,
@@ -105,7 +106,12 @@ type ProcedureEnvelopeRuntime =
 
 const isTransportCallFailure = (
   cause: unknown,
-): cause is StdbDecodeError | RemoteRejectedError | TransportError =>
+): cause is
+  | ConnectionLostError
+  | StdbDecodeError
+  | RemoteRejectedError
+  | TransportError =>
+  ConnectionLostError.is(cause) ||
   StdbDecodeError.is(cause) ||
   RemoteRejectedError.is(cause) ||
   TransportError.is(cause)

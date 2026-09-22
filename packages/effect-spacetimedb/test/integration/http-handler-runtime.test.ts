@@ -32,7 +32,7 @@ const decodeJson = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Unknown),
 )
 
-class MissingUser extends Schema.TaggedErrorClass<MissingUser>()(
+class MissingUser extends Schema.TaggedError<MissingUser>()(
   "MissingUser",
   { id: Schema.String },
   { httpApiStatus: 404 },
@@ -44,7 +44,9 @@ class CompilerHttpHandlerBindingTestError extends Data.TaggedError(
   readonly cause: unknown
 }> {}
 
-class HttpHandlerRuntimeDefect extends Error {}
+class HttpHandlerRuntimeDefect extends Data.TaggedError(
+  "HttpHandlerRuntimeDefect",
+) {}
 
 const RuntimeErrors = Stdb.errors(MissingUser)
 
@@ -214,9 +216,7 @@ describe("HTTP handler runtime", (it) => {
         ) as never,
         rawThrow: server.httpHandler(
           Effect.fn(function* () {
-            return yield* Effect.die(
-              new HttpHandlerRuntimeDefect("handler defect"),
-            )
+            return yield* Effect.die(new HttpHandlerRuntimeDefect())
           }),
         ) as never,
         invalidResponse: server.httpHandler(
@@ -260,7 +260,9 @@ describe("HTTP handler runtime", (it) => {
       )
       expect(defect.status).toBe(500)
       expect(defect.text()).toBe("")
-      expect(calls.flat().map(String).join(" ")).toContain("handler defect")
+      expect(calls.flat().map(String).join(" ")).toContain(
+        "HttpHandlerRuntimeDefect",
+      )
 
       calls.splice(0, calls.length)
       const decoded = handlers.voidRequest.invoke(

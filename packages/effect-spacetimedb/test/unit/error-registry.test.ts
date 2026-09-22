@@ -32,43 +32,40 @@ const decodeFailureCauseString = (
   return failure instanceof StdbDecodeError ? String(failure.cause) : ""
 }
 
-class NumericError extends Schema.TaggedErrorClass<NumericError>()(
-  "NumericError",
-  {
-    value: Schema.Finite,
-  },
-) {}
+class NumericError extends Schema.TaggedError<NumericError>()("NumericError", {
+  value: Schema.Finite,
+}) {}
 
-class JsonBigIntError extends Schema.TaggedErrorClass<JsonBigIntError>()(
+class JsonBigIntError extends Schema.TaggedError<JsonBigIntError>()(
   "JsonBigIntError",
   {
     value: Schema.BigIntFromString,
   },
 ) {}
 
-class MetadataRecordError extends Schema.TaggedErrorClass<MetadataRecordError>()(
+class MetadataRecordError extends Schema.TaggedError<MetadataRecordError>()(
   "MetadataRecordError",
   {
     metadata: Schema.Record(Schema.String, Schema.String),
   },
 ) {}
 
-class MergeFirstError extends Schema.TaggedErrorClass<MergeFirstError>()(
+class MergeFirstError extends Schema.TaggedError<MergeFirstError>()(
   "MergeFirstError",
   {},
 ) {}
 
-class MergeSharedError extends Schema.TaggedErrorClass<MergeSharedError>()(
+class MergeSharedError extends Schema.TaggedError<MergeSharedError>()(
   "MergeSharedError",
   {},
 ) {}
 
-class MergeSecondError extends Schema.TaggedErrorClass<MergeSecondError>()(
+class MergeSecondError extends Schema.TaggedError<MergeSecondError>()(
   "MergeSecondError",
   {},
 ) {}
 
-class JsonPayloadError extends Schema.TaggedErrorClass<JsonPayloadError>()(
+class JsonPayloadError extends Schema.TaggedError<JsonPayloadError>()(
   "JsonPayloadError",
   {
     occurredAt: Schema.DateFromString,
@@ -78,16 +75,16 @@ class JsonPayloadError extends Schema.TaggedErrorClass<JsonPayloadError>()(
   },
 ) {}
 
-class toString extends Schema.TaggedErrorClass<toString>()("toString", {}) {}
+class toString extends Schema.TaggedError<toString>()("toString", {}) {}
 
-class EncodedTagDropped extends Schema.TaggedErrorClass<EncodedTagDropped>()(
+class EncodedTagDropped extends Schema.TaggedError<EncodedTagDropped>()(
   "EncodedTagDropped",
   {
     code: Schema.String,
   },
 ) {}
 
-class EncodedTagMismatch extends Schema.TaggedErrorClass<EncodedTagMismatch>()(
+class EncodedTagMismatch extends Schema.TaggedError<EncodedTagMismatch>()(
   "EncodedTagMismatch",
   {
     code: Schema.String,
@@ -144,25 +141,25 @@ describe("error codec", (it) => {
     "normalizes array declared-error inputs like merged definitions",
     () =>
       Effect.gen(function* () {
-        const FirstErrors = StdbTesting.ContractError.errors(
+        const ErrorsFirst = StdbTesting.ContractError.errors(
           MergeFirstError,
           MergeSharedError,
         )
-        const SecondErrors = StdbTesting.ContractError.errors(
+        const ErrorsSecond = StdbTesting.ContractError.errors(
           MergeSharedError,
           MergeSecondError,
         )
 
         expect(
-          StdbTesting.ContractError.normalizeErrorsInput(FirstErrors),
-        ).toBe(FirstErrors)
+          StdbTesting.ContractError.normalizeErrorsInput(ErrorsFirst),
+        ).toBe(ErrorsFirst)
 
         const NormalizedErrors = StdbTesting.ContractError.normalizeErrorsInput(
-          [FirstErrors, SecondErrors, MergeSecondError],
+          [ErrorsFirst, ErrorsSecond, MergeSecondError],
         )
         const MergedErrors = StdbTesting.ContractError.merge(
-          FirstErrors,
-          SecondErrors,
+          ErrorsFirst,
+          ErrorsSecond,
         )
 
         expect(NormalizedErrors.errors).toEqual(MergedErrors.errors)
@@ -172,11 +169,13 @@ describe("error codec", (it) => {
 
   it.effect("rejects invalid array declared-error inputs", () =>
     Effect.gen(function* () {
-      class MergeFirstDuplicate extends Schema.TaggedErrorClass<MergeFirstDuplicate>()(
+      // The mismatch is the fixture: this class reuses an existing tag so the
+      // registry has a duplicate to reject.
+      class MergeFirstDuplicate extends Schema.TaggedError<MergeFirstDuplicate>()(
         "MergeFirstError",
         {},
       ) {}
-      class RemoteRejectedError extends Schema.TaggedErrorClass<RemoteRejectedError>()(
+      class RemoteRejectedError extends Schema.TaggedError<RemoteRejectedError>()(
         "RemoteRejectedError",
         {},
       ) {}
@@ -201,12 +200,12 @@ describe("error codec", (it) => {
           Missing: Stdb.error({}, { status: 404 }),
           Conflict: Stdb.error({}),
         })
-        class AnnotatedStatus extends Schema.TaggedErrorClass<AnnotatedStatus>()(
+        class AnnotatedStatus extends Schema.TaggedError<AnnotatedStatus>()(
           "AnnotatedStatus",
           {},
           { httpApiStatus: 418 },
         ) {}
-        class StaticStatus extends Schema.TaggedErrorClass<StaticStatus>()(
+        class StaticStatus extends Schema.TaggedError<StaticStatus>()(
           "StaticStatus",
           {},
           { httpApiStatus: 409 },
@@ -231,7 +230,7 @@ describe("error codec", (it) => {
 
   it.effect("reads declared error tags without mutating schema classes", () =>
     Effect.gen(function* () {
-      class IdentifierOnlyError extends Schema.TaggedErrorClass<IdentifierOnlyError>()(
+      class IdentifierOnlyError extends Schema.TaggedError<IdentifierOnlyError>()(
         "IdentifierOnlyError",
         {
           code: Schema.String,
@@ -501,7 +500,7 @@ describe("error codec", (it) => {
   it.effect("rejects duplicate and reserved declared error tags", () =>
     Effect.gen(function* () {
       const DuplicateTagA = (() => {
-        class DuplicateTag extends Schema.TaggedErrorClass<DuplicateTag>()(
+        class DuplicateTag extends Schema.TaggedError<DuplicateTag>()(
           "DuplicateTag",
           {},
         ) {}
@@ -510,7 +509,7 @@ describe("error codec", (it) => {
       })()
 
       const DuplicateTagB = (() => {
-        class DuplicateTag extends Schema.TaggedErrorClass<DuplicateTag>()(
+        class DuplicateTag extends Schema.TaggedError<DuplicateTag>()(
           "DuplicateTag",
           {},
         ) {}
@@ -518,47 +517,47 @@ describe("error codec", (it) => {
         return DuplicateTag
       })()
 
-      class RemoteRejectedError extends Schema.TaggedErrorClass<RemoteRejectedError>()(
+      class RemoteRejectedError extends Schema.TaggedError<RemoteRejectedError>()(
         "RemoteRejectedError",
         {},
       ) {}
 
-      class StdbDeclaredErrorEncodingFailure extends Schema.TaggedErrorClass<StdbDeclaredErrorEncodingFailure>()(
+      class StdbDeclaredErrorEncodingFailure extends Schema.TaggedError<StdbDeclaredErrorEncodingFailure>()(
         "StdbDeclaredErrorEncodingFailure",
         {},
       ) {}
 
-      class StdbUniqueAlreadyExistsError extends Schema.TaggedErrorClass<StdbUniqueAlreadyExistsError>()(
+      class StdbUniqueAlreadyExistsError extends Schema.TaggedError<StdbUniqueAlreadyExistsError>()(
         "StdbUniqueAlreadyExistsError",
         {},
       ) {}
 
-      class StdbAutoIncOverflowError extends Schema.TaggedErrorClass<StdbAutoIncOverflowError>()(
+      class StdbAutoIncOverflowError extends Schema.TaggedError<StdbAutoIncOverflowError>()(
         "StdbAutoIncOverflowError",
         {},
       ) {}
 
-      class StdbNoSuchRowError extends Schema.TaggedErrorClass<StdbNoSuchRowError>()(
+      class StdbNoSuchRowError extends Schema.TaggedError<StdbNoSuchRowError>()(
         "StdbNoSuchRowError",
         {},
       ) {}
 
-      class StdbScheduleDelayTooLongError extends Schema.TaggedErrorClass<StdbScheduleDelayTooLongError>()(
+      class StdbScheduleDelayTooLongError extends Schema.TaggedError<StdbScheduleDelayTooLongError>()(
         "StdbScheduleDelayTooLongError",
         {},
       ) {}
 
-      class StdbValueCodecError extends Schema.TaggedErrorClass<StdbValueCodecError>()(
+      class StdbValueCodecError extends Schema.TaggedError<StdbValueCodecError>()(
         "StdbValueCodecError",
         {},
       ) {}
 
-      class ReducerGlobalRandomNotAllowedError extends Schema.TaggedErrorClass<ReducerGlobalRandomNotAllowedError>()(
+      class ReducerGlobalRandomNotAllowedError extends Schema.TaggedError<ReducerGlobalRandomNotAllowedError>()(
         "ReducerGlobalRandomNotAllowedError",
         {},
       ) {}
 
-      class GeneratedArtifactShapeError extends Schema.TaggedErrorClass<GeneratedArtifactShapeError>()(
+      class GeneratedArtifactShapeError extends Schema.TaggedError<GeneratedArtifactShapeError>()(
         "GeneratedArtifactShapeError",
         {},
       ) {}
@@ -601,7 +600,7 @@ describe("error codec", (it) => {
     () =>
       Effect.gen(function* () {
         const SharedDeclaredOne = (() => {
-          class SharedDeclared extends Schema.TaggedErrorClass<SharedDeclared>()(
+          class SharedDeclared extends Schema.TaggedError<SharedDeclared>()(
             "SharedDeclared",
             {},
           ) {}
@@ -610,7 +609,7 @@ describe("error codec", (it) => {
         })()
 
         const SharedDeclaredTwo = (() => {
-          class SharedDeclared extends Schema.TaggedErrorClass<SharedDeclared>()(
+          class SharedDeclared extends Schema.TaggedError<SharedDeclared>()(
             "SharedDeclared",
             {},
           ) {}
@@ -618,11 +617,11 @@ describe("error codec", (it) => {
           return SharedDeclared
         })()
 
-        const FirstErrors = StdbTesting.ContractError.errors(SharedDeclaredOne)
-        const SecondErrors = StdbTesting.ContractError.errors(SharedDeclaredTwo)
+        const ErrorsFirst = StdbTesting.ContractError.errors(SharedDeclaredOne)
+        const ErrorsSecond = StdbTesting.ContractError.errors(SharedDeclaredTwo)
 
         expect(() =>
-          StdbTesting.ContractError.merge(FirstErrors, SecondErrors),
+          StdbTesting.ContractError.merge(ErrorsFirst, ErrorsSecond),
         ).toThrow(/duplicate error tag/i)
         expect(
           () =>
@@ -631,14 +630,14 @@ describe("error codec", (it) => {
                 .add(
                   Stdb.StdbFn.reducer("first", {
                     params: Stdb.struct({}),
-                    errors: FirstErrors,
+                    errors: ErrorsFirst,
                   }),
                 )
                 .add(
                   Stdb.StdbFn.procedure("second", {
                     params: Stdb.struct({}),
                     returns: Stdb.unit(),
-                    errors: SecondErrors,
+                    errors: ErrorsSecond,
                   }),
                 ),
             ).spec,
@@ -650,17 +649,17 @@ describe("error codec", (it) => {
     "merges declared-error definitions with shared classes by identity",
     () =>
       Effect.gen(function* () {
-        const FirstErrors = StdbTesting.ContractError.errors(
+        const ErrorsFirst = StdbTesting.ContractError.errors(
           MergeFirstError,
           MergeSharedError,
         )
-        const SecondErrors = StdbTesting.ContractError.errors(
+        const ErrorsSecond = StdbTesting.ContractError.errors(
           MergeSharedError,
           MergeSecondError,
         )
         const MergedErrors = StdbTesting.ContractError.merge(
-          FirstErrors,
-          SecondErrors,
+          ErrorsFirst,
+          ErrorsSecond,
         )
         const HandSpreadErrors = StdbTesting.ContractError.errors(
           MergeFirstError,

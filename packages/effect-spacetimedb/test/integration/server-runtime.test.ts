@@ -397,7 +397,10 @@ describe("server runtime", (it) => {
           return {}
         },
       })
-      const server = makeServer({ module: FullModule, runtime: TestSyncRunner })
+      const server = makeServer({
+        module: FullModule,
+        runtime: TestSyncRunner,
+      })
       const reducers = server.reducers({
         userUpsert: server.reducer(
           Effect.fn(function* () {
@@ -1096,6 +1099,38 @@ describe("server runtime", (it) => {
       expect(invoked).toBe(true)
 
       invoked = false
+      const serverRuntimeSchedulerCtx = {
+        ...verifiedSchedulerCtx,
+        sender: { __identity__: 2n },
+        databaseIdentity: { __identity__: 2n },
+        identity: { __identity__: 2n },
+      }
+      expect(() =>
+        SpacetimeServerStub.invokeModuleExport(
+          compilerGuardExport,
+          serverRuntimeSchedulerCtx as never,
+          rawArgs,
+        ),
+      ).not.toThrow()
+      expect(invoked).toBe(true)
+
+      invoked = false
+      const serverRuntimeExternalCtx = {
+        ...serverRuntimeSchedulerCtx,
+        sender: { __identity__: 3n },
+      }
+      expect(() =>
+        SpacetimeServerStub.invokeModuleExport(
+          compilerGuardExport,
+          serverRuntimeExternalCtx as never,
+          rawArgs,
+        ),
+      ).toThrow(
+        "Scheduled target compilerGuardFire is only invocable by the scheduler",
+      )
+      expect(invoked).toBe(false)
+
+      invoked = false
       expect(() =>
         SpacetimeServerStub.invokeModuleExport(
           compilerGuardExport,
@@ -1402,7 +1437,7 @@ describe("server runtime", (it) => {
           "forced setInterval restore failure",
         )
 
-        const firstRun = yield* withRestoredDevGuardGlobals(
+        const runFirst = yield* withRestoredDevGuardGlobals(
           Effect.gen(function* () {
             const exit = yield* provideConstrainedServerSupport(
               Effect.try({
@@ -1443,10 +1478,10 @@ describe("server runtime", (it) => {
           }).pipe(Effect.provideService(Console.Console, recordingConsole)),
         )
 
-        expect(Exit.isSuccess(firstRun.exit)).toBe(true)
-        expect(firstRun.mathRandomRestored).toBe(true)
-        expect(firstRun.queueMicrotaskRestored).toBe(true)
-        expect(firstRun.setTimeoutRestored).toBe(true)
+        expect(Exit.isSuccess(runFirst.exit)).toBe(true)
+        expect(runFirst.mathRandomRestored).toBe(true)
+        expect(runFirst.queueMicrotaskRestored).toBe(true)
+        expect(runFirst.setTimeoutRestored).toBe(true)
         expect(
           hasConsoleCall(
             calls,
@@ -1455,7 +1490,7 @@ describe("server runtime", (it) => {
           ),
         ).toBe(true)
 
-        const secondExit = yield* provideConstrainedServerSupport(
+        const exitSecond = yield* provideConstrainedServerSupport(
           Effect.try({
             try: () => Math.random(),
             catch: (cause) =>
@@ -1468,9 +1503,9 @@ describe("server runtime", (it) => {
           "dev-guarded",
         ).pipe(Effect.exit)
 
-        expect(Exit.isFailure(secondExit)).toBe(true)
-        if (Exit.isFailure(secondExit)) {
-          const failure = secondExit.cause.pipe(
+        expect(Exit.isFailure(exitSecond)).toBe(true)
+        if (Exit.isFailure(exitSecond)) {
+          const failure = exitSecond.cause.pipe(
             Cause.findErrorOption,
             Option.getOrUndefined,
           )

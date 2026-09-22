@@ -1,5 +1,4 @@
 import { defineEcConfig } from "@astrojs/starlight/expressive-code"
-import ecTwoSlash from "expressive-code-twoslash"
 import { spacetimedbShikiTheme } from "./src/styles/spacetimedb-shiki-theme.js"
 
 export default defineEcConfig({
@@ -30,16 +29,4 @@ export default defineEcConfig({
       frameBoxShadowCssValue: "0 18px 64px rgba(0, 0, 0, 0.28)",
     },
   },
-  plugins: [
-    ecTwoSlash({
-      twoslashOptions: {
-        compilerOptions: {
-          module: "esnext",
-          moduleResolution: "bundler",
-          target: "es2022",
-          strict: true,
-        },
-      },
-    }),
-  ],
 })

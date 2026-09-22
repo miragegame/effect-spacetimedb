@@ -26,9 +26,9 @@ const useExtraService: Effect.Effect<void, never, ExtraService> = Effect.gen(
   },
 )
 
-const defaultServer = makeServer({ module: CallableOnlyModule })
+const serverDefault = makeServer({ module: CallableOnlyModule })
 
-const missingRuntimeService = defaultServer.handlers({
+const missingRuntimeService = serverDefault.handlers({
   // @ts-expect-error ExtraService must be provided by the server runtime.
   reducers: {
     ping: () => useExtraService,
@@ -42,9 +42,9 @@ const missingRuntimeService = defaultServer.handlers({
 
 void missingRuntimeService
 
-const missingSectionRuntimeService = defaultServer.reducers({
+const missingSectionRuntimeService = serverDefault.reducers({
   // @ts-expect-error section records reject services absent from the server runtime; @effect-diagnostics-next-line missingEffectContext:off
-  ping: defaultServer.reducer(
+  ping: serverDefault.reducer(
     Effect.fn(function* () {
       const extra = yield* ExtraService
       void extra.value

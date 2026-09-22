@@ -65,6 +65,27 @@ export type TableAtomSession<Module extends AnyModuleSpec> = {
   ) => boolean
 }
 
+type SupervisedSessionSource<Session, Failure> = {
+  readonly session: SubscriptionRef.SubscriptionRef<
+    AsyncResult.AsyncResult<Session, Failure>
+  >
+}
+
+export const supervisedSessionAtom = <Session, Failure>(
+  acquire: Effect.Effect<
+    SupervisedSessionSource<Session, Failure>,
+    never,
+    Scope.Scope
+  >,
+): Atom.Atom<AsyncResult.AsyncResult<Session, Failure>> => {
+  const source = Atom.subscriptionRef(
+    acquire.pipe(Effect.map((supervisor) => supervisor.session)),
+  )
+  return Atom.readable((get) =>
+    AsyncResult.flatMap(get(source), (current) => current),
+  )
+}
+
 const refAtom = <A, E>(
   acquire: Effect.Effect<
     SubscriptionRef.SubscriptionRef<AsyncResult.AsyncResult<A, E>>,

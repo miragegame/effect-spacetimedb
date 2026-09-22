@@ -323,7 +323,7 @@ export const collectIterator = (
     Effect.map((values) => values as ReadonlyArray<unknown>),
   )
 
-export const firstIteratorValue = (
+export const iteratorValueFirst = (
   iterator: unknown,
   op: string,
   mapValue: (value: unknown) => unknown = (value) => value,

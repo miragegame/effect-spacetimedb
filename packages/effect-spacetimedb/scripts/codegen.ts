@@ -42,7 +42,6 @@ const target: CodegenTarget = {
   moduleBundlePath: exampleBundlePath,
   stagingDir: path.join(
     packageRoot,
-    "node_modules",
     ".tmp",
     "effect-spacetimedb-codegen",
     "staging",

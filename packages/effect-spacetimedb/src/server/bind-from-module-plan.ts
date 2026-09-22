@@ -4,19 +4,18 @@ import * as Clock from "effect/Clock"
 import * as Layer from "effect/Layer"
 
 import * as Match from "effect/Match"
-import type * as Tracer from "effect/Tracer"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import { formatModuleDiagnostics } from "../contract/module-validation.ts"
 import { SyncResponse as NativeSyncResponse } from "../http-primitives.ts"
 
 import type { ModulePlan } from "../module-plan.ts"
 
-import { makeModulePlan } from "../module-plan.ts"
 import { makeServerContextAccessors } from "./bind-context-accessors.ts"
 import { makeHandlerInputFactory } from "./bind-handler-inputs.ts"
 import {
   assertHandlerRecordOwnership,
   decodeHttpRequest,
+  handlerSpanTraceOptions,
   type HandlerLogAnnotations,
   logHttpHandlerBoundaryFailure,
   senderLogValue,
@@ -79,18 +78,22 @@ import type { LifecycleHandler } from "./lifecycle.ts"
 import type { ProcedureHandler } from "./procedure.ts"
 import type { ReducerHandler } from "./reducer.ts"
 import {
-  defaultServerRuntimeMode,
+  serverRuntimeModeDefault,
   provideConstrainedServerRuntime,
   provideConstrainedServerSupport,
+  makeProcedureServerClock,
   makeUntimedServerClock,
+  type ConstrainedServerRuntimeMode,
+  type TimedRuntimeCtx,
 } from "./runtime-layer.ts"
-import type {
-  AnonymousViewCtxLike,
-  BaseReducerCtx,
-  DbShape,
-  HttpHandlerCtxLike,
-  ProcedureCtxLike,
-  ViewCtxLike,
+import {
+  type AnonymousViewCtxLike,
+  type BaseReducerCtx,
+  type DbShape,
+  type HttpHandlerCtxLike,
+  ProcedureClockNow,
+  type ProcedureCtxLike,
+  type ViewCtxLike,
 } from "./runtime-types.ts"
 import {
   StdbSenderFailure,
@@ -106,11 +109,8 @@ import { makeTransactionHelpers } from "./transaction-helpers.ts"
 import { makeDbOnlyTxRunner, makeTxRunner } from "./tx.ts"
 import type { ViewHandler } from "./view.ts"
 
-const handlerSpanTraceOptions: Tracer.TraceOptions = {
-  captureStackTrace: false,
-}
-
 export function makeFromModulePlan<Module extends AnyModuleSpec>(options: {
+  readonly onDefect?: MakeOptions<Module>["onDefect"]
   readonly plan: ModulePlan<Module>
   readonly runtime?: undefined
   readonly runtimeMode?: MakeOptions<Module>["runtimeMode"]
@@ -119,6 +119,7 @@ export function makeFromModulePlan<
   Module extends AnyModuleSpec,
   RuntimeR,
 >(options: {
+  readonly onDefect?: MakeOptions<Module, RuntimeR>["onDefect"]
   readonly plan: ModulePlan<Module>
   readonly runtime: MakeOptions<Module, RuntimeR>["runtime"]
   readonly runtimeMode?: MakeOptions<Module, RuntimeR>["runtimeMode"]
@@ -127,6 +128,7 @@ export function makeFromModulePlan<
   Module extends AnyModuleSpec,
   RuntimeR = never,
 >(options: {
+  readonly onDefect?: MakeOptions<Module, RuntimeR>["onDefect"]
   readonly plan: ModulePlan<Module>
   readonly runtime?: MakeOptions<Module, RuntimeR>["runtime"]
   readonly runtimeMode?: MakeOptions<Module, RuntimeR>["runtimeMode"]
@@ -138,13 +140,27 @@ export function makeFromModulePlan<
     options.runtime === undefined
       ? (toSyncRunnerFromLayer(Layer.empty) as SyncRunner<RuntimeR>)
       : toSyncRunner(options.runtime)
-  const runtimeMode = options.runtimeMode ?? defaultServerRuntimeMode
+  const runtimeMode = options.runtimeMode ?? serverRuntimeModeDefault
+  const onDefect = options.onDefect
+  // Every handler boundary provides the same runtime mode and the same defect
+  // observer; only the context and clock differ. Binding them once here keeps
+  // each call site to the part that actually varies.
+  const withServerSupport = <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+    mode: ConstrainedServerRuntimeMode = runtimeMode,
+  ) => provideConstrainedServerSupport(effect, mode, onDefect)
+  const withServerRuntime = <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+    ctx: TimedRuntimeCtx,
+    clock?: Clock.Clock,
+  ) =>
+    provideConstrainedServerRuntime(effect, ctx, runtimeMode, clock, onDefect)
   const warnings = module.diagnostics.filter(
     (diagnostic) => diagnostic.severity === "warning",
   )
   if (warnings.length > 0) {
     runner.runSync(
-      provideConstrainedServerSupport(
+      withServerSupport(
         Effect.logWarning(formatModuleDiagnostics(warnings)),
         // Binding is outside a callable transaction, so there is no host
         // timestamp with which to replace the logger's wall clock.
@@ -158,9 +174,7 @@ export function makeFromModulePlan<
     handler: string,
     kind: StdbServerDisposedError["kind"],
   ) => new StdbServerDisposedError({ module: module.name, handler, kind })
-  const makeHandlerSpanOptions = (
-    kind: HandlerLogAnnotations["kind"],
-  ): Tracer.SpanOptionsNoTrace => ({
+  const makeHandlerSpanOptions = (kind: HandlerLogAnnotations["kind"]) => ({
     attributes: {
       "effect-spacetimedb.endpoint.kind": kind,
       "effect-spacetimedb.module": module.name,
@@ -179,7 +193,7 @@ export function makeFromModulePlan<
       Effect.provideService(ServerContext.ReducerCtx, ctx),
       Effect.provideService(ServerContext.MutationCtx, ctx),
       Effect.provideService(ServerContext.Db, dbHandles.readwrite(ctx.db)),
-      (provided) => provideConstrainedServerRuntime(provided, ctx, runtimeMode),
+      (provided) => withServerRuntime(provided, ctx),
     ) as Effect.Effect<A, E, RuntimeR>
 
   const provideProcedureRuntime = <A, E>(
@@ -198,7 +212,12 @@ export function makeFromModulePlan<
         ServerContext.TxRunner,
         txRunner as unknown as ServerContext.TxRunnerService<AnyModuleSpec>,
       ),
-      (provided) => provideConstrainedServerRuntime(provided, ctx, runtimeMode),
+      (provided) =>
+        withServerRuntime(
+          provided,
+          ctx,
+          makeProcedureServerClock(ctx[ProcedureClockNow]),
+        ),
     ) as Effect.Effect<A, E, RuntimeR>
 
   const provideHttpHandlerRuntime = <A, E>(
@@ -219,7 +238,7 @@ export function makeFromModulePlan<
         ServerContext.HttpTxRunner,
         txRunner as unknown as ServerContext.HttpTxRunnerService<AnyModuleSpec>,
       ),
-      (provided) => provideConstrainedServerRuntime(provided, ctx, runtimeMode),
+      (provided) => withServerRuntime(provided, ctx),
     ) as Effect.Effect<A, E, RuntimeR>
 
   const provideViewRuntime = <A, E>(
@@ -268,9 +287,8 @@ export function makeFromModulePlan<
     // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
     const narrowed = provided as Effect.Effect<A, E, RuntimeR>
 
-    return provideConstrainedServerSupport(
+    return withServerSupport(
       Effect.provideService(narrowed, Clock.Clock, makeUntimedServerClock()),
-      runtimeMode,
     )
   }
 
@@ -282,8 +300,7 @@ export function makeFromModulePlan<
       Effect.provideService(ServerContext.TxCtx, txCtx),
       Effect.provideService(ServerContext.MutationCtx, txCtx),
       Effect.provideService(ServerContext.Db, dbHandles.readwrite(txCtx.db)),
-      (provided) =>
-        provideConstrainedServerRuntime(provided, txCtx, runtimeMode),
+      (provided) => withServerRuntime(provided, txCtx),
     ) as Effect.Effect<A, E, RuntimeR>
 
   const provideHttpTxRuntime = <
@@ -297,8 +314,7 @@ export function makeFromModulePlan<
   ): Effect.Effect<A, E, RuntimeR> =>
     effect.pipe(
       Effect.provideService(ServerContext.Db, dbHandles.readwrite(txCtx.db)),
-      (provided) =>
-        provideConstrainedServerRuntime(provided, httpCtx, runtimeMode),
+      (provided) => withServerRuntime(provided, httpCtx),
     ) as Effect.Effect<A, E, RuntimeR>
 
   const { withTx, tx, httpTx } = makeTransactionHelpers<Module>()
@@ -768,30 +784,4 @@ export function makeFromModulePlan<
     Module,
     RuntimeR
   >
-}
-
-export function make<Module extends AnyModuleSpec>(
-  options: MakeOptions<Module> & { readonly runtime?: undefined },
-): InternalServerInstance<Module>
-export function make<Module extends AnyModuleSpec, RuntimeR>(
-  options: MakeOptions<Module, RuntimeR> & {
-    readonly runtime: MakeOptions<Module, RuntimeR>["runtime"]
-  },
-): InternalServerInstance<Module, RuntimeR>
-export function make<Module extends AnyModuleSpec, RuntimeR = never>(
-  options: MakeOptions<Module, RuntimeR>,
-): InternalServerInstance<Module> | InternalServerInstance<Module, RuntimeR> {
-  const runtimeMode = options.runtimeMode ?? defaultServerRuntimeMode
-  return (
-    options.runtime === undefined
-      ? makeFromModulePlan({
-          plan: makeModulePlan(options.module),
-          runtimeMode,
-        })
-      : makeFromModulePlan({
-          plan: makeModulePlan(options.module),
-          runtime: options.runtime,
-          runtimeMode,
-        })
-  ) as InternalServerInstance<Module, RuntimeR>
 }

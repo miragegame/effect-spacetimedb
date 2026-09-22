@@ -146,8 +146,10 @@ const WideHandlers: Stdb.GroupCheckedHandlers<
   auth_width_58: handler,
 }
 
-const WideLive = Stdb.StdbBuilder.groupPrechecked(WideModule, "ObservedWidth", {
-  ...WideHandlers,
-})
+const WideLive = Stdb.StdbBuilder.groupPrechecked(
+  WideModule,
+  "ObservedWidth",
+  WideHandlers,
+)
 
 void build(WideModule, [WideLive] as const)

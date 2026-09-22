@@ -94,7 +94,7 @@ const exerciseNativeRanges = (
   ]
 }
 
-describe("SpaceTimeDB 2.6.1 cache patch", () => {
+describe("SpaceTimeDB client cache scalar-range patch", () => {
   it("keeps native scalar ranges working through root and sdk exports", () => {
     expect(exerciseNativeRanges(RootClientCache)).toEqual([1, 1, 1, 1])
     expect(exerciseNativeRanges(SdkClientCache)).toEqual([1, 1, 1, 1])

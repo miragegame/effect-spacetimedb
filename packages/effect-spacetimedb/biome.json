@@ -7,7 +7,12 @@
     "lineWidth": 80
   },
   "files": {
-    "includes": ["**", "!examples/publishable-module/generated-client"]
+    "includes": [
+      "**",
+      "!.tmp",
+      "!examples/publishable-module/generated-client",
+      "!examples/publishable-module/generated-client/**"
+    ]
   },
   "linter": {
     "enabled": true
