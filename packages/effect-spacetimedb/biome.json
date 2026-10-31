@@ -11,7 +11,11 @@
       "**",
       "!.tmp",
       "!examples/publishable-module/generated-client",
-      "!examples/publishable-module/generated-client/**"
+      "!examples/publishable-module/generated-client/**",
+      "!examples/idc-pair/sender/src/remote",
+      "!examples/idc-pair/sender/src/remote/**",
+      "!test/fixtures/idc/remote",
+      "!test/fixtures/idc/remote/**"
     ]
   },
   "linter": {

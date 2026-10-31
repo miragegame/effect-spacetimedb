@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
-import type {} from "effect/unstable/httpapi/HttpApiSchema"
+import type {} from "effect/http-api/HttpApiSchema"
 import * as ParseResult from "../schema-parse.ts"
 import { StdbDecodeError } from "../decode-error.ts"
 import {
@@ -486,7 +486,7 @@ export const matchEffect = <Definition extends AnyErrorDefinition>(
   }
 
   return Schema.decodeUnknownEffect(
-    schema as unknown as Schema.Codec<
+    Schema.toType(schema) as unknown as Schema.Codec<
       ErrorInstances<Definition>,
       unknown,
       never,

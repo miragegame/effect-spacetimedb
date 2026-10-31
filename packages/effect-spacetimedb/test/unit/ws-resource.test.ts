@@ -5,6 +5,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Stdb from "effect-spacetimedb"
 import { Identity } from "spacetimedb"
+import { fixtureConnectTimeoutMillis } from "../helpers/transport-bounds"
 const { expect } = EffectVitest
 import * as StdbTesting from "effect-spacetimedb/testing"
 import { FullModule } from "../fixtures/full-module"
@@ -75,6 +76,7 @@ describe("ws resource", (it) => {
           },
           uri: "ws://localhost:3000",
           databaseName: "test",
+          connectTimeoutMillis: fixtureConnectTimeoutMillis,
         },
       })
 
@@ -134,6 +136,7 @@ describe("ws resource", (it) => {
             },
             uri: "ws://localhost:3000",
             databaseName: "test",
+            connectTimeoutMillis: fixtureConnectTimeoutMillis,
           },
         })
 
@@ -190,6 +193,7 @@ describe("ws resource", (it) => {
           },
           uri: "ws://localhost:3000",
           databaseName: "test",
+          connectTimeoutMillis: fixtureConnectTimeoutMillis,
         },
       })
 
@@ -260,6 +264,7 @@ describe("ws resource", (it) => {
           },
           uri: "ws://localhost:3000",
           databaseName: "test",
+          connectTimeoutMillis: fixtureConnectTimeoutMillis,
         },
       })
 
@@ -334,6 +339,7 @@ describe("ws resource", (it) => {
             },
             uri: "ws://localhost:3000",
             databaseName: "test",
+            connectTimeoutMillis: fixtureConnectTimeoutMillis,
           },
         })
 
@@ -399,6 +405,7 @@ describe("ws resource", (it) => {
             },
             uri: "ws://localhost:3000",
             databaseName: "test",
+            connectTimeoutMillis: fixtureConnectTimeoutMillis,
           },
         })
 
@@ -489,6 +496,7 @@ describe("ws resource", (it) => {
             },
             uri: "ws://localhost:3000",
             databaseName: "test",
+            connectTimeoutMillis: fixtureConnectTimeoutMillis,
           },
         })
 
@@ -555,6 +563,7 @@ describe("ws resource", (it) => {
           },
           uri: "ws://localhost:3000",
           databaseName: "test",
+          connectTimeoutMillis: fixtureConnectTimeoutMillis,
         },
       })
 
@@ -629,6 +638,7 @@ describe("ws resource", (it) => {
           },
           uri: "ws://localhost:3000",
           databaseName: "test",
+          connectTimeoutMillis: fixtureConnectTimeoutMillis,
         },
       })
 
@@ -754,6 +764,7 @@ describe("ws resource", (it) => {
               },
               uri: "ws://localhost:3000",
               databaseName: "test",
+              connectTimeoutMillis: fixtureConnectTimeoutMillis,
             },
             { name: "main" },
           ),
@@ -840,6 +851,7 @@ describe("ws resource", (it) => {
           },
           uri: "ws://localhost:3000",
           databaseName: "test",
+          connectTimeoutMillis: fixtureConnectTimeoutMillis,
           token: "token",
           compression: "gzip",
           lightMode: true,
@@ -924,6 +936,7 @@ describe("ws resource", (it) => {
             },
             uri: "ws://localhost:3000",
             databaseName: "test",
+            connectTimeoutMillis: fixtureConnectTimeoutMillis,
           })
           .pipe(Effect.scoped)
 
@@ -931,4 +944,22 @@ describe("ws resource", (it) => {
         expect(disconnectCount).toBe(1)
       }),
   )
+
+  it("rejects a connect timeout that bounds nothing when the resource is built", () => {
+    const unboundedTimeouts = [Number.POSITIVE_INFINITY, 0, -1, Number.NaN]
+    for (const connectTimeoutMillis of unboundedTimeouts) {
+      expect(() =>
+        StdbTesting.makeScopedFromModulePlan({
+          plan: StdbTesting.makeModulePlan(FullModule),
+          config: {
+            builder: () =>
+              expect.unreachable("an invalid bound must fail first"),
+            uri: "ws://localhost:3000",
+            databaseName: "test",
+            connectTimeoutMillis,
+          },
+        }),
+      ).toThrow(TypeError)
+    }
+  })
 })

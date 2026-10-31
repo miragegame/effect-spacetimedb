@@ -2,6 +2,7 @@ import * as EffectVitest from "@effect/vitest"
 import * as Stdb from "effect-spacetimedb"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import { typeBuilder } from "../helpers/type-builder"
+import { testArrayLength } from "../helpers/array-bounds"
 
 const { describe, expect, it } = EffectVitest
 
@@ -38,7 +39,7 @@ const capabilityCases: ReadonlyArray<{
   readonly label: string
   readonly value: StdbTesting.ContractType.AnyValueType
 }> = [
-  { label: "array", value: Stdb.array(Stdb.u8()) },
+  { label: "array", value: Stdb.array(Stdb.u8(), testArrayLength) },
   { label: "bigint", value: Stdb.bigint() },
   { label: "bool", value: Stdb.bool() },
   { label: "bytes", value: Stdb.bytes() },

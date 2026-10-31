@@ -22,6 +22,7 @@ const spacetimeSysStub = decodeURIComponent(
 export const spacetimeSysAlias = {
   "spacetime:sys@2.0": spacetimeSysStub,
   "spacetime:sys@2.1": spacetimeSysStub,
+  "spacetime:sys@2.2": spacetimeSysStub,
 } as const
 
 export {
@@ -125,10 +126,27 @@ export { type TypeOf } from "./contract/type.ts"
 export { makeModulePlan } from "./module-plan.ts"
 export { project } from "./project.ts"
 export { bindCallables } from "./testing/bind-callables.ts"
+export * as IdcPump from "./testing/idc-pump.ts"
+export {
+  IdcDelivery,
+  type IdcPumpDatabase,
+  type IdcPumpLink,
+  type IdcPumpReceiver,
+  type IdcPumpRecordingReceiver,
+  type IdcRecordedCall,
+  makeIdcPump,
+} from "./testing/idc-pump.ts"
+export {
+  TestModuleEnvironmentError,
+  type TestModuleEnvironmentUpdate,
+  type TestModuleEnvironmentValues,
+} from "./testing/module-environment.ts"
 export {
   makeTestModuleHarness,
   NestedTestTransactionError,
+  type OutboxTableKeys,
   type TestModuleHarness,
+  type TestModuleRawDb,
   type TestModuleRowWrite,
 } from "./testing/module-harness.ts"
 export {

@@ -6,7 +6,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import { makeDevServer } from "effect-spacetimedb/dev-server"
 import { project } from "effect-spacetimedb/testing"
 import * as ExampleGeneratedClient from "effect-spacetimedb/testing/example-client"
@@ -272,6 +272,11 @@ const makeSmokeWebSocket = async ({
   }
 }
 
+// The smoke connects to a local dev server that is already up, which answers
+// in well under a second; a connect still pending after 30 s is a hang, and
+// the smoke should fail on it rather than stall its CI job.
+const smokeConnectTimeoutMillis = 30_000
+
 const decodeUserId = Schema.decodeUnknownSync(UserId)
 const decodeUserName = Schema.decodeUnknownSync(UserName)
 
@@ -285,7 +290,7 @@ class NodeSmokeRoundTripMismatch extends Data.TaggedError(
   }
 }
 
-const requiredSpacetimeVersion = "2.10.1"
+const requiredSpacetimeVersion = "2.14.0"
 const spacetimeVersionRequirement =
   `spacetimedb tool version ${requiredSpacetimeVersion}` as const
 
@@ -310,6 +315,7 @@ const program = Effect.gen(function* () {
     compression: "none",
     createWebSocket: makeSmokeWebSocket,
     databaseName: runtime.databaseName,
+    connectTimeoutMillis: smokeConnectTimeoutMillis,
     token: runtime.token,
     uri: runtime.baseUrl,
   })

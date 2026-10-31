@@ -4,6 +4,12 @@ import type * as Stream from "effect/Stream"
 import type { TimeDuration } from "spacetimedb"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import type { AnyTableSpec } from "../contract/table.ts"
+import type { OutboxMetadata } from "../contract/outbox-table.ts"
+import type {
+  AnyRemoteInterface,
+  PeerIdentity,
+} from "../contract/remote-interface.ts"
+import type { OutboxRowTooLarge } from "../contract/outbox-table.ts"
 import type { BodyInit, Headers } from "../http-primitives.ts"
 import type {
   ColumnKey,
@@ -399,6 +405,42 @@ type TableAccessors<Table extends AnyTableSpec, Readonly extends boolean> = {
     string]: ExplicitIndexAccessor<Table, Index, Readonly>
 }
 
+/**
+ * What a sender passes to an outbox insert: the target peer, the receiver's
+ * parameters and any local columns. `msgId` and `enqueuedAt` are filled in.
+ */
+export type OutboxInsertRow<
+  Table extends AnyTableSpec,
+  Interface extends AnyRemoteInterface,
+> = Omit<TableRow<Table>, "msgId" | "enqueuedAt" | "target"> & {
+  readonly target: PeerIdentity<Interface>
+}
+
+/**
+ * An outbox: insert-only, with reads and read-only lookups (`byTarget` among
+ * them) for inspection. The host deletes a row when its settle reducer runs.
+ */
+export type OutboxTableHandle<
+  Table extends AnyTableSpec,
+  Interface extends AnyRemoteInterface,
+  Readonly extends boolean,
+> = {
+  readonly count: () => DbEffect<bigint>
+  readonly first: () => DbEffect<TableRow<Table> | undefined>
+  readonly toArray: () => DbEffect<ReadonlyArray<TableRow<Table>>>
+  readonly stream: () => DbStream<TableRow<Table>>
+  readonly unsafe: {
+    readonly iter: () => DbEffect<Iterable<TableRow<Table>>>
+  }
+} & (Readonly extends true
+  ? {}
+  : {
+      readonly insert: (
+        row: OutboxInsertRow<Table, Interface>,
+      ) => Effect.Effect<TableRow<Table>, OutboxRowTooLarge | DbFailure>
+    }) &
+  TableAccessors<Table, true>
+
 export type EffectTableHandle<
   Table extends AnyTableSpec,
   Readonly extends boolean,
@@ -429,12 +471,22 @@ export type EffectTableHandle<
       }) &
   TableAccessors<Table, Readonly>
 
+/** An outbox's handle, or the ordinary handle of any other table. */
+type TableHandleFor<
+  Table extends AnyTableSpec,
+  Readonly extends boolean,
+> = Table extends {
+  readonly outbox: OutboxMetadata<infer Interface>
+}
+  ? OutboxTableHandle<Table, Interface, Readonly>
+  : EffectTableHandle<Table, Readonly>
+
 export type DbHandleFor<Tables extends Record<string, AnyTableSpec>> = {
-  readonly [Key in keyof Tables]-?: EffectTableHandle<Tables[Key], false>
+  readonly [Key in keyof Tables]-?: TableHandleFor<Tables[Key], false>
 }
 
 export type ReadonlyDbHandleFor<Tables extends Record<string, AnyTableSpec>> = {
-  readonly [Key in keyof Tables]-?: EffectTableHandle<Tables[Key], true>
+  readonly [Key in keyof Tables]-?: TableHandleFor<Tables[Key], true>
 }
 
 export type EffectDbView<Module extends AnyModuleSpec> = DbHandleFor<

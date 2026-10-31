@@ -100,5 +100,8 @@ describe("spacetime sys testing stub", () => {
     expect(spacetimeSysAlias["spacetime:sys@2.1"]).toBe(
       spacetimeSysAlias["spacetime:sys@2.0"],
     )
+    expect(spacetimeSysAlias["spacetime:sys@2.2"]).toBe(
+      spacetimeSysAlias["spacetime:sys@2.0"],
+    )
   })
 })

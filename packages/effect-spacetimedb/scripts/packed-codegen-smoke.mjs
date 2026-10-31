@@ -8,7 +8,7 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { packPublishArchive } from "./pack.mjs"
+import { resolvePublishArchive } from "./pack.mjs"
 import {
   ensureModuleCanResolveInstallRoot,
   exampleBundlePath,
@@ -80,9 +80,11 @@ try {
     "spacetime:sys@2.0",
     "--external",
     "spacetime:sys@2.1",
+    "--external",
+    "spacetime:sys@2.2",
   ])
 
-  const tarball = await packPublishArchive(packDir)
+  const tarball = await resolvePublishArchive(packDir)
   writeFileSync(
     path.join(consumerDir, "package.json"),
     `${JSON.stringify({ name: "packed-codegen-smoke", private: true, type: "module" }, null, 2)}\n`,

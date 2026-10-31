@@ -1,3 +1,4 @@
+import type { HostValue } from "./core.ts"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as ParseResult from "../../schema-parse.ts"
@@ -81,18 +82,13 @@ export {
   resolveLiteralBuilder,
 } from "./literal-utils.ts"
 
-export const resolvePrimitiveSchema = <
-  Base,
-  BaseEncoded,
-  A extends Base,
-  Encoded,
->(
+export const resolvePrimitiveSchema = <Base, BaseEncoded, A, Encoded>(
   domain: Schema.Codec<A, Encoded, never> | undefined,
   fallback: Schema.Codec<Base, BaseEncoded, never>,
 ): Schema.Codec<Base | A, BaseEncoded | Encoded, never> =>
   narrowSchema<Base | A, BaseEncoded | Encoded>(domain ?? fallback)
 
-export const boundedBigIntSchema = <A extends bigint, Encoded extends bigint>(
+export const boundedBigIntSchema = <A, Encoded extends bigint>(
   domain: Schema.Codec<A, Encoded, never, never> | undefined,
   min: bigint,
   max: bigint,
@@ -103,14 +99,22 @@ export const boundedBigIntSchema = <A extends bigint, Encoded extends bigint>(
 
   return narrowSchema<bigint | A, bigint | Encoded>(
     (domain != null
-      ? wire
-          .pipe(Schema.decodeTo(domain as Schema.Codec<A, bigint, never>))
-          .check(Schema.isBetweenBigInt({ minimum: min, maximum: max }))
+      ? wire.pipe(
+          Schema.decodeTo(
+            domain.check(
+              Schema.makeFilter<A>((value) =>
+                typeof value === "bigint" && (value < min || value > max)
+                  ? "Decoded bigint is outside the native integer range"
+                  : undefined,
+              ),
+            ) as Schema.Codec<A, bigint, never>,
+          ),
+        )
       : wire) as Schema.Codec<bigint | A, bigint | Encoded, never, never>,
   )
 }
 
-export const boundedNumberSchema = <A extends number, Encoded extends number>(
+export const boundedNumberSchema = <A, Encoded extends number>(
   domain: Schema.Codec<A, Encoded, never, never> | undefined,
   min: number,
   max: number,
@@ -121,12 +125,18 @@ export const boundedNumberSchema = <A extends number, Encoded extends number>(
 
   return narrowSchema<number | A, number | Encoded>(
     (domain != null
-      ? wire
-          .pipe(Schema.decodeTo(domain as Schema.Codec<A, number, never>))
-          .check(
-            Schema.isInt(),
-            Schema.isBetween({ minimum: min, maximum: max }),
-          )
+      ? wire.pipe(
+          Schema.decodeTo(
+            domain.check(
+              Schema.makeFilter<A>((value) =>
+                typeof value === "number" &&
+                (!Number.isInteger(value) || value < min || value > max)
+                  ? "Decoded number is outside the native integer range"
+                  : undefined,
+              ),
+            ) as Schema.Codec<A, number, never>,
+          ),
+        )
       : wire) as Schema.Codec<number | A, number | Encoded, never, never>,
   )
 }
@@ -420,11 +430,11 @@ export function bool<A extends boolean, Encoded extends boolean>(
 
 export function u8(): U8ValueType
 
-export function u8<A extends number, Encoded extends number>(
+export function u8<A, Encoded extends number>(
   domain: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<A, Encoded>
 
-export function u8<A extends number, Encoded extends number>(
+export function u8<A, Encoded extends number>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<number | A, number | Encoded> {
   const schema = boundedNumberSchema(domain, 0, U8Max)
@@ -436,11 +446,11 @@ export function u8<A extends number, Encoded extends number>(
 
 export function u16(): U16ValueType
 
-export function u16<A extends number, Encoded extends number>(
+export function u16<A, Encoded extends number>(
   domain: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<A, Encoded>
 
-export function u16<A extends number, Encoded extends number>(
+export function u16<A, Encoded extends number>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<number | A, number | Encoded> {
   const schema = boundedNumberSchema(domain, 0, U16Max)
@@ -452,11 +462,11 @@ export function u16<A extends number, Encoded extends number>(
 
 export function i8(): I8ValueType
 
-export function i8<A extends number, Encoded extends number>(
+export function i8<A, Encoded extends number>(
   domain: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<A, Encoded>
 
-export function i8<A extends number, Encoded extends number>(
+export function i8<A, Encoded extends number>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<number | A, number | Encoded> {
   const schema = boundedNumberSchema(domain, I8Min, I8Max)
@@ -468,11 +478,11 @@ export function i8<A extends number, Encoded extends number>(
 
 export function i16(): I16ValueType
 
-export function i16<A extends number, Encoded extends number>(
+export function i16<A, Encoded extends number>(
   domain: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<A, Encoded>
 
-export function i16<A extends number, Encoded extends number>(
+export function i16<A, Encoded extends number>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<number | A, number | Encoded> {
   const schema = boundedNumberSchema(domain, I16Min, I16Max)
@@ -484,11 +494,11 @@ export function i16<A extends number, Encoded extends number>(
 
 export function i32(): I32ValueType
 
-export function i32<A extends number, Encoded extends number>(
+export function i32<A, Encoded extends number>(
   domain: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<A, Encoded>
 
-export function i32<A extends number, Encoded extends number>(
+export function i32<A, Encoded extends number>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<number | A, number | Encoded> {
   const schema = boundedNumberSchema(domain, I32Min, I32Max)
@@ -500,11 +510,11 @@ export function i32<A extends number, Encoded extends number>(
 
 export function f32(): F32ValueType
 
-export function f32<A extends number, Encoded extends number>(
+export function f32<A, Encoded extends number>(
   domain: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<A, Encoded>
 
-export function f32<A extends number, Encoded extends number>(
+export function f32<A, Encoded extends number>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<number | A, number | Encoded> {
   // @effect-diagnostics-next-line schemaNumber:off -- SpaceTimeDB f32 values preserve native float NaN/Infinity; HTTP JSON rejects non-finite at encoding.
@@ -517,11 +527,11 @@ export function f32<A extends number, Encoded extends number>(
 
 export function f64(): F64ValueType
 
-export function f64<A extends number, Encoded extends number>(
+export function f64<A, Encoded extends number>(
   domain: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<A, Encoded>
 
-export function f64<A extends number, Encoded extends number>(
+export function f64<A, Encoded extends number>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<number | A, number | Encoded> {
   // @effect-diagnostics-next-line schemaNumber:off -- SpaceTimeDB f64 values preserve native float NaN/Infinity; HTTP JSON rejects non-finite at encoding.
@@ -534,11 +544,11 @@ export function f64<A extends number, Encoded extends number>(
 
 export function u32(): U32ValueType
 
-export function u32<A extends number, Encoded extends number>(
+export function u32<A, Encoded extends number>(
   domain: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<A, Encoded>
 
-export function u32<A extends number, Encoded extends number>(
+export function u32<A, Encoded extends number>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<number | A, number | Encoded> {
   const schema = boundedNumberSchema(domain, 0, U32Max)
@@ -550,11 +560,11 @@ export function u32<A extends number, Encoded extends number>(
 
 export function u64(): U64ValueType
 
-export function u64<A extends bigint, Encoded extends bigint>(
+export function u64<A, Encoded extends bigint>(
   domain: Schema.Codec<A, Encoded, never, never>,
 ): U64ValueType<A, Encoded>
 
-export function u64<A extends bigint, Encoded extends bigint>(
+export function u64<A, Encoded extends bigint>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<bigint | A, bigint | Encoded, "u64"> {
   const schema = boundedBigIntSchema(domain, 0n, U64Max)
@@ -566,11 +576,11 @@ export function u64<A extends bigint, Encoded extends bigint>(
 
 export function i64(): I64ValueType
 
-export function i64<A extends bigint, Encoded extends bigint>(
+export function i64<A, Encoded extends bigint>(
   domain: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<A, Encoded>
 
-export function i64<A extends bigint, Encoded extends bigint>(
+export function i64<A, Encoded extends bigint>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<bigint | A, bigint | Encoded> {
   const schema = boundedBigIntSchema(domain, I64Min, I64Max)
@@ -582,11 +592,11 @@ export function i64<A extends bigint, Encoded extends bigint>(
 
 export function u128(): U128ValueType
 
-export function u128<A extends bigint, Encoded extends bigint>(
+export function u128<A, Encoded extends bigint>(
   domain: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<A, Encoded>
 
-export function u128<A extends bigint, Encoded extends bigint>(
+export function u128<A, Encoded extends bigint>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<bigint | A, bigint | Encoded> {
   const schema = boundedBigIntSchema(domain, 0n, U128Max)
@@ -598,11 +608,11 @@ export function u128<A extends bigint, Encoded extends bigint>(
 
 export function i128(): I128ValueType
 
-export function i128<A extends bigint, Encoded extends bigint>(
+export function i128<A, Encoded extends bigint>(
   domain: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<A, Encoded>
 
-export function i128<A extends bigint, Encoded extends bigint>(
+export function i128<A, Encoded extends bigint>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<bigint | A, bigint | Encoded> {
   const schema = boundedBigIntSchema(domain, I128Min, I128Max)
@@ -614,11 +624,11 @@ export function i128<A extends bigint, Encoded extends bigint>(
 
 export function u256(): U256ValueType
 
-export function u256<A extends bigint, Encoded extends bigint>(
+export function u256<A, Encoded extends bigint>(
   domain: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<A, Encoded>
 
-export function u256<A extends bigint, Encoded extends bigint>(
+export function u256<A, Encoded extends bigint>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<bigint | A, bigint | Encoded> {
   const schema = boundedBigIntSchema(domain, 0n, U256Max)
@@ -630,11 +640,11 @@ export function u256<A extends bigint, Encoded extends bigint>(
 
 export function i256(): I256ValueType
 
-export function i256<A extends bigint, Encoded extends bigint>(
+export function i256<A, Encoded extends bigint>(
   domain: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<A, Encoded>
 
-export function i256<A extends bigint, Encoded extends bigint>(
+export function i256<A, Encoded extends bigint>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<bigint | A, bigint | Encoded> {
   const schema = boundedBigIntSchema(domain, I256Min, I256Max)
@@ -680,19 +690,21 @@ export function bigint<A extends bigint>(
   })
 }
 
-export function uuid(): ValueType<UuidValue, unknown> {
+export function uuid(): ValueType<UuidValue, unknown> & HostValue<UuidValue> {
   return attachStdbType(SelfUuid, (factories) => factories.uuid(), {
     kind: "uuid",
   })
 }
 
-export function identity(): ValueType<IdentityValue, unknown> {
+export function identity(): ValueType<IdentityValue, unknown> &
+  HostValue<IdentityValue> {
   return attachStdbType(SelfIdentity, (factories) => factories.identity(), {
     kind: "identity",
   })
 }
 
-export function connectionId(): ValueType<ConnectionIdValue, unknown> {
+export function connectionId(): ValueType<ConnectionIdValue, unknown> &
+  HostValue<ConnectionIdValue> {
   return attachStdbType(
     SelfConnectionId,
     (factories) => factories.connectionId(),
@@ -702,19 +714,22 @@ export function connectionId(): ValueType<ConnectionIdValue, unknown> {
   )
 }
 
-export function timestamp(): ValueType<TimestampValue, unknown> {
+export function timestamp(): ValueType<TimestampValue, unknown> &
+  HostValue<TimestampValue> {
   return attachStdbType(SelfTimestamp, (factories) => factories.timestamp(), {
     kind: "timestamp",
   })
 }
 
-export function scheduleAt(): ValueType<ScheduleAtValue, unknown> {
+export function scheduleAt(): ValueType<ScheduleAtValue, unknown> &
+  HostValue<ScheduleAtValue> {
   return attachStdbType(SelfScheduleAt, (factories) => factories.scheduleAt(), {
     kind: "scheduleAt",
   })
 }
 
-export function timeDuration(): ValueType<TimeDurationValue, unknown> {
+export function timeDuration(): ValueType<TimeDurationValue, unknown> &
+  HostValue<TimeDurationValue> {
   return attachStdbType(
     SelfTimeDuration,
     (factories) => factories.timeDuration(),

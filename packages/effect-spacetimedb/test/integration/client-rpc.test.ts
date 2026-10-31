@@ -1,5 +1,5 @@
 import * as Cause from "effect/Cause"
-import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClient from "effect/http/HttpClient"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as EffectVitest from "@effect/vitest"
@@ -8,6 +8,7 @@ import * as Option from "effect/Option"
 import * as Stdb from "effect-spacetimedb"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import * as Schema from "effect/Schema"
+import { fixtureCallDurationMax } from "../helpers/transport-bounds"
 const { expect } = EffectVitest
 import { SenderError } from "spacetimedb"
 import { ExampleErrors, FullModule, UserMissing } from "../fixtures/full-module"
@@ -29,6 +30,7 @@ const HttpConfig = {
   uri: "http://stdb.test",
   databaseName: "full",
   token: "example-token",
+  callDurationMax: fixtureCallDurationMax,
 } as const
 
 const exitSnapshot = (value: unknown): unknown => {

@@ -35,9 +35,11 @@ jobs:
           node-version: "24"
       - run: bun install
       - run: bun run typecheck
+      # Before the tests: the native-package project boots real standalones
+      # (the inter-database calls test) and needs the pinned CLI on PATH.
+      - uses: ./.github/actions/setup-spacetimedb
       - run: bun run test
       - run: bun run test:coverage
       - run: bun run check:exports
-      - uses: ./.github/actions/setup-spacetimedb
       - run: bun --cwd=packages/effect-spacetimedb run smoke:packed-codegen
       - run: bun --cwd=packages/effect-spacetimedb run smoke:dev-server-node

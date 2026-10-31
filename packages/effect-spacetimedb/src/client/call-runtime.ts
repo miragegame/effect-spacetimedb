@@ -14,9 +14,12 @@ import type { ReducerSpec } from "../contract/reducer.ts"
 import type { AnyValueType } from "../contract/type.ts"
 import {
   type CallFailure,
+  type CallNotSentError,
   classifyRawCallFailure,
-  ConnectionLostError,
+  type ConnectionIdentityChangedError,
+  type ConnectionLostError,
   DomainCallError,
+  isConnectionCallFailure,
   type RawCallFailure,
   RemoteRejectedBody,
   RemoteRejectedError,
@@ -108,10 +111,12 @@ const isTransportCallFailure = (
   cause: unknown,
 ): cause is
   | ConnectionLostError
+  | CallNotSentError
+  | ConnectionIdentityChangedError
   | StdbDecodeError
   | RemoteRejectedError
   | TransportError =>
-  ConnectionLostError.is(cause) ||
+  isConnectionCallFailure(cause) ||
   StdbDecodeError.is(cause) ||
   RemoteRejectedError.is(cause) ||
   TransportError.is(cause)

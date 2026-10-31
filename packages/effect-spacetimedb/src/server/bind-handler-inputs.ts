@@ -1,3 +1,4 @@
+import type * as ServerContext from "./context.ts"
 import * as Effect from "effect/Effect"
 
 import type { AnyModuleSpec } from "../contract/module.ts"
@@ -72,7 +73,7 @@ export const makeHandlerInputFactory = <
   function reducer<Args, A, E, R>(
     handler: HandlerWithoutForbiddenRequirements<
       (args: Args) => Effect.Effect<A, E, R>,
-      ReducerAllowedRequirements
+      ServerContext.WithEnv<ReducerAllowedRequirements>
     >,
   ): ReducerHandler<Args, A, E, R>
   function reducer<Args, A, E, R>(
@@ -84,13 +85,13 @@ export const makeHandlerInputFactory = <
   function procedure<A, E, R>(
     handler: HandlerWithoutForbiddenRequirements<
       () => Effect.Effect<A, E, R>,
-      ProcedureAllowedRequirements
+      ServerContext.WithEnv<ProcedureAllowedRequirements>
     >,
   ): ProcedureHandler<void, A, E, R>
   function procedure<Args, A, E, R>(
     handler: HandlerWithoutForbiddenRequirements<
       (args: Args) => Effect.Effect<A, E, R>,
-      ProcedureAllowedRequirements
+      ServerContext.WithEnv<ProcedureAllowedRequirements>
     >,
   ): ProcedureHandler<Args, A, E, R>
   function procedure<Args, A, E, R>(
@@ -107,7 +108,7 @@ export const makeHandlerInputFactory = <
   function httpHandler<Args, A, E, R>(
     handler: HandlerWithoutForbiddenRequirements<
       (args: Args) => Effect.Effect<A, E, R>,
-      HttpHandlerAllowedRequirements
+      ServerContext.WithEnv<HttpHandlerAllowedRequirements>
     >,
   ): HttpHandlerHandler<Args, A, E, R>
   function httpHandler<Args, A, E, R>(
@@ -119,7 +120,7 @@ export const makeHandlerInputFactory = <
   function view<Args, A, E, R>(
     handler: HandlerWithoutForbiddenRequirements<
       (args: Args) => Effect.Effect<A, E, R>,
-      SenderViewAllowedRequirements
+      ServerContext.WithEnv<SenderViewAllowedRequirements>
     >,
   ): ViewHandler<Args, A, E, R>
   function view<Args, A, E, R>(
@@ -131,7 +132,7 @@ export const makeHandlerInputFactory = <
   function anonymousView<Args, A, E, R>(
     handler: HandlerWithoutForbiddenRequirements<
       (args: Args) => Effect.Effect<A, E, R>,
-      AnonymousViewAllowedRequirements
+      ServerContext.WithEnv<AnonymousViewAllowedRequirements>
     >,
   ): ViewHandler<Args, A, E, R>
   function anonymousView<Args, A, E, R>(
@@ -143,21 +144,21 @@ export const makeHandlerInputFactory = <
   const init = <A, E, R>(
     handler: HandlerWithoutForbiddenRequirements<
       () => Effect.Effect<A, E, R>,
-      ReducerAllowedRequirements
+      ServerContext.WithEnv<ReducerAllowedRequirements>
     >,
   ): LifecycleHandler<A, E, R> => makeInitHandler(owner, handler)
 
   const clientConnected = <A, E, R>(
     handler: HandlerWithoutForbiddenRequirements<
       () => Effect.Effect<A, E, R>,
-      ReducerAllowedRequirements
+      ServerContext.WithEnv<ReducerAllowedRequirements>
     >,
   ): LifecycleHandler<A, E, R> => makeClientConnectedHandler(owner, handler)
 
   const clientDisconnected = <A, E, R>(
     handler: HandlerWithoutForbiddenRequirements<
       () => Effect.Effect<A, E, R>,
-      ReducerAllowedRequirements
+      ServerContext.WithEnv<ReducerAllowedRequirements>
     >,
   ): LifecycleHandler<A, E, R> => makeClientDisconnectedHandler(owner, handler)
 

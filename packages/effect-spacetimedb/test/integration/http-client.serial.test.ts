@@ -1,5 +1,5 @@
 import { testEffectCallbackError } from "../helpers/effect-errors"
-import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClient from "effect/http/HttpClient"
 import * as Cause from "effect/Cause"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
@@ -17,6 +17,7 @@ import {
   Timestamp,
   Uuid,
 } from "spacetimedb"
+import { fixtureCallDurationMax } from "../helpers/transport-bounds"
 const { expect } = EffectVitest
 import * as Stdb from "effect-spacetimedb"
 import * as StdbTesting from "effect-spacetimedb/testing"
@@ -30,6 +31,7 @@ import {
 } from "../helpers/module-builders"
 import { makeMockHttpClientLayer } from "../helpers/mock-http-client"
 import { TestLayer } from "../helpers/test-layer"
+import { testArrayLength } from "../helpers/array-bounds"
 
 const describe = EffectVitest.layer(TestLayer)
 
@@ -37,6 +39,7 @@ const HttpConfig = {
   uri: "http://stdb.test",
   databaseName: "full",
   token: "example-token",
+  callDurationMax: fixtureCallDurationMax,
 } as const
 const JsonDate = new Date("2026-04-24T00:00:00.000Z")
 const I64Min = -9223372036854775808n
@@ -69,6 +72,7 @@ const NestedBulkHttpModule = moduleFromSections({
             gameClientBuildId: Stdb.option(Stdb.string()),
             createdAt: Stdb.string(),
           }),
+          testArrayLength,
         ),
       }),
     }),
@@ -79,7 +83,7 @@ const NestedBulkHttpModule = moduleFromSections({
           buildLabel: Stdb.string(),
           retryCount: Stdb.u32(),
         }).optional(),
-        extraTags: Stdb.array(Stdb.string()).optional(),
+        extraTags: Stdb.array(Stdb.string(), testArrayLength).optional(),
       }),
     }),
   },
@@ -88,7 +92,7 @@ const NestedBulkHttpModule = moduleFromSections({
       params: Stdb.struct({
         filter: Stdb.option(
           Stdb.struct({
-            artifactIds: Stdb.array(Stdb.string()),
+            artifactIds: Stdb.array(Stdb.string(), testArrayLength),
             includeDeleted: Stdb.option(Stdb.bool()),
           }),
         ),
@@ -100,11 +104,12 @@ const NestedBulkHttpModule = moduleFromSections({
             gameClientBuildId: Stdb.option(Stdb.string()),
             createdAt: Stdb.string(),
           }),
+          testArrayLength,
         ),
         selected: Stdb.option(
           Stdb.struct({
             artifactId: Stdb.string(),
-            tags: Stdb.array(Stdb.string()),
+            tags: Stdb.array(Stdb.string(), testArrayLength),
           }),
         ),
       }),

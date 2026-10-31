@@ -11,6 +11,7 @@ import { FullModule } from "../fixtures/full-module"
 import { MinimalModule } from "../fixtures/minimal-module"
 import { DbConnection as RawArtifactDbConnection } from "../../examples/publishable-module/generated-client/index.js"
 import type { Assert, ErrorOf, IsAny, IsAssignable, IsEqual } from "./helpers"
+import { fixtureConnectTimeoutMillis } from "../helpers/transport-bounds"
 
 type GeneratedSchema = {
   readonly tables: Record<string, never>
@@ -26,7 +27,7 @@ declare const REMOTE_MODULE: RemoteModule<
   GeneratedSchema,
   GeneratedReducers,
   GeneratedProcedures,
-  "2.10.1"
+  "2.14.0"
 >
 type ErrorContext = ErrorContextInterface<typeof REMOTE_MODULE>
 
@@ -59,6 +60,7 @@ void Full.client.ws.layerGenerated({
   DbConnection,
   uri: "ws://localhost:3000",
   databaseName: "generated-inference",
+  connectTimeoutMillis: fixtureConnectTimeoutMillis,
 })
 
 declare const ErasedDbConnection: {
@@ -99,6 +101,7 @@ const generatedScoped = Full.client.ws.scopedGenerated({
   DbConnection: FullFacade,
   uri: "ws://localhost:3000",
   databaseName: "generated-facade",
+  connectTimeoutMillis: fixtureConnectTimeoutMillis,
 })
 type _generatedScopedFailureIsTyped = Assert<
   IsEqual<
@@ -117,6 +120,7 @@ const rawScoped = StdbClient.wsScoped({
     builder: () => FullBuilder,
     uri: "ws://localhost:3000",
     databaseName: "raw-scoped",
+    connectTimeoutMillis: fixtureConnectTimeoutMillis,
   },
 })
 type _rawScopedFailureUnchanged = Assert<
@@ -129,6 +133,7 @@ const rawLayer = StdbClient.wsLayer({
     builder: () => FullBuilder,
     uri: "ws://localhost:3000",
     databaseName: "raw-layer",
+    connectTimeoutMillis: fixtureConnectTimeoutMillis,
   },
 })
 type _rawLayerFailureUnchanged = Assert<
@@ -154,6 +159,7 @@ void Minimal.client.ws.layerGenerated({
   DbConnection,
   uri: "ws://localhost:3000",
   databaseName: "native-minimal",
+  connectTimeoutMillis: fixtureConnectTimeoutMillis,
 })
 
 void StdbClient.wsScopedGenerated({
@@ -184,6 +190,7 @@ const configForFreeModule = <Module extends Stdb.AnyModuleSpec>(
     DbConnection: FullFacade,
     uri: "ws://localhost:3000",
     databaseName: "free-module-config",
+    connectTimeoutMillis: fixtureConnectTimeoutMillis,
   }
 }
 void configForFreeModule

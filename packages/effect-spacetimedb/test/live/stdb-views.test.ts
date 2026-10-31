@@ -6,6 +6,8 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as Stream from "effect/Stream"
 
 const { describe, expect, live } = EffectVitest
 
@@ -282,6 +284,54 @@ describe("effect-spacetimedb live views", () => {
               name,
             },
           ])
+        }),
+      ),
+    { timeout: LIVE_TEST_TIMEOUT_MS },
+  )
+
+  live(
+    "subscribes calls of views with params through the session",
+    () =>
+      provideLiveTest(
+        Effect.gen(function* () {
+          const { session, connection } = yield* makeExampleSession
+          // A quote and a backslash, which the SQL literal must carry intact.
+          const name = decodeUserName("O'Hara \\ Grace")
+          yield* callLiveReducer(connection, wireFunction("userUpsert"), {
+            userId: decodeUserId("view-call-named"),
+            name,
+          })
+          yield* callLiveReducer(connection, wireFunction("userUpsert"), {
+            userId: decodeUserId("view-call-other"),
+            name: decodeUserName("Someone Else"),
+          })
+          yield* callLiveReducer(connection, wireFunction("seedSelfUser"), {
+            name: decodeUserName("Called By Identity"),
+          })
+
+          const snapshot = yield* session
+            .viewGroup(["usersNamed", "userOfIdentity"] as const, {
+              args: {
+                usersNamed: { name },
+                userOfIdentity: { identity: session.identity },
+              },
+            })
+            .changes.pipe(
+              Stream.filter(
+                (rows) =>
+                  rows.usersNamed.length > 0 && rows.userOfIdentity.length > 0,
+              ),
+              Stream.runHead,
+              Effect.timeout(CONVERGENCE_TIMEOUT_MS),
+            )
+
+          const identityUserId = yield* toHexString(session.identity)
+          expect(Option.getOrUndefined(snapshot)).toEqual({
+            usersNamed: [{ id: "view-call-named", name }],
+            userOfIdentity: [
+              { id: identityUserId, name: "Called By Identity" },
+            ],
+          })
         }),
       ),
     { timeout: LIVE_TEST_TIMEOUT_MS },

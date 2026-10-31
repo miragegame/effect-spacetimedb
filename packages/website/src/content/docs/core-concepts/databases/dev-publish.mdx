@@ -60,6 +60,17 @@ const program = Effect.gen(function* () {
 })
 ```
 
+The runtime is its first database: `runtime.databaseIdentity`, `republish`,
+`updateEnvironment`, `reset` and `remove` act on it. `runtime.publishDatabase`
+publishes another bundle to the same standalone under a name you choose and
+returns the same handle for it, which is how tests run
+[inter-database calls](/core-concepts/functions/inter-database-calls): the host
+delivers them only between databases on one standalone. For the same reason
+every standalone the dev server starts has `localhost` added to its `NO_PROXY`
+unless `standaloneEnvironment` sets `NO_PROXY` or `no_proxy` itself.
+`publishEnvironmentOnly` is exported for tools that drive their own logged-in
+CLI.
+
 The generated server bundle must include
 `effect-spacetimedb/server-compiler`; native `spacetime build` preserves its
 side-effectful server polyfill import. Off-host tests that import server modules

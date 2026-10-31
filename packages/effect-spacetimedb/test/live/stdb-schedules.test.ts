@@ -6,10 +6,10 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
-import * as HttpBody from "effect/unstable/http/HttpBody"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
+import * as HttpBody from "effect/http/HttpBody"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as GeneratedArtifact from "../../examples/publishable-module/generated-client/index.js"
 
 const { describe, expect, live } = EffectVitest

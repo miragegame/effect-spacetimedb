@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Scope from "effect/Scope"
 import type { TypedQuery } from "../query/types.ts"
+import type { WsConnectionState } from "./connection-state.ts"
 import {
   SubscriptionRejectedError,
   SubscriptionTransportError,
@@ -32,8 +33,25 @@ const handleFailureSignals = new WeakMap<
   object,
   Deferred.Deferred<never, SubscriptionRejectedError>
 >()
+const handleConnectionStates = new WeakMap<object, WsConnectionState>()
+
+/**
+ * Ties an applied subscription handle to the connection that carries it. The
+ * SDK never ends a subscription or runs its `onEnd` callbacks when the socket
+ * closes, so {@link unsubscribeThen} needs the connection's invalidation to
+ * know that the subscription ended with it; and an automatic reconnect's
+ * replay must re-apply it before the connection counts as recovered.
+ */
+export const bindHandleToConnection = (
+  handle: SubscriptionHandleLike,
+  connectionState: WsConnectionState,
+): void => {
+  handleConnectionStates.set(handle, connectionState)
+  connectionState.trackSubscription(handle)
+}
 
 export type SubscriptionQuerySource<Root> =
+  | string
   | TypedQuery
   | ReadonlyArray<TypedQuery>
   | ((root: Root) => TypedQuery | ReadonlyArray<TypedQuery>)
@@ -85,6 +103,7 @@ export type SubscriptionAdapter<QueryRoot> = {
 export const unsubscribeHandle = (handle: SubscriptionHandleLike) =>
   Effect.try({
     try: () => {
+      handleConnectionStates.get(handle)?.untrackSubscription(handle)
       handleDeactivators.get(handle)?.()
       if (!handle.isEnded()) {
         handle.unsubscribe()
@@ -96,7 +115,35 @@ export const unsubscribeHandle = (handle: SubscriptionHandleLike) =>
       }),
   }).pipe(Effect.catchTag("SubscriptionTransportError", () => Effect.void))
 
+/**
+ * Unsubscribes and waits until the subscription has ended: the server
+ * confirmed it, the subscription failed, or the connection carrying it was
+ * lost (a lost connection ends every subscription on it, and no confirmation
+ * would ever arrive).
+ */
 export const unsubscribeThen = (
+  handle: SubscriptionHandleLike,
+): Effect.Effect<
+  void,
+  SubscriptionRejectedError | SubscriptionTransportError
+> =>
+  Effect.suspend(() => {
+    const connectionState = handleConnectionStates.get(handle)
+    if (connectionState === undefined) {
+      return unsubscribeThenOnLiveConnection(handle)
+    }
+    // An automatic reconnect's replay must not wait for it any more.
+    connectionState.untrackSubscription(handle)
+    if (connectionState.isInvalidated()) {
+      return Effect.void
+    }
+    return Effect.raceFirst(
+      unsubscribeThenOnLiveConnection(handle),
+      connectionState.awaitInvalidation().pipe(Effect.asVoid),
+    )
+  })
+
+const unsubscribeThenOnLiveConnection = (
   handle: SubscriptionHandleLike,
 ): Effect.Effect<
   void,
@@ -184,6 +231,13 @@ export const fromBuilder = <ErrorContext, QueryRoot>(options: {
                   finish(callbackBeforeHandle("onApplied"))
                   return
                 }
+                if (applied) {
+                  // An automatic reconnect replayed it.
+                  handleConnectionStates
+                    .get(currentHandle)
+                    ?.subscriptionReapplied(currentHandle)
+                  return
+                }
 
                 applied = true
                 finish(Effect.succeed(currentHandle))
@@ -199,7 +253,14 @@ export const fromBuilder = <ErrorContext, QueryRoot>(options: {
                 Deferred.doneUnsafe(failureSignal, Effect.fail(rejection))
 
                 if (applied) {
+                  // Ended by the server after it applied (an automatic
+                  // reconnect's replay): no replay waits on it any more.
                   active = false
+                  if (handle != null) {
+                    handleConnectionStates
+                      .get(handle)
+                      ?.untrackSubscription(handle)
+                  }
                   onAppliedError?.(rejection)
                   return
                 }

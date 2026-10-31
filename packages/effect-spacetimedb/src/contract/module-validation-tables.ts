@@ -30,7 +30,12 @@ import {
   type TypeKind,
   typeInfo,
 } from "./type.ts"
-import type { AnyViewSpec } from "./view.ts"
+import {
+  type AnyViewSpec,
+  isViewParamKind,
+  viewParamKinds,
+  viewParamWireKind,
+} from "./view.ts"
 
 export const isColumnTypeKind = (
   value: unknown,
@@ -305,12 +310,49 @@ export const isStructValueType = (
   value: Parameters<typeof structFields>[0],
 ): boolean => structFields(value) !== undefined
 
+const validateViewParams = (
+  diagnostics: Array<StdbDiagnostic>,
+  viewKey: string,
+  view: AnyViewSpec,
+  completed: WeakSet<object>,
+) => {
+  validateValueType(
+    diagnostics,
+    view.params,
+    ["views", viewKey, "params"],
+    new WeakSet<object>(),
+    completed,
+  )
+  const fields = structFields(view.params)
+  if (fields == null) {
+    pushDiagnostic(
+      diagnostics,
+      "UnsupportedViewParam",
+      ["views", viewKey, "params"],
+      `View ${viewKey} params must be authored with Type.struct(...)`,
+    )
+    return
+  }
+  for (const [fieldName, field] of Object.entries(fields)) {
+    // An optional field travels as an option, which no SQL literal writes.
+    const kind = viewParamWireKind(field)
+    if (kind !== undefined && isViewParamKind(kind)) continue
+    pushDiagnostic(
+      diagnostics,
+      "UnsupportedViewParam",
+      ["views", viewKey, "params", fieldName],
+      `View ${viewKey} param ${fieldName} is ${kind ?? "an unknown type"}; a view argument must be one of ${viewParamKinds.join(", ")}, written as a positional SQL literal`,
+    )
+  }
+}
+
 export const validateView = (
   diagnostics: Array<StdbDiagnostic>,
   viewKey: string,
   view: AnyViewSpec,
   completed: WeakSet<object>,
 ) => {
+  validateViewParams(diagnostics, viewKey, view, completed)
   validateValueType(
     diagnostics,
     view.returns,

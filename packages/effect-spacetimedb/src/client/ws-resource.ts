@@ -1,17 +1,15 @@
-import * as Context from "effect/Context"
+import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
+import * as Exit from "effect/Exit"
+import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import type { Identity } from "spacetimedb"
 import type { AnyModuleSpec } from "../contract/module.ts"
-import { readTaggedErrorTag } from "../error-identity.ts"
 import type { ModulePlan } from "../module-plan.ts"
 import { makeModulePlan } from "../module-plan.ts"
-import { prefixId } from "../utils.ts"
-import { messageFromUnknown } from "./call-errors.ts"
 import { connectionStateFor } from "./connection-state.ts"
 import {
   GeneratedArtifactShapeError,
@@ -26,15 +24,29 @@ import {
   generatedConfig as generated,
   type ManagedWsConnection,
   type MismatchedGeneratedModuleDiagnostic,
+  type WsAttemptCredentials,
 } from "./generated-ws-adapter.ts"
-import { canonicalValueKey } from "./table-ref.ts"
+import { attemptCredentials, liveToken } from "./ws-attempt-credentials.ts"
+import {
+  awaitReplayOnAutomaticReconnect,
+  beginReportedRecovery,
+  watchReconnectAttempts,
+} from "./ws-automatic-reconnect.ts"
 import { makeFromModulePlan as makeWsClient } from "./ws-client.ts"
 import {
   type AcquisitionState,
+  assertAutomaticReconnectBounded,
+  assertConnectTimeoutBounded,
+  connectError,
+  connectErrorOfReport,
+  disconnectMessage,
+  invalidateDisconnected,
+  knownConnection,
   WsConnectError,
   WsConnectTimeoutError,
   WsDisconnectError,
 } from "./ws-resource-lifecycle.ts"
+import type { WsSession } from "./ws-session-tag.ts"
 
 export type {
   GeneratedConnectionOf,
@@ -46,7 +58,9 @@ export type {
   GeneratedWsConnectionFactory,
   ManagedWsConnection,
   MismatchedGeneratedModuleDiagnostic,
+  WsAutomaticReconnect,
   WsCompression,
+  WsToken,
 } from "./generated-ws-adapter.ts"
 export {
   generatedConnection,
@@ -57,8 +71,6 @@ export {
   WsConnectError,
   WsConnectTimeoutError,
 } from "./ws-resource-lifecycle.ts"
-
-type Simplify<Value> = { readonly [Key in keyof Value]: Value[Key] } & {}
 
 export type WsBuilderConfig<
   Module extends AnyModuleSpec,
@@ -74,64 +86,11 @@ export type WsGeneratedConfig<
 
 export { generated }
 
-type WsClientRuntime<
-  Module extends AnyModuleSpec,
-  ErrorContext,
-  RelationContext,
-> = Simplify<
-  ReturnType<typeof makeWsClient<Module, ErrorContext, RelationContext>>
->
-
-export type WsSession<
-  Module extends AnyModuleSpec,
-  ErrorContext = unknown,
-  RelationContext = unknown,
-> = Simplify<
-  WsClientRuntime<Module, ErrorContext, RelationContext> & {
-    readonly connection: ManagedWsConnection<
-      Module,
-      ErrorContext,
-      RelationContext
-    >
-    readonly identity: Identity
-    readonly token: string
-  }
->
-
-export type SessionOf<
-  Module extends AnyModuleSpec,
-  ConnectionClass,
-  RelationContext = unknown,
-> = WsSession<Module, GeneratedErrorContextOf<ConnectionClass>, RelationContext>
-
-export declare const WsSessionTagTypeId: unique symbol
-
-export type WsSessionTagIdentifier<
-  Module extends AnyModuleSpec,
-  ErrorContext,
-  RelationContext,
-> = {
-  readonly [WsSessionTagTypeId]: {
-    readonly module: Module["name"]
-    readonly errorContext: ErrorContext
-    readonly relationContext: RelationContext
-  }
-}
-
-export type WsSessionTag<
-  Module extends AnyModuleSpec,
-  ErrorContext,
-  RelationContext,
-> = Context.Key<
-  WsSessionTagIdentifier<Module, ErrorContext, RelationContext>,
-  WsSession<Module, ErrorContext, RelationContext>
->
-
-const GeneratedArtifactValidation = Symbol(
+export const GeneratedArtifactValidation = Symbol(
   "effect-spacetimedb/GeneratedArtifactValidation",
 )
 
-type InternalWsBuilderConfig<
+export type InternalWsBuilderConfig<
   Module extends AnyModuleSpec,
   ErrorContext,
   RelationContext,
@@ -142,35 +101,7 @@ type InternalWsBuilderConfig<
     : true
 }
 
-const sessionTagIdForModule = (module: AnyModuleSpec, name: string): string =>
-  // Same-named module objects intentionally share a Context key, matching the
-  // HTTP client tag precedent; use name to distinguish multiple WS sessions.
-  prefixId(`Client/WsSession/${canonicalValueKey([module.name, name])}`)
-
-const sessionTagForModule = <
-  Module extends AnyModuleSpec,
-  ErrorContext,
-  RelationContext,
->(
-  module: Module,
-  name = "default",
-): WsSessionTag<Module, ErrorContext, RelationContext> =>
-  Context.Service<
-    WsSessionTagIdentifier<Module, ErrorContext, RelationContext>,
-    WsSession<Module, ErrorContext, RelationContext>
-  >(sessionTagIdForModule(module, name))
-
-// The native disconnect context is the connection object itself, never a
-// carrier of human-readable text, so only the cause can name the reason. A
-// terminal close with no socket error (a clean close, or the decompress
-// failure that closes the socket) legitimately has no cause and gets the
-// stable fallback.
-const disconnectMessage = (cause: unknown): string => {
-  const message = messageFromUnknown(cause)
-  return message !== undefined && message.length > 0
-    ? message
-    : (readTaggedErrorTag(cause) ?? "WebSocket connection disconnected")
-}
+const releasedConnectionMessage = "WebSocket connection released"
 
 const disconnectManagedConnection = <
   Module extends AnyModuleSpec,
@@ -197,44 +128,9 @@ const runCallbackEffectSafely = (
   }
 }
 
-const connectError = (cause: unknown, context?: unknown) =>
-  new WsConnectError({
-    cause,
-    ...(context === undefined ? {} : { context }),
-  })
-
-const invalidateDisconnected = <
-  Module extends AnyModuleSpec,
-  ErrorContext,
-  RelationContext,
->(
-  connection: ManagedWsConnection<Module, ErrorContext, RelationContext>,
-  error: WsConnectError,
-) => {
-  connectionStateFor(connection).invalidateFromTransport(
-    disconnectMessage(error.cause),
-  )
-}
-
-export const sessionTag = <
-  Module extends AnyModuleSpec,
-  ErrorContext,
-  RelationContext,
->(
-  module: Module,
-  name?: string,
-) => sessionTagForModule<Module, ErrorContext, RelationContext>(module, name)
-
-export const sessionTagFromModulePlan = <
-  Module extends AnyModuleSpec,
-  ErrorContext,
-  RelationContext,
->(
-  plan: ModulePlan<Module>,
-  name?: string,
-) =>
-  sessionTagForModule<Module, ErrorContext, RelationContext>(plan.module, name)
-
+// Every WebSocket entry point (scoped, layered, supervised) builds its
+// acquisition here, so validating before the Effect is returned rejects an
+// unbounded connect when the client is constructed rather than at first use.
 export const makeScopedFromModulePlan = <
   Module extends AnyModuleSpec,
   ErrorContext,
@@ -248,8 +144,16 @@ export const makeScopedFromModulePlan = <
     RelationContext,
     ValidationError
   >
-}) =>
-  Effect.gen(function* () {
+  /**
+   * The acquisition's owner enables automatic-reconnect recovery itself, once
+   * the session is live (a session supervisor, after connecting, subscribing
+   * and setup). Otherwise the acquisition enables it when it completes.
+   */
+  readonly recoveryEnabledByOwner?: boolean | undefined
+}) => {
+  assertConnectTimeoutBounded(options.config.connectTimeoutMillis)
+  assertAutomaticReconnectBounded(options.config.automaticReconnect)
+  return Effect.gen(function* () {
     type AcquireError = WsConnectError | ValidationError
     const state = yield* Ref.make<
       AcquisitionState<Module, ErrorContext, RelationContext, ValidationError>
@@ -292,7 +196,9 @@ export const makeScopedFromModulePlan = <
         ...session,
         connection,
         identity,
-        token,
+        get token() {
+          return liveToken(connection, token)
+        },
       }).pipe(Effect.asVoid)
     }
 
@@ -324,6 +230,21 @@ export const makeScopedFromModulePlan = <
       ]
     }
 
+    // The SDK never rejects outstanding calls when its socket closes, and a
+    // client-side disconnect may never fire `onDisconnect` at all (a silent
+    // partition), so release invalidates the connection itself: calls still
+    // in flight, and any made later through a stale handle, fail with
+    // `ConnectionLostError` instead of waiting forever on a closed socket.
+    const invalidateAndDisconnect = (
+      connection: ManagedWsConnection<Module, ErrorContext, RelationContext>,
+    ) =>
+      Effect.suspend(() => {
+        connectionStateFor(connection).invalidateFromTransport(
+          releasedConnectionMessage,
+        )
+        return disconnectOnce(connection)
+      })
+
     const release = Ref.modify(state, (current) => {
       if (current.released) {
         return [Effect.void, current] as const
@@ -335,7 +256,7 @@ export const makeScopedFromModulePlan = <
           : undefined
 
       return [
-        connection != null ? disconnectOnce(connection) : Effect.void,
+        connection != null ? invalidateAndDisconnect(connection) : Effect.void,
         {
           ...current,
           released: true,
@@ -568,88 +489,241 @@ export const makeScopedFromModulePlan = <
         ] as const
       }).pipe(Effect.flatten)
 
+    // With automatic reconnect, a drop the SDK will retry (it reports the
+    // next attempt) only puts a live session's connection into recovery.
+    // Every other report (no retry scheduled, or a session not live yet) ends
+    // it, so the SDK's own retries never outlive the session's owner.
+    const automaticReconnect = options.config.automaticReconnect !== undefined
+    const reportEnd = (
+      context: ErrorContext,
+      error: Error | undefined,
+      reconnectAttempt: number | undefined,
+      reconnectDelayMillis: number | undefined,
+    ) =>
+      Ref.get(state).pipe(
+        Effect.flatMap((current) => {
+          const connection = knownConnection(current)
+          const recovering =
+            automaticReconnect &&
+            reconnectAttempt !== undefined &&
+            connection != null &&
+            beginReportedRecovery(
+              connection,
+              error,
+              reconnectAttempt,
+              reconnectDelayMillis,
+            )
+          if (recovering) {
+            return Effect.void
+          }
+          const ended = failAcquire(connectErrorOfReport(error, context))
+          // The SDK scheduled a retry for a session that is not live: stop it,
+          // since nobody would ever own the connection it reopens.
+          return reconnectAttempt !== undefined && connection != null
+            ? ended.pipe(Effect.andThen(disconnectOnce(connection)))
+            : ended
+        }),
+      )
+
+    // The SDK's token refreshes run here. The reconnect attempt's bound (the
+    // watcher below) limits them, and an overrun while one is still running
+    // is the token's, not the transport's. A refresh that does not succeed
+    // ends the connection so the owner's retry policy decides; a defect stays
+    // a defect. A refresh still running when the connection ends is dropped.
+    let refreshesInFlight = 0
+    const endOnRefreshExit = (exit: Exit.Exit<string, WsConnectError>) =>
+      Ref.get(state).pipe(
+        Effect.flatMap((current) => {
+          const connection = knownConnection(current)
+          if (Exit.isSuccess(exit) || connection == null) {
+            return Effect.void
+          }
+          const connectionState = connectionStateFor(connection)
+          const failure = Cause.findErrorOption(exit.cause)
+          if (Option.isSome(failure)) {
+            connectionState.invalidateForFailedCredentials(
+              `Token refresh failed: ${disconnectMessage(failure.value)}`,
+              failure.value.cause,
+            )
+          } else {
+            const defect = Cause.squash(exit.cause)
+            connectionState.invalidateForCredentialsDefect(
+              `Token refresh died: ${disconnectMessage(defect)}`,
+              defect,
+            )
+          }
+          return disconnectOnce(connection)
+        }),
+      )
+    const connectionEnded = Ref.get(state).pipe(
+      Effect.flatMap((current) => {
+        const connection = knownConnection(current)
+        return connection == null
+          ? Effect.never
+          : connectionStateFor(connection)
+              .awaitInvalidation()
+              .pipe(
+                Effect.flatMap((invalidation) =>
+                  Effect.fail(connectError(new Error(invalidation.message))),
+                ),
+              )
+      }),
+    )
+    const superviseRefresh = (refresh: Effect.Effect<string, WsConnectError>) =>
+      Effect.suspend(() => {
+        refreshesInFlight += 1
+        return refresh
+      }).pipe(
+        Effect.raceFirst(connectionEnded),
+        Effect.onExit((exit) =>
+          Effect.suspend(() => {
+            refreshesInFlight -= 1
+            return endOnRefreshExit(exit)
+          }),
+        ),
+      )
+
     let builtConnection:
       | ManagedWsConnection<Module, ErrorContext, RelationContext>
       | undefined
-    const acquire: Effect.Effect<
+    const acquireWith = (
+      credentials: WsAttemptCredentials,
+    ): Effect.Effect<
       WsSession<Module, ErrorContext, RelationContext>,
       AcquireError
-    > = Effect.suspend(() => {
-      Result.match(
-        Result.try(() => {
-          const builder = configureGeneratedWsBuilder(options.config)
-            .onConnect((connection, identity, token) => {
-              runCallbackEffect(
-                completeSuccess(connection, identity, token),
+    > =>
+      Effect.suspend(() => {
+        Result.match(
+          Result.try(() => {
+            let builder = configureGeneratedWsBuilder(
+              options.config,
+              credentials,
+            )
+              .onConnect((connection, identity, token) => {
+                runCallbackEffect(
+                  completeSuccess(connection, identity, token),
+                  connection,
+                )
+              })
+              // A socket error raised after the handshake never reaches
+              // `onConnectError`: the SDK stashes it, closes the socket, and
+              // delivers it here as the second argument. Keep it as the cause
+              // so connection loss stays distinguishable from a close with no
+              // reported error, which arrives with `error` undefined.
+              .onDisconnect((context, error, reconnectAttempt, delayMs) => {
+                runCallbackEffect(
+                  reportEnd(context, error, reconnectAttempt, delayMs),
+                )
+              })
+              // With automatic reconnect this also reports each failed
+              // reconnect attempt; one with a successor scheduled keeps the
+              // connection recovering.
+              .onConnectError((context, error, reconnectAttempt, delayMs) => {
+                runCallbackEffect(
+                  reportEnd(context, error, reconnectAttempt, delayMs),
+                )
+              })
+            if (automaticReconnect) {
+              builder = awaitReplayOnAutomaticReconnect(builder)
+            }
+
+            const connection = builder.build()
+            builtConnection = connection
+            if (options.config[GeneratedArtifactValidation] === true) {
+              const shapeError = generatedArtifactShapeError(
+                options.plan,
                 connection,
               )
-            })
-            // A socket error raised after the handshake never reaches
-            // `onConnectError`: the SDK stashes it, closes the socket, and
-            // delivers it here as the second argument. Keep it as the cause so
-            // connection loss stays distinguishable from a close with no
-            // reported error, which arrives with `error` undefined.
-            .onDisconnect((context, error) => {
-              connectError(error, context).pipe(failAcquire, runCallbackEffect)
-            })
-            .onConnectError((context, error) => {
-              connectError(error, context).pipe(failAcquire, runCallbackEffect)
-            })
-
-          const connection = builder.build()
-          builtConnection = connection
-          if (options.config[GeneratedArtifactValidation] === true) {
-            const shapeError = generatedArtifactShapeError(
-              options.plan,
-              connection,
-            )
-            if (shapeError !== undefined) {
-              runCallbackEffect(
-                failAcquire(shapeError as ValidationError, connection),
-              )
-              return
+              if (shapeError !== undefined) {
+                runCallbackEffect(
+                  failAcquire(shapeError as ValidationError, connection),
+                )
+                return
+              }
             }
-          }
-          runCallbackEffect(rememberBuiltConnection(connection))
-        }),
-        {
-          onFailure: (cause) =>
-            connectError(cause).pipe(
-              (error) => failAcquire(error, builtConnection),
-              runCallbackEffect,
-            ),
-          onSuccess: () => undefined,
-        },
-      )
+            runCallbackEffect(rememberBuiltConnection(connection))
+          }),
+          {
+            onFailure: (cause) =>
+              connectError(cause).pipe(
+                (error) => failAcquire(error, builtConnection),
+                runCallbackEffect,
+              ),
+            onSuccess: () => undefined,
+          },
+        )
 
-      return Deferred.await(latch)
-    })
+        return Deferred.await(latch)
+      })
 
     const connectTimeoutMillis = options.config.connectTimeoutMillis
-    const timedAcquire =
-      connectTimeoutMillis === undefined
-        ? acquire
-        : acquire.pipe(
-            Effect.timeoutOrElse({
-              duration: Duration.millis(connectTimeoutMillis),
-              orElse: () => {
-                const error = connectError(
-                  new WsConnectTimeoutError({
-                    timeoutMillis: connectTimeoutMillis,
-                  }),
-                )
-                return failAcquire(error, builtConnection).pipe(
-                  Effect.andThen(Effect.fail(error)),
-                )
-              },
+    // A token Effect is evaluated for this attempt inside the connect bound;
+    // with automatic reconnect it is also the SDK's refresh, run with this
+    // acquisition's services.
+    const acquisitionServices = yield* Effect.context<never>()
+    const acquire = attemptCredentials(options.config.token, {
+      automaticReconnect,
+      services: acquisitionServices,
+      superviseRefresh,
+    }).pipe(Effect.flatMap(acquireWith))
+    const timedAcquire = acquire.pipe(
+      Effect.timeoutOrElse({
+        duration: Duration.millis(connectTimeoutMillis),
+        orElse: () => {
+          const error = connectError(
+            new WsConnectTimeoutError({
+              timeoutMillis: connectTimeoutMillis,
             }),
           )
+          return failAcquire(error, builtConnection).pipe(
+            Effect.andThen(Effect.fail(error)),
+          )
+        },
+      }),
+    )
+
+    const endRecoveringConnection =
+      (
+        connection: ManagedWsConnection<Module, ErrorContext, RelationContext>,
+      ) =>
+      (message: string) =>
+        Effect.suspend(() => {
+          const connectionState = connectionStateFor(connection)
+          if (refreshesInFlight > 0) {
+            connectionState.invalidateForFailedCredentials(
+              `Token refresh did not complete: ${message}`,
+              new WsConnectTimeoutError({
+                timeoutMillis: connectTimeoutMillis,
+              }),
+            )
+          } else {
+            connectionState.invalidateFromTransport(message)
+          }
+          return disconnectOnce(connection)
+        })
 
     return yield* timedAcquire.pipe(
       Effect.onInterrupt(() => release),
       Effect.tap(() => Effect.addFinalizer(() => release)),
+      Effect.tap((session) =>
+        Effect.suspend(() => {
+          if (!automaticReconnect) {
+            return Effect.void
+          }
+          const connectionState = connectionStateFor(session.connection)
+          if (options.recoveryEnabledByOwner !== true) {
+            connectionState.enableRecovery()
+          }
+          return watchReconnectAttempts(
+            connectionState,
+            connectTimeoutMillis,
+            endRecoveringConnection(session.connection),
+          ).pipe(Effect.forkScoped, Effect.asVoid)
+        }),
+      ),
     )
   })
+}
 
 export const makeScoped = <
   Module extends AnyModuleSpec,
@@ -702,86 +776,5 @@ export const makeScopedGenerated = <
   >({
     module: options.module,
     config,
-  })
-}
-
-export const layerFromModulePlan = <
-  Module extends AnyModuleSpec,
-  ErrorContext,
-  RelationContext,
-  ValidationError = never,
->(options: {
-  readonly plan: ModulePlan<Module>
-  readonly config: InternalWsBuilderConfig<
-    Module,
-    ErrorContext,
-    RelationContext,
-    ValidationError
-  >
-  readonly name?: string | undefined
-}) =>
-  Layer.effect(
-    sessionTagFromModulePlan<Module, ErrorContext, RelationContext>(
-      options.plan,
-      options.name,
-    ),
-    makeScopedFromModulePlan<
-      Module,
-      ErrorContext,
-      RelationContext,
-      ValidationError
-    >(options),
-  )
-
-export const layer = <
-  Module extends AnyModuleSpec,
-  ErrorContext,
-  RelationContext,
-  ValidationError = never,
->(options: {
-  readonly module: Module
-  readonly config: InternalWsBuilderConfig<
-    Module,
-    ErrorContext,
-    RelationContext,
-    ValidationError
-  >
-  readonly name?: string | undefined
-}) =>
-  layerFromModulePlan<Module, ErrorContext, RelationContext, ValidationError>({
-    plan: makeModulePlan(options.module),
-    config: options.config,
-    name: options.name,
-  })
-
-export const layerGenerated = <
-  Module extends AnyModuleSpec,
-  ConnectionClass extends GeneratedConnectionClassLike,
-  RelationContext,
->(options: {
-  readonly module: Module
-  readonly config: WsGeneratedConfig<Module, ConnectionClass, RelationContext> &
-    MismatchedGeneratedModuleDiagnostic<Module, ConnectionClass>
-  readonly name?: string | undefined
-}) => {
-  const config: InternalWsBuilderConfig<
-    Module,
-    GeneratedErrorContextOf<ConnectionClass>,
-    RelationContext,
-    GeneratedArtifactShapeError
-  > = {
-    ...generated(options.config),
-    [GeneratedArtifactValidation]: true,
-  }
-
-  return layer<
-    Module,
-    GeneratedErrorContextOf<ConnectionClass>,
-    RelationContext,
-    GeneratedArtifactShapeError
-  >({
-    module: options.module,
-    config,
-    name: options.name,
   })
 }

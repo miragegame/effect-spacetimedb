@@ -18,6 +18,7 @@ import {
 import { appendPath, typeBuilderWithFactories } from "./builder-lowering.ts"
 import type {
   AnyValueType,
+  ArrayLengthBounds,
   ArrayValueType,
   LazyValueType,
   LiteralValueType,
@@ -119,14 +120,57 @@ export const literal = <
   ) as unknown as LiteralValueType<Values>
 }
 
+const isArrayLengthBound = (value: number): boolean =>
+  Number.isSafeInteger(value) && value >= 0
+
+// Rejected eagerly because `Schema.isBetweenLength` silently floors and clamps
+// its arguments, which would turn an authoring mistake into a different bound.
+// The result is a copy so a caller mutating its options object afterwards
+// cannot desynchronise the recorded metadata from the check built from it.
+const checkedArrayLengthBounds = (
+  length: ArrayLengthBounds,
+): ArrayLengthBounds => {
+  if (!isArrayLengthBound(length.minimum)) {
+    throw new TypeError(
+      `Stdb.array(...) length minimum must be a non-negative safe integer; received ${String(length.minimum)}`,
+    )
+  }
+  if (!isArrayLengthBound(length.maximum)) {
+    throw new TypeError(
+      `Stdb.array(...) length maximum must be a non-negative safe integer; received ${String(length.maximum)}`,
+    )
+  }
+  if (length.minimum > length.maximum) {
+    throw new TypeError(
+      `Stdb.array(...) length minimum ${length.minimum} exceeds maximum ${length.maximum}`,
+    )
+  }
+  return { minimum: length.minimum, maximum: length.maximum }
+}
+
+/**
+ * Array value type. The inclusive `length` bounds are required: every array
+ * that crosses the module boundary states how many elements it may carry. They
+ * are enforced on both decode and encode and recorded in the type metadata
+ * (`describe(...)`), but never reach the wire, so arrays that differ only in
+ * their bounds lower to the same SATS `array<T>`.
+ */
 export const array = <Inner extends AnyValueType>(
   inner: Inner,
-): ArrayValueType<Inner> =>
-  attachStdbType(
-    inner.schema.pipe(narrowSchema, Schema.Array),
+  length: ArrayLengthBounds,
+): ArrayValueType<Inner> => {
+  const bounds = checkedArrayLengthBounds(length)
+
+  return attachStdbType(
+    inner.schema.pipe(
+      narrowSchema,
+      Schema.Array,
+      Schema.check(Schema.isBetweenLength(bounds.minimum, bounds.maximum)),
+    ),
     (factories) => factories.array(typeBuilderWithFactories(inner, factories)),
-    { kind: "array", item: inner },
+    { kind: "array", item: inner, length: bounds },
   ) as ArrayValueType<Inner>
+}
 
 /**
  * Nullable value type usable anywhere a value type is accepted, including

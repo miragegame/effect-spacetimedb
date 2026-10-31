@@ -79,8 +79,10 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
-      - run: bun run test
+      # Before the tests: the native-package project boots real standalones
+      # (the inter-database calls test) and needs the pinned CLI on PATH.
       - uses: ./.github/actions/setup-spacetimedb
+      - run: bun run test
       - run: bun --cwd=packages/effect-spacetimedb run codegen:check
       - run: bun --cwd=packages/effect-spacetimedb run smoke:packed-codegen
       - run: bun --cwd=packages/effect-spacetimedb run smoke:dev-server-node

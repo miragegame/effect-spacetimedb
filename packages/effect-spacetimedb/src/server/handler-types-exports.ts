@@ -187,6 +187,11 @@ export type ServerInstance<
     never,
     ServerContext.Http
   >
+  readonly env: Effect.Effect<
+    ServerContext.EnvService<Module>,
+    never,
+    ServerContext.Env
+  >
   readonly txRunner: Effect.Effect<
     ServerContext.TxRunnerService<Module>,
     never,
@@ -200,12 +205,12 @@ export type ServerInstance<
   readonly withTx: <A, E, R>(
     effect: ServerContext.EffectWithoutForbiddenRequirements<
       Effect.Effect<A, E, R>,
-      TxAllowedRequirements
+      ServerContext.WithEnv<TxAllowedRequirements>
     >,
   ) => Effect.Effect<
     A,
     E | StdbHostFailure | StdbDecodeError,
-    | Exclude<R, TxAllowedRequirements>
+    | Exclude<R, ServerContext.WithEnv<TxAllowedRequirements>>
     | ServerContext.ModuleScopedRequirement<Module, ServerContext.TxRunner>
   >
   readonly tx: TransactionHelper<Module>

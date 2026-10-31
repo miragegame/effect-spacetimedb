@@ -1,4 +1,3 @@
-
 import { make as makeServer } from "../../src/server/bind.ts"
 import * as EffectVitest from "@effect/vitest"
 import * as Console from "effect/Console"
@@ -170,6 +169,7 @@ const makeRandom = () =>
   StdbTesting.makeTestModuleHarness(BoundaryModule).makeHttpHandlerCtx().random
 
 class ThisDependentCompilerHttpHostCtx implements CompilerHttpHandlerHostCtx {
+  readonly env = { get: () => null }
   readonly timestamp = new Timestamp(1000n)
   readonly http = {
     fetch: () => ({

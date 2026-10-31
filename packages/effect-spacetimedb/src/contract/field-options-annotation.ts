@@ -36,8 +36,9 @@ import { ownAnnotation } from "./schema-annotations.ts"
  * (or the reverse) and read as a partial merge of the two.
  *
  * What we cannot fix: published 0.6.0 reads only the legacy key, so it sees a
- * field authored here as carrying no options at all. That direction is covered
- * by `scripts/mixed-version-smoke.mjs` and the release notes, not by code.
+ * field authored here as carrying no options at all. That direction is
+ * documented in the 0.7.0 release notes, not handled by code. (Published 0.7.0
+ * writes this key and version, which `scripts/mixed-version-smoke.mjs` checks.)
  */
 export const StdbFieldOptionsAnnotationId = Symbol.for(
   "effect-spacetimedb/StdbFieldOptions/versioned",

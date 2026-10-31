@@ -24,12 +24,17 @@ export {
 } from "./type/constructors.ts"
 export type {
   AnyValueType,
+  ArrayLengthBounds,
   ArrayValueType,
   BigIntValueType,
   BoolValueType,
   BytesValueType,
   Encoded,
   EncodedOf,
+  HostOf,
+  HostValue,
+  HostStruct,
+  HostSum,
   F32ValueType,
   F64ValueType,
   I8ValueType,
@@ -68,6 +73,7 @@ export type {
   ValueTypeInfo,
 } from "./type/core.ts"
 export {
+  HostValueTypeId,
   annotateValueTypeSchema,
   applyFieldOptions,
   fieldOptionsObject,

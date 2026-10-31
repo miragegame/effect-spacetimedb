@@ -5,6 +5,7 @@ import * as Stdb from "effect-spacetimedb"
 import * as Server from "effect-spacetimedb/server"
 import { build } from "effect-spacetimedb/server-compiler"
 import type { Assert, IsEqual, RequirementsOf } from "./helpers"
+import { testViewRowsLength } from "../helpers/array-bounds"
 
 const IdentityIdSchema = Schema.String.pipe(Schema.brand("IdentityMatrixId"))
 type IdentityId = typeof IdentityIdSchema.Type
@@ -30,12 +31,12 @@ const IdentityCore = Stdb.StdbGroup.make("Core")
   )
   .add(
     Stdb.StdbFn.view("self", {
-      returns: Stdb.array(identityUser.row),
+      returns: Stdb.array(identityUser.row, testViewRowsLength),
     }),
   )
   .add(
     Stdb.StdbFn.anonymousView("all", {
-      returns: Stdb.array(identityUser.row),
+      returns: Stdb.array(identityUser.row, testViewRowsLength),
     }),
   )
   .add(Stdb.StdbFn.init())

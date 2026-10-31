@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as EffectVitest from "@effect/vitest"
+import { fixtureConnectTimeoutMillis } from "../helpers/transport-bounds"
 const { expect } = EffectVitest
 import * as StdbTesting from "effect-spacetimedb/testing"
 import { FullModule } from "../fixtures/full-module"
@@ -58,6 +59,7 @@ describe("generated ws config", (it) => {
         const configured =
           StdbTesting.ClientGeneratedWsAdapter.configureGeneratedWsBuilder(
             config,
+            { token: undefined, refreshToken: undefined },
           )
         configured.build()
 
@@ -106,10 +108,14 @@ describe("generated ws config", (it) => {
         DbConnection,
         uri: "ws://localhost:3000",
         databaseName: "brotli-test",
+        connectTimeoutMillis: fixtureConnectTimeoutMillis,
         compression: "brotli",
       })
 
-      StdbTesting.ClientGeneratedWsAdapter.configureGeneratedWsBuilder(config)
+      StdbTesting.ClientGeneratedWsAdapter.configureGeneratedWsBuilder(config, {
+        token: undefined,
+        refreshToken: undefined,
+      })
 
       expect(calls).toEqual([
         "uri:ws://localhost:3000",

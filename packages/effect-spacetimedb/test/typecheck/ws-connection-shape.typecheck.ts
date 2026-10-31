@@ -8,6 +8,7 @@ import {
   makeUnexpectedSubscriptionBuilder,
 } from "../helpers/ws-fixtures"
 import type { Assert, IsEqual } from "./helpers"
+import { testViewRowsLength } from "../helpers/array-bounds"
 
 void StdbTesting.ClientWs.make({
   module: FullModule,
@@ -32,7 +33,7 @@ const NonePolicyModule = Stdb.StdbModule.make("none_policy_views", {
 }).add(
   Stdb.StdbGroup.make("Views").add(
     Stdb.StdbFn.anonymousView("allUsers", {
-      returns: Stdb.array(FullModule.tables.user.row),
+      returns: Stdb.array(FullModule.tables.user.row, testViewRowsLength),
     }),
   ),
 ).spec

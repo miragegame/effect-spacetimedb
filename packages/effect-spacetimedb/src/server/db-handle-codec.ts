@@ -1,4 +1,3 @@
-
 import { StdbDecodeError } from "../decode-error.ts"
 
 import { rowType, type AnyTableSpec } from "../contract/table.ts"

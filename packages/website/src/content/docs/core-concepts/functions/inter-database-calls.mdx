@@ -1,0 +1,331 @@
+---
+draft: false
+title: Inter-Database Calls
+description: Call another database's reducers through outbox tables, receivers and settle reducers.
+sidebar:
+  order: 6
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/cli-reference/spacetime-json#receiver-dependencies" target="_blank" rel="noopener noreferrer">SpacetimeDB: Receiver dependencies ↗</a>
+
+SpacetimeDB 2.14 lets one database call a reducer of another. The calling
+database inserts a row into an **outbox table**; once that transaction commits,
+the host delivers the row as one call to the **receiver** reducer it is bound to,
+then runs the caller's **settle reducer** with the outcome. effect-spacetimedb
+declares all three in the contract, checks the rules SpacetimeDB leaves to you,
+and generates the binding the caller compiles against with native codegen.
+
+The pieces, using the `examples/idc-pair` modules from the repository:
+
+| Piece | Declared with | Lives in |
+| --- | --- | --- |
+| Interface | a group of `Stdb.StdbFn.receiver(...)` | a package both sides import |
+| Receiver binding | `generateReceiverArtifact` (`effect-spacetimedb/codegen`) | committed next to the caller, bound in its module entry |
+| Inbox | `Stdb.StdbBuilder.group(...)` with a guard | the receiving module |
+| Outbox | `Stdb.outboxTable(...)` | the calling module |
+| Settle reducer | `Stdb.StdbFn.outboxResult(...)` | the calling module |
+
+## Interface
+
+An interface is a group whose endpoints are all receivers. Its declared errors
+are how the receiver refuses a call.
+
+```ts
+export const IdcPairInbox = Stdb.StdbGroup.make("IdcPairInbox", {
+  errors: Stdb.errors(IdcPairUnknownSender, IdcPairBlankNote),
+}).add(
+  Stdb.StdbFn.receiver("receiveNote", {
+    params: Stdb.struct({ note: Stdb.string() }),
+  }),
+)
+```
+
+A call names its receiver and carries a signature hash of the receiver's
+parameter names and types; the host refuses a call whose hash differs. Both
+must survive either module's case policy, so validation refuses a receiver
+unless:
+
+- its wire name is `snakeCase(key)` (`receive_note` here), whatever the
+  module's policy;
+- every parameter, field and variant name reachable from its params is one
+  lowercase word (`^[a-z][a-z0-9]*$`), and no parameter is named `msgId`,
+  `target` or `enqueuedAt`, which the outbox row reserves;
+- it is client-callable and neither scheduled nor a lifecycle hook.
+
+A changed signature is a new receiver: keep the old one until every caller has
+moved.
+
+## Receiver binding
+
+The caller compiles against a binding that native
+`spacetime generate --bindings module` writes from the receiver's bundle. Native
+codegen writes every client-callable reducer of the bundle into it, so generate
+it from an **interface fixture**: a module entry that composes only the
+interface group.
+
+```ts
+import { generateReceiverArtifact } from "effect-spacetimedb/codegen"
+
+yield* generateReceiverArtifact({
+  interfaceName: "pair_inbox",
+  receiverBundlePath: ".tmp/pair-inbox/receiver.js",
+  stagingDir: ".tmp/pair-inbox/staging",
+  artifactDir: "src/remote/pair_inbox",
+  spacetimeCommand: ["spacetime"],
+})
+```
+
+The artifact is quarantined like a generated client: `index.js` is the native
+output bundled verbatim, `index.d.ts` declares its default export as a
+`RemoteModuleBinding` with one `RemoteReducerBinding` per receiver, and both
+start with a banner recording the CLI and esbuild versions. The native module
+names its types through SDK internals that no declaration file can carry into a
+consumer, which is why the declaration is structural. `interfaceName` namespaces
+the binding's type names, so use the interface's own name.
+`checkReceiverArtifact(target)` regenerates the binding and fails with
+`ArtifactDriftError` when the committed one differs, including after a
+toolchain bump; run it wherever you check generated clients.
+
+Name the group as an interface once, in the package both sides import:
+
+```ts
+export const PairInboxInterface = Stdb.RemoteInterface.make({
+  name: "pair_inbox",
+  group: IdcPairInbox,
+})
+```
+
+`RemoteInterface.make` throws `StdbValidationError` (`InvalidRemoteInterface`)
+at load when an endpoint of the group is not a receiver or the name is not a
+SpacetimeDB identifier.
+
+A package that emits declarations annotates the exported group with
+`Stdb.StdbGroup<...>` and the interface with
+`Stdb.RemoteInterfaceOf<"pair_inbox", typeof IdcPairInbox>`: their inferred
+types are built from internal helpers that a consumer's declaration emit
+cannot name.
+
+The interface carries no binding, so neither does a contract that declares an
+outbox against it. A generated binding imports `spacetimedb/server`, which
+loads only inside a SpacetimeDB host, while a module's contract is also
+imported by workers, browsers, CLIs and tests: a bundler cannot resolve the
+host's `spacetime:sys` import, and a plain runtime fails to load it. The calling
+module therefore pairs each interface with its binding in its module entry, the
+one file only the host runs, and passes the pairs to `build` from
+`effect-spacetimedb/server-compiler`, the entrypoint that already keeps
+host-only code apart:
+
+```ts
+import pairInboxBinding from "./remote/pair_inbox/index.js"
+
+const compiled = build(
+  IdcPairSenderModule,
+  [IdcPairSendsLive, IdcPairSettlesLive],
+  {
+    runtimeMode: "dev-guarded",
+    receiverBindings: [
+      Stdb.RemoteInterface.bind(PairInboxInterface, pairInboxBinding),
+    ],
+  },
+)
+```
+
+`RemoteInterface.bind` throws `StdbValidationError`
+(`RemoteInterfaceBindingMismatch`) at load when the binding no longer carries a
+receiver of the interface under its wire name with its parameters in order, and
+a receiver missing from the binding's declaration is a type error. `build`
+refuses a module with an outbox whose interface has no binding
+(`OutboxReceiverBindingMissing`) or an interface bound twice
+(`DuplicateReceiverBinding`); a binding no outbox uses is accepted.
+`StdbBuilder.plan` and the test harness never read a binding.
+
+## Inbox
+
+The receiving module adds the group like any other and implements it. A group
+implementing a receiver must declare a guard as its `middleware.reducers`;
+`StdbBuilder.group` throws `StdbValidationError` (`ReceiverWithoutGuard`)
+otherwise.
+
+```ts
+export const requireTrustedSender = Effect.gen(function* () {
+  const ctx = yield* ReducerCtx
+  const env = yield* Env
+  const trusted = yield* env.IDC_PAIR_TRUSTED_SENDER
+  const caller = StdbServer.databaseCaller(ctx)
+  if (
+    trusted === undefined ||
+    Option.isNone(caller) ||
+    !Stdb.identityEquals(caller.value, trusted)
+  ) {
+    return yield* IdcPairUnknownSender.make()
+  }
+})
+
+export const IdcPairInboxLive = Stdb.StdbBuilder.group(
+  IdcPairReceiverModule,
+  "IdcPairInbox",
+  {
+    receiveNote: Effect.fn(function* ({ note }) {
+      if (note.trim().length === 0) {
+        return yield* IdcPairBlankNote.make()
+      }
+      const ctx = yield* ReducerCtx
+      const db = yield* Db
+      yield* db.receivedNote.insert({ id: 0n, sender: ctx.sender, note })
+    }),
+  },
+  { middleware: { reducers: requireTrustedSender } },
+)
+```
+
+`StdbServer.databaseCaller(ctx)` is the calling database's identity, which its
+host signs, when the call is an inter-database delivery, and `None` for every
+other caller. Take peers from configuration or your own registry rows, never
+from a call argument.
+
+A receiver refuses by failing with a declared error. The refusal is final: the
+host rolls the receiver back, settles the row as `Refused` with the encoded
+error, and moves on to the stream's next row. Every delivery also runs your
+`clientConnected` hook, as a caller with no JWT; a hook that refuses it makes
+the host retry that row until the hook admits it, so admit the databases you
+expect.
+
+## Outbox
+
+An outbox table is bound to one receiver of one interface. Its row is the
+call: `msgId` (`u64`, primary key, auto-increment), `target` (the receiving
+database), the receiver's parameters as the binding defines them, any local
+columns you add (stored, never sent), and `enqueuedAt`. It has a `byTarget`
+index over `[target, msgId]`, is always private, and states its encoded size
+bound.
+
+```ts
+export const noteOutbox = Stdb.outboxTable("noteOutbox", {
+  interface: PairInboxInterface,
+  reducer: "receiveNote",
+  rowBytesMax: 4 * 1024,
+})
+```
+
+`rowBytesMax` defaults to `Stdb.outboxRowBytesMaxDefault` (64 KiB) and may not
+exceed `Stdb.outboxRowBytesMaxCeiling` (1 MiB), half of the 2 MiB request body
+a standalone host accepts: a row over that limit can never be delivered and
+would block its stream. Send ids and digests, never blobs.
+
+The insert is the send. The handle fills `msgId` and `enqueuedAt`, and its
+error channel carries `OutboxRowTooLarge` for a row over the bound, which your
+handler must handle: drop the call, or refuse its own caller with an error it
+declares.
+
+```ts
+export const resolveReceiver = Effect.gen(function* () {
+  const env = yield* Env
+  const hex = yield* env.IDC_PAIR_RECEIVER
+  return Stdb.RemoteInterface.peer(PairInboxInterface, new Identity(hex))
+})
+
+sendNote: Effect.fn(function* ({ note }) {
+  const target = yield* resolveReceiver
+  const db = yield* Db
+  yield* db.noteOutbox.insert({ target, note }).pipe(
+    Effect.catchTag("OutboxRowTooLarge", (tooLarge) =>
+      Effect.fail(IdcPairNoteTooLarge.make({ rowBytes: tooLarge.rowBytes })),
+    ),
+  )
+})
+```
+
+`target` is a `PeerIdentity` of the interface, which only
+`RemoteInterface.peer` mints; call it from the module's peer resolver. The
+handle is insert-only (plus `iter`, `count` and the read-only `byTarget`), and
+it dies with `OutboxSelfTargetDefect` on a row addressed to the database itself.
+Insert only in reducers, scheduled reducers, settle reducers and procedure
+`withTx` blocks: an HTTP handler's transaction dies with
+`OutboxSendOutsideMutationDefect`, and views have no insert.
+
+## Settle reducer
+
+Each outbox has exactly one settle reducer. It receives the row and an
+`OutboxResult`: `Delivered` when the receiver committed, `Refused` with the
+receiver's failure text otherwise. Transport failures never settle; the host
+retries them.
+
+```ts
+export const IdcPairSettles = Stdb.StdbGroup.make("IdcPairSettles").add(
+  Stdb.StdbFn.outboxResult("noteSettled", { table: noteOutbox }),
+)
+
+noteSettled: ({ row, result }) =>
+  Effect.gen(function* () {
+    const db = yield* Db
+    yield* db.noteDelivery.insert({
+      msgId: row.msgId,
+      note: row.note,
+      ...StdbServer.OutboxResult.$match(result, {
+        Delivered: () => ({ delivered: true, message: "" }),
+        Refused: ({ message }) => ({ delivered: false, message }),
+      }),
+    })
+  }).pipe(Effect.orDie)
+```
+
+A settle handler's error type is `never`: the host does not retry a failed
+settle, so its outcome would be lost. Handle what can fail, and let a bug die;
+the host rolls the settle back and still deletes the row. The host runs it as
+the zero identity, and the compiled module refuses any other caller, the owner
+included, so nobody can forge an outcome. A settle reducer can share a group
+with player-facing reducers: the group's `middleware.reducers` does not run
+for it, since that middleware would refuse the host.
+
+## Delivery
+
+| What SpacetimeDB 2.14 does | What it means for your modules |
+| --- | --- |
+| Delivers each row exactly once, in order per outbox and target, after the sending transaction is durable | A rolled-back transaction sends nothing. Rows of different outboxes, or to different targets, may arrive in any order |
+| Retries transport failures without end; there is no dead letter | An unreachable target, a refusing connection hook or an oversized row holds its stream's later rows forever |
+| Posts deliveries to `http://localhost:<port>` | Caller and receiver must share one host. A proxy set through `HTTP_PROXY` must exempt `localhost` |
+| Keeps each side's stream state with its database | Reset connected databases together. A database keeps its identity through `--delete-data`, and a deleted database republished under its name gets it back, so a stream reset on one side only meets stale state on the other |
+
+The database owner can read the host's stream bookkeeping over SQL:
+`st_outbound_msg` holds each undelivered row's `retry_count` and
+`last_transport_error`, which is how to tell a stuck stream from a slow one.
+
+## Testing
+
+`StdbTesting.makeIdcPump` delivers rows between module harnesses in memory, one
+stream at a time, the way the host does: the receiver runs as the calling
+database with no JWT, a failure settles `Refused`, the settle runs as the zero
+identity and the row is deleted. Tests choose every interleaving explicitly.
+
+```ts
+const pump = StdbTesting.makeIdcPump({
+  links: [{ sender, receivers: [receiver] }],
+})
+pump.deliverNext("noteOutbox") // the head row of one stream
+pump.drain({ deliveriesMax: 100 })
+```
+
+`IdcPump.recording({ databaseIdentity })` stands in for a receiver you do not
+run, and records each call.
+
+For real delivery, publish both modules to one dev server. The runtime is its
+first database, `publishDatabase` adds others on the same standalone, and every
+database exposes the `databaseIdentity` its peers need:
+
+```ts
+const receiver = yield* makeDevServer({
+  bundlePath: "receiver/dist/bundle.js",
+  dbNamePrefix: "receiver",
+})
+const sender = yield* receiver.publishDatabase({
+  bundlePath: "sender/dist/bundle.js",
+  databaseName: "sender",
+  environment: { IDC_PAIR_RECEIVER: receiver.databaseIdentity },
+})
+yield* receiver.updateEnvironment({
+  IDC_PAIR_TRUSTED_SENDER: sender.databaseIdentity,
+})
+```
+
+The dev server adds `localhost` to every standalone's `NO_PROXY` unless your
+`standaloneEnvironment` sets it.

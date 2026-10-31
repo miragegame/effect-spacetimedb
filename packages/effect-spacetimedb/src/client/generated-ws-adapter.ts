@@ -1,4 +1,5 @@
 import * as Data from "effect/Data"
+import type * as Effect from "effect/Effect"
 import type { Identity } from "spacetimedb"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import { errorTypeId, hasErrorTypeId } from "../error-identity.ts"
@@ -14,7 +15,46 @@ export type ManagedWsConnection<
   Partial<WsCallableTransport> & {
     readonly disconnect: () => void
     readonly isActive?: boolean | undefined
+    /**
+     * The token the connection currently authenticates with. The SDK keeps
+     * it current across automatic reconnects that refresh it.
+     */
+    readonly token?: string | undefined
   }
+
+/**
+ * Opts a WebSocket connection into the SDK's automatic reconnect: after an
+ * established connection drops, the SDK reopens it with exponential, jittered
+ * backoff and keeps the same connection object, client cache, subscription
+ * handles and callbacks. The SDK raises `delayMillisMin` below 500 ms and
+ * `delayMillisMax` below 1 s (or below `delayMillisMin`) to those floors; its
+ * defaults are 1 s and 30 s. Both must be finite, non-negative numbers of
+ * milliseconds: a client built with any other value throws a `TypeError`.
+ */
+export type WsAutomaticReconnect = {
+  /** The delay before the first reconnect attempt, and the floor for every later one. */
+  readonly delayMillisMin?: number | undefined
+  /** The cap on the delay between reconnect attempts. */
+  readonly delayMillisMax?: number | undefined
+}
+
+/**
+ * The token a WebSocket connection authenticates with: a fixed string, or an
+ * Effect evaluated before every connection attempt. An Effect is run again for
+ * each acquisition (every supervisor reconnect included) and, with automatic
+ * reconnect, whenever the SDK refreshes a token that is close to expiry or was
+ * rejected. An acquisition's evaluation is bounded by `connectTimeoutMillis`,
+ * and its failure (any `Error`, so any tagged error) fails that attempt with
+ * `WsConnectError` carrying it as `cause`. A refresh is bounded by its
+ * reconnect attempt, and one that fails, dies or overruns ends the session.
+ */
+export type WsToken = string | Effect.Effect<string, Error>
+
+/** The native builder options `withAutomaticReconnect` accepts. */
+export type NativeAutomaticReconnectOptions = {
+  readonly minDelayMs?: number
+  readonly maxDelayMs?: number
+}
 
 export interface GeneratedWsBuilderLike<
   Module extends AnyModuleSpec,
@@ -42,6 +82,12 @@ export interface GeneratedWsBuilderLike<
   withWSFn?(
     createWebSocket: unknown,
   ): GeneratedWsBuilderLike<Module, ErrorContext, RelationContext>
+  withAutomaticReconnect?(
+    options?: NativeAutomaticReconnectOptions,
+  ): GeneratedWsBuilderLike<Module, ErrorContext, RelationContext>
+  withTokenProvider?(
+    provider: () => Promise<string>,
+  ): GeneratedWsBuilderLike<Module, ErrorContext, RelationContext>
   onConnect(
     callback: (
       connection: ManagedWsConnection<Module, ErrorContext, RelationContext>,
@@ -49,11 +95,33 @@ export interface GeneratedWsBuilderLike<
       token: string,
     ) => void,
   ): GeneratedWsBuilderLike<Module, ErrorContext, RelationContext>
+  onAutomaticReconnect?(
+    callback: (
+      connection: ManagedWsConnection<Module, ErrorContext, RelationContext>,
+      identity: Identity,
+      token: string,
+    ) => void,
+  ): GeneratedWsBuilderLike<Module, ErrorContext, RelationContext>
+  /**
+   * With automatic reconnect, `nextReconnectAttempt` and
+   * `nextReconnectDelayMs` report the retry the SDK scheduled; both are
+   * `undefined` when no retry is scheduled, so the disconnect is terminal.
+   */
   onDisconnect(
-    callback: (context: ErrorContext, error?: Error) => void,
+    callback: (
+      context: ErrorContext,
+      error?: Error,
+      nextReconnectAttempt?: number,
+      nextReconnectDelayMs?: number,
+    ) => void,
   ): GeneratedWsBuilderLike<Module, ErrorContext, RelationContext>
   onConnectError(
-    callback: (context: ErrorContext, error: Error) => void,
+    callback: (
+      context: ErrorContext,
+      error: Error,
+      nextReconnectAttempt?: number,
+      nextReconnectDelayMs?: number,
+    ) => void,
   ): GeneratedWsBuilderLike<Module, ErrorContext, RelationContext>
   build(): ManagedWsConnection<Module, ErrorContext, RelationContext>
 }
@@ -70,11 +138,29 @@ export type GeneratedWsBuilderConfig<
   >
   readonly uri: string
   readonly databaseName: string
-  readonly token?: string | undefined
+  /** A fixed token, or an Effect producing one per connection attempt. */
+  readonly token?: WsToken | undefined
   readonly compression?: WsCompression | undefined
   readonly lightMode?: boolean | undefined
   readonly confirmedReads?: boolean | undefined
-  readonly connectTimeoutMillis?: number | undefined
+  /**
+   * Opts into the SDK's automatic reconnect. The session then outlives a
+   * dropped socket: it stays valid while the SDK reconnects, and is
+   * invalidated only when the SDK gives up (no retry scheduled), the identity
+   * changes, or a reconnect attempt overruns `connectTimeoutMillis`.
+   */
+  readonly automaticReconnect?: WsAutomaticReconnect | undefined
+  /**
+   * The longest connection acquisition may take, from resolving the token and
+   * building the native connection to its connect callback. Acquisition still
+   * unfinished at this bound fails with `WsConnectError` whose `cause` is
+   * `WsConnectTimeoutError`. Required: a native builder that never invokes a
+   * connect callback would otherwise strand acquisition forever. Session
+   * supervisors also use it as the bound on each whole activation attempt
+   * (connect, subscribe, setup). With automatic reconnect it also bounds each
+   * reconnect attempt past its scheduled delay, and each token refresh.
+   */
+  readonly connectTimeoutMillis: number
   readonly createWebSocket?: unknown | undefined
   readonly configureBuilder?:
     | ((
@@ -235,7 +321,13 @@ const WsUnsupportedBuilderFeatureErrorTypeId = errorTypeId(
 export class WsUnsupportedBuilderFeatureError extends Data.TaggedError(
   "WsUnsupportedBuilderFeatureError",
 )<{
-  readonly feature: "withLightMode" | "withConfirmedReads" | "withWSFn"
+  readonly feature:
+    | "withLightMode"
+    | "withConfirmedReads"
+    | "withWSFn"
+    | "withAutomaticReconnect"
+    | "withTokenProvider"
+    | "onAutomaticReconnect"
 }> {
   readonly [WsUnsupportedBuilderFeatureErrorTypeId] =
     WsUnsupportedBuilderFeatureErrorTypeId
@@ -261,7 +353,8 @@ export const generatedConfig = <
   ...optionalProperty("compression", config.compression),
   ...optionalProperty("lightMode", config.lightMode),
   ...optionalProperty("confirmedReads", config.confirmedReads),
-  ...optionalProperty("connectTimeoutMillis", config.connectTimeoutMillis),
+  ...optionalProperty("automaticReconnect", config.automaticReconnect),
+  connectTimeoutMillis: config.connectTimeoutMillis,
   ...optionalProperty("createWebSocket", config.createWebSocket),
   ...optionalProperty("configureBuilder", config.configureBuilder),
   // The one sanctioned narrowing for the native-generated ↔ spec-typed seam: the
@@ -277,18 +370,38 @@ export const generatedConfig = <
     >,
 })
 
+/**
+ * The credentials one connection attempt presents: the token resolved from
+ * the config's `token`, and with automatic reconnect a refresh the SDK calls
+ * before a reconnect whose token is near expiry or was rejected. Required by
+ * `configureGeneratedWsBuilder`: a token Effect resolves per attempt, so the
+ * builder can never read it from the config itself.
+ */
+export type WsAttemptCredentials = {
+  readonly token: string | undefined
+  readonly refreshToken: (() => Promise<string>) | undefined
+}
+
+const nativeAutomaticReconnectOptions = (
+  options: WsAutomaticReconnect,
+): NativeAutomaticReconnectOptions => ({
+  ...optionalProperty("minDelayMs", options.delayMillisMin),
+  ...optionalProperty("maxDelayMs", options.delayMillisMax),
+})
+
 export const configureGeneratedWsBuilder = <
   Module extends AnyModuleSpec,
   ErrorContext,
   RelationContext,
 >(
   config: GeneratedWsBuilderConfig<Module, ErrorContext, RelationContext>,
+  credentials: WsAttemptCredentials,
 ): GeneratedWsBuilderLike<Module, ErrorContext, RelationContext> => {
   let builder = config.builder()
   builder = builder.withUri(config.uri).withDatabaseName(config.databaseName)
 
-  if (config.token !== undefined) {
-    builder = builder.withToken(config.token)
+  if (credentials.token !== undefined) {
+    builder = builder.withToken(credentials.token)
   }
 
   if (config.compression !== undefined) {
@@ -320,6 +433,25 @@ export const configureGeneratedWsBuilder = <
       })
     }
     builder = builder.withWSFn(config.createWebSocket)
+  }
+
+  if (config.automaticReconnect !== undefined) {
+    if (builder.withAutomaticReconnect == null) {
+      throw new WsUnsupportedBuilderFeatureError({
+        feature: "withAutomaticReconnect",
+      })
+    }
+    builder = builder.withAutomaticReconnect(
+      nativeAutomaticReconnectOptions(config.automaticReconnect),
+    )
+    if (credentials.refreshToken !== undefined) {
+      if (builder.withTokenProvider == null) {
+        throw new WsUnsupportedBuilderFeatureError({
+          feature: "withTokenProvider",
+        })
+      }
+      builder = builder.withTokenProvider(credentials.refreshToken)
+    }
   }
 
   return config.configureBuilder != null

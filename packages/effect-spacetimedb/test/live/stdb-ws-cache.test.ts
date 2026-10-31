@@ -2,7 +2,7 @@ import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { unsubscribeThen } from "effect-spacetimedb/client"
 import { Identity, Timestamp } from "spacetimedb"
 

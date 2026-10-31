@@ -18,21 +18,21 @@ then build native module exports and generated clients from the same contract.
   <TabItem label="npm">
 
     ```sh
-    npm install effect-spacetimedb effect@4.0.0-rc.117 spacetimedb@2.10.1
+    npm install effect-spacetimedb effect@4.1.1 spacetimedb@2.14.0
     ```
 
   </TabItem>
   <TabItem label="pnpm">
 
     ```sh
-    pnpm add effect-spacetimedb effect@4.0.0-rc.117 spacetimedb@2.10.1
+    pnpm add effect-spacetimedb effect@4.1.1 spacetimedb@2.14.0
     ```
 
   </TabItem>
   <TabItem label="bun">
 
     ```sh
-    bun add effect-spacetimedb effect@4.0.0-rc.117 spacetimedb@2.10.1
+    bun add effect-spacetimedb effect@4.1.1 spacetimedb@2.14.0
     ```
 
   </TabItem>
@@ -52,6 +52,35 @@ If several CLI versions are installed, make sure the matching `spacetime` is the
 one on your `PATH`, or invoke it by full path in your build scripts.
 
 :::
+
+### Patch the SDK
+
+The published `spacetimedb` 2.14.0 package has three defects that an install
+does not fix: `Prettify` turns branded primitives into object types
+([upstream fix](https://github.com/clockworklabs/SpacetimeDB/pull/5971), merged
+but not yet released), the client `TableCache` compares ranges over
+`Identity`, `Timestamp` and other object-backed keys by wrapper rather than
+value ([open PR](https://github.com/clockworklabs/SpacetimeDB/pull/5970)), and
+a non-unique index whose columns are a strict subset of a unique constraint
+loses its range methods
+([open PR](https://github.com/clockworklabs/SpacetimeDB/pull/5969)).
+
+Copy
+[`patches/spacetimedb@2.14.0.patch`](https://github.com/miragegame/effect-spacetimedb/blob/main/patches/spacetimedb@2.14.0.patch)
+into your project. Its paths are relative to the `spacetimedb` package root, so
+Bun applies it from your root `package.json`, and pnpm from the same entry
+under `pnpm.patchedDependencies` or in `pnpm-workspace.yaml`:
+
+```json
+{
+  "patchedDependencies": {
+    "spacetimedb@2.14.0": "patches/spacetimedb@2.14.0.patch"
+  }
+}
+```
+
+Other package managers need their own patch mechanism. Apply it wherever the
+SDK is installed, module and client packages alike.
 
 ## Minimal Module
 

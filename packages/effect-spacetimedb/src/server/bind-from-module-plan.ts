@@ -1,15 +1,11 @@
 import * as Effect from "effect/Effect"
 import * as Clock from "effect/Clock"
-
 import * as Layer from "effect/Layer"
-
 import * as Match from "effect/Match"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import { formatModuleDiagnostics } from "../contract/module-validation.ts"
 import { SyncResponse as NativeSyncResponse } from "../http-primitives.ts"
-
 import type { ModulePlan } from "../module-plan.ts"
-
 import { makeServerContextAccessors } from "./bind-context-accessors.ts"
 import { makeHandlerInputFactory } from "./bind-handler-inputs.ts"
 import {
@@ -31,6 +27,7 @@ import {
 } from "./callable-runtime.ts"
 import * as ServerContext from "./context.ts"
 import { makeDbHandleFactory } from "./db-handle.ts"
+import { makeEnvServiceFactory } from "./environment.ts"
 import {
   encodeDeclaredProcedureFailure,
   encodeDeclaredReducerFailure,
@@ -136,6 +133,7 @@ export function makeFromModulePlan<
   const module = options.plan.module
   const scheduleBindings = options.plan.scheduleBindings
   const dbHandles = makeDbHandleFactory(module)
+  const envServiceFor = makeEnvServiceFactory(module.environment)
   const runner: SyncRunner<RuntimeR> =
     options.runtime === undefined
       ? (toSyncRunnerFromLayer(Layer.empty) as SyncRunner<RuntimeR>)
@@ -192,7 +190,8 @@ export function makeFromModulePlan<
     effect.pipe(
       Effect.provideService(ServerContext.ReducerCtx, ctx),
       Effect.provideService(ServerContext.MutationCtx, ctx),
-      Effect.provideService(ServerContext.Db, dbHandles.readwrite(ctx.db)),
+      Effect.provideService(ServerContext.Db, dbHandles.readwrite(ctx.db, ctx)),
+      Effect.provideService(ServerContext.Env, envServiceFor(ctx)),
       (provided) => withServerRuntime(provided, ctx),
     ) as Effect.Effect<A, E, RuntimeR>
 
@@ -208,6 +207,7 @@ export function makeFromModulePlan<
     effect.pipe(
       Effect.provideService(ServerContext.ProcedureCtx, ctx),
       Effect.provideService(ServerContext.Http, wrapHttp(ctx.http)),
+      Effect.provideService(ServerContext.Env, envServiceFor(ctx)),
       Effect.provideService(
         ServerContext.TxRunner,
         txRunner as unknown as ServerContext.TxRunnerService<AnyModuleSpec>,
@@ -234,6 +234,7 @@ export function makeFromModulePlan<
     effect.pipe(
       Effect.provideService(ServerContext.HttpHandlerCtx, ctx),
       Effect.provideService(ServerContext.Http, wrapHttp(ctx.http)),
+      Effect.provideService(ServerContext.Env, envServiceFor(ctx)),
       Effect.provideService(
         ServerContext.HttpTxRunner,
         txRunner as unknown as ServerContext.HttpTxRunnerService<AnyModuleSpec>,
@@ -266,6 +267,7 @@ export function makeFromModulePlan<
           effect.pipe(
             Effect.provideService(ServerContext.ViewCtx, ctx),
             Effect.provideService(ServerContext.From, ctx.from),
+            Effect.provideService(ServerContext.Env, envServiceFor(ctx)),
             Effect.provideService(
               ServerContext.ReadonlyDb,
               dbHandles.readonly(ctx.db),
@@ -275,6 +277,7 @@ export function makeFromModulePlan<
           effect.pipe(
             Effect.provideService(ServerContext.AnonymousViewCtx, ctx),
             Effect.provideService(ServerContext.From, ctx.from),
+            Effect.provideService(ServerContext.Env, envServiceFor(ctx)),
             Effect.provideService(
               ServerContext.ReadonlyDb,
               dbHandles.readonly(ctx.db),
@@ -292,28 +295,38 @@ export function makeFromModulePlan<
     )
   }
 
-  const provideTxRuntime = <A, E, R extends TxAllowedRequirements | RuntimeR>(
+  const provideTxRuntime = <
+    A,
+    E,
+    R extends ServerContext.WithEnv<TxAllowedRequirements> | RuntimeR,
+  >(
     txCtx: BaseReducerCtx<Module>,
     effect: Effect.Effect<A, E, R>,
   ): Effect.Effect<A, E, RuntimeR> =>
     effect.pipe(
       Effect.provideService(ServerContext.TxCtx, txCtx),
       Effect.provideService(ServerContext.MutationCtx, txCtx),
-      Effect.provideService(ServerContext.Db, dbHandles.readwrite(txCtx.db)),
+      Effect.provideService(
+        ServerContext.Db,
+        dbHandles.readwrite(txCtx.db, txCtx),
+      ),
+      Effect.provideService(ServerContext.Env, envServiceFor(txCtx)),
       (provided) => withServerRuntime(provided, txCtx),
     ) as Effect.Effect<A, E, RuntimeR>
 
   const provideHttpTxRuntime = <
     A,
     E,
-    R extends HttpTxAllowedRequirements | RuntimeR,
+    R extends ServerContext.WithEnv<HttpTxAllowedRequirements> | RuntimeR,
   >(
     httpCtx: HttpHandlerCtxLike<Module>,
     txCtx: { readonly db: DbShape<Module> },
     effect: Effect.Effect<A, E, R>,
   ): Effect.Effect<A, E, RuntimeR> =>
     effect.pipe(
+      // No send context: an HTTP handler never sends inter-database calls.
       Effect.provideService(ServerContext.Db, dbHandles.readwrite(txCtx.db)),
+      Effect.provideService(ServerContext.Env, envServiceFor(httpCtx)),
       (provided) => withServerRuntime(provided, httpCtx),
     ) as Effect.Effect<A, E, RuntimeR>
 

@@ -1,9 +1,37 @@
 import * as Cause from "effect/Cause"
 import * as Data from "effect/Data"
+import * as Inspectable from "effect/Inspectable"
+import * as Result from "effect/Result"
 import { errorTypeId, hasErrorTypeId } from "./error-identity.ts"
 
 export type StdbDecodePhase = "args" | "ok" | "row" | "declaredError"
 
+/** The longest rendering of a structured cause an error message carries. */
+const structuredCauseCharsMax = 2048
+
+/**
+ * A structured cause, rendered as JSON for an error message. The JSON
+ * rendering falls back to `String` when the record cannot be serialized (a
+ * throwing getter or `toJSON`), so that fallback is guarded too: rendering
+ * never throws.
+ */
+export const renderStructuredCause = (cause: object): string => {
+  const rendered = Result.getOrElse(
+    Result.try(() => Inspectable.toStringUnknown(cause, 0)),
+    () => Object.prototype.toString.call(cause),
+  )
+  return rendered.length <= structuredCauseCharsMax
+    ? rendered
+    : `${rendered.slice(0, structuredCauseCharsMax)}…`
+}
+
+/**
+ * A cause with no message of its own reads as `String` gives it, as before;
+ * only when `String` throws (a null-prototype record has nothing to convert
+ * with) is it rendered structurally. A throw there would take down the
+ * message being built and every report that reads it, which hid a live
+ * suite's decode failure behind "TypeError: No default value".
+ */
 const messageFromUnknown = (cause: unknown): string => {
   if (cause instanceof Error && cause.message.length > 0) {
     return cause.message
@@ -17,8 +45,13 @@ const messageFromUnknown = (cause: unknown): string => {
   ) {
     return (cause as { readonly message: string }).message
   }
-
-  return String(cause)
+  return Result.getOrElse(
+    Result.try(() => String(cause)),
+    () =>
+      typeof cause === "object" && cause !== null
+        ? renderStructuredCause(cause)
+        : Object.prototype.toString.call(cause),
+  )
 }
 
 const StdbDecodeErrorTypeId = errorTypeId("StdbDecodeError")

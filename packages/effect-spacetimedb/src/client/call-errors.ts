@@ -1,10 +1,9 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
-import * as Inspectable from "effect/Inspectable"
 import { InternalError, SenderError } from "spacetimedb"
 import * as ErrorCodec from "../contract/error.ts"
 import * as Type from "../contract/type.ts"
-import { StdbDecodeError } from "../decode-error.ts"
+import { renderStructuredCause, StdbDecodeError } from "../decode-error.ts"
 import { errorTypeId, hasErrorTypeId } from "../error-identity.ts"
 import { prepareHttpInputValue } from "./http-json.ts"
 import * as ValueCodec from "./value-codec.ts"
@@ -48,6 +47,12 @@ export class TransportError extends Data.TaggedError("TransportError")<{
 }
 
 const ConnectionLostErrorTypeId = errorTypeId("ConnectionLostError")
+/**
+ * The call's outcome is unknown. Its connection was lost while the call was
+ * in flight (or the session had already ended), so the reducer or procedure
+ * may have committed on the server. Reconcile from subscribed state before
+ * retrying anything that is not idempotent.
+ */
 export class ConnectionLostError extends Data.TaggedError(
   "ConnectionLostError",
 )<{
@@ -55,6 +60,40 @@ export class ConnectionLostError extends Data.TaggedError(
 }> {
   readonly [ConnectionLostErrorTypeId] = ConnectionLostErrorTypeId
   static is = hasErrorTypeId<ConnectionLostError>(ConnectionLostErrorTypeId)
+}
+
+const CallNotSentErrorTypeId = errorTypeId("CallNotSentError")
+/**
+ * The call never left the client: its session was reconnecting after a
+ * dropped socket (automatic reconnect), so the server never saw it. Retrying
+ * is safe once the session is live again.
+ */
+export class CallNotSentError extends Data.TaggedError("CallNotSentError")<{
+  readonly raw: string
+}> {
+  readonly [CallNotSentErrorTypeId] = CallNotSentErrorTypeId
+  static is = hasErrorTypeId<CallNotSentError>(CallNotSentErrorTypeId)
+}
+
+const ConnectionIdentityChangedErrorTypeId = errorTypeId(
+  "ConnectionIdentityChangedError",
+)
+/**
+ * An automatic reconnect came back under a different identity (the token was
+ * revoked or replaced), so the session ended rather than serve another
+ * identity's data. Fatal for the session: retrying on it cannot succeed, and
+ * a new session needs credentials for the intended identity.
+ */
+export class ConnectionIdentityChangedError extends Data.TaggedError(
+  "ConnectionIdentityChangedError",
+)<{
+  readonly raw: string
+}> {
+  readonly [ConnectionIdentityChangedErrorTypeId] =
+    ConnectionIdentityChangedErrorTypeId
+  static is = hasErrorTypeId<ConnectionIdentityChangedError>(
+    ConnectionIdentityChangedErrorTypeId,
+  )
 }
 
 const WsRpcInvokeErrorTypeId = errorTypeId("WsRpcInvokeError")
@@ -68,6 +107,8 @@ export class WsRpcInvokeError extends Data.TaggedError("WsRpcInvokeError")<{
 export type CallFailure<E> =
   | E
   | ConnectionLostError
+  | CallNotSentError
+  | ConnectionIdentityChangedError
   | RemoteRejectedError
   | TransportError
   | StdbDecodeError
@@ -75,9 +116,26 @@ export type CallFailure<E> =
 export type RawCallFailure<E> =
   | DomainCallError<E>
   | ConnectionLostError
+  | CallNotSentError
+  | ConnectionIdentityChangedError
   | RemoteRejectedError
   | TransportError
   | StdbDecodeError
+
+/**
+ * The connection-level call failures: the call was not sent, its outcome is
+ * unknown, or the session's identity changed. They pass through domain-error
+ * classification untouched.
+ */
+export const isConnectionCallFailure = (
+  cause: unknown,
+): cause is
+  | ConnectionLostError
+  | CallNotSentError
+  | ConnectionIdentityChangedError =>
+  ConnectionLostError.is(cause) ||
+  CallNotSentError.is(cause) ||
+  ConnectionIdentityChangedError.is(cause)
 
 export { StdbDecodeError }
 
@@ -215,9 +273,7 @@ export const messageFromUnknown = (cause: unknown): string | undefined => {
     return (cause as { readonly message: string }).message
   }
   if (typeof cause === "object" && cause !== null) {
-    const rendered = Inspectable.toStringUnknown(cause, 0)
-    const limit = 2048
-    return rendered.length <= limit ? rendered : `${rendered.slice(0, limit)}…`
+    return renderStructuredCause(cause)
   }
   return undefined
 }
@@ -351,7 +407,7 @@ export const remoteRejectedFromRaw = (
 }
 
 export const classifyRawCallFailure = <E>(cause: unknown): CallFailure<E> =>
-  ConnectionLostError.is(cause)
+  isConnectionCallFailure(cause)
     ? (cause as CallFailure<E>)
     : WsRpcInvokeError.is(cause)
       ? classifyRawCallFailure(cause.cause)

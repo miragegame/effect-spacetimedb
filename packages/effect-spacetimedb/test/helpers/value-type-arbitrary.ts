@@ -34,6 +34,7 @@ import {
   codecCorpus,
   codecCorpusEntries,
 } from "./codec-corpus"
+import { testArrayLength } from "./array-bounds"
 
 type CorpusArbitrary = {
   readonly kind: StdbTesting.ContractType.TypeKind
@@ -43,8 +44,8 @@ type CorpusArbitrary = {
 
 const boundedString = FastCheck.string({ maxLength: 32 })
 
-// Effect rc.113 (#7254) deleted `Schema.toArbitrary`, and rc.117's replacement
-// `effect/unstable/arbitrary/Arbitrary` is an Effect-native generator with no
+// Effect 4.0.0-rc.113 deleted `Schema.toArbitrary`, and its replacement,
+// the top-level `effect/Arbitrary`, is an Effect-native generator with no
 // fast-check bridge: it cannot produce the `FastCheck.Arbitrary` every consumer
 // of this module needs now that the property suites run on the standalone
 // `fast-check` package. The kinds that used to be derived from
@@ -102,8 +103,13 @@ const simpleSumArbitrary = FastCheck.oneof(
 )
 
 const arbitraryByKind = {
-  // The corpus array is `T.array(T.u16())`, so its elements carry the u16 bound.
-  array: () => FastCheck.array(u16Number),
+  // The corpus array is `T.array(T.u16(), testArrayLength)`, so its elements
+  // carry the u16 bound and its length the test bounds.
+  array: () =>
+    FastCheck.array(u16Number, {
+      minLength: testArrayLength.minimum,
+      maxLength: testArrayLength.maximum,
+    }),
   bigint: () => FastCheck.bigInt(),
   bool: () => FastCheck.boolean(),
   bytes: () => FastCheck.uint8Array(),

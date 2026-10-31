@@ -114,6 +114,15 @@ export const UserFunctionsLive = Stdb.StdbBuilder.group(
         )
         return row ?? undefined
       }),
+    usersNamed: Effect.fn(function* ({ name }) {
+      const db = yield* ReadonlyDb
+      return (yield* db.user.toArray()).filter((row) => row.name === name)
+    }),
+    userOfIdentity: Effect.fn(function* ({ identity }) {
+      const db = yield* ReadonlyDb
+      const row = yield* db.user.id.find(decodeUserId(toHexString(identity)))
+      return row ?? undefined
+    }),
     privateAuditLog: () => Effect.succeed([]),
   },
 )

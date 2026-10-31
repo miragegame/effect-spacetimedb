@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 import { ExampleErrors } from "../errors"
-import { String255, ThingId, thing, U64 } from "../schema"
+import { ResultRowsLength, String255, ThingId, thing, U64 } from "../schema"
 
 export const ThingPingInput = Schema.Struct({
   thingId: ThingId,
@@ -105,7 +105,7 @@ export const ThingFunctions = Stdb.StdbGroup.make("Things")
   .add(
     Stdb.StdbFn.procedure("thingList", {
       params: Stdb.struct({}),
-      returns: Stdb.array(thing.row),
+      returns: Stdb.array(thing.row, ResultRowsLength),
     }),
   )
   .add(
@@ -113,7 +113,7 @@ export const ThingFunctions = Stdb.StdbGroup.make("Things")
       params: Stdb.struct({
         count: U64,
       }),
-      returns: Stdb.array(thing.row),
+      returns: Stdb.array(thing.row, ResultRowsLength),
     }),
   )
   .add(
@@ -122,7 +122,7 @@ export const ThingFunctions = Stdb.StdbGroup.make("Things")
         lo: U64,
         hi: U64,
       }),
-      returns: Stdb.array(thing.row),
+      returns: Stdb.array(thing.row, ResultRowsLength),
     }),
   )
   .add(
@@ -131,7 +131,7 @@ export const ThingFunctions = Stdb.StdbGroup.make("Things")
         lo: U64,
         hi: U64,
       }),
-      returns: Stdb.array(thing.row),
+      returns: Stdb.array(thing.row, ResultRowsLength),
     }),
   )
   .add(
@@ -168,7 +168,7 @@ export const ThingFunctions = Stdb.StdbGroup.make("Things")
   )
   .add(
     Stdb.StdbFn.anonymousView("allThings", {
-      returns: Stdb.array(thing.row),
+      returns: Stdb.array(thing.row, ResultRowsLength),
     }),
   )
 

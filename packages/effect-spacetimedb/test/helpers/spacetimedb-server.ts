@@ -12,19 +12,24 @@ type CallableModuleExport = ModuleExport & {
   readonly kind: "procedure" | "reducer"
   readonly params: unknown
   readonly returnType?: unknown
+  readonly name?: string
   readonly onSchedule?: unknown
+  readonly onResult?: unknown
   readonly invoke: (ctx: unknown, rawArgs: unknown) => unknown
 }
 
-type ScheduleOptions = {
-  readonly onSchedule: unknown
+/** Function-side options, as `schema.reducer(options, params, fn)` takes them. */
+type FunctionOptions = {
+  readonly name?: string
+  readonly onSchedule?: unknown
+  readonly onResult?: unknown
 }
 
-const isScheduleOptions = (value: unknown): value is ScheduleOptions =>
-  typeof value === "object" && value !== null && "onSchedule" in value
+const functionOptionsOf = (value: unknown): FunctionOptions =>
+  typeof value === "object" && value !== null ? (value as FunctionOptions) : {}
 
 type ViewModuleExport = ModuleExport & {
-  readonly invoke: (ctx: unknown) => unknown
+  readonly invoke: (ctx: unknown, rawArgs: unknown) => unknown
 }
 
 type HttpRoute = {
@@ -34,7 +39,7 @@ type HttpRoute = {
 }
 
 type ExplicitNameEntry = {
-  readonly tag: "Index" | "Table"
+  readonly tag: "Function" | "Index" | "Table"
   readonly value: {
     readonly sourceName: string
     readonly canonicalName: string
@@ -51,6 +56,21 @@ type TableIndexOptions = {
 type TableOptions = {
   readonly name?: string
   readonly indexes?: ReadonlyArray<TableIndexOptions>
+  readonly outbox?: { readonly receiver: RemoteReducerHandle }
+}
+
+type RemoteReducerHandle = {
+  readonly name: string
+  readonly signatureHash: bigint
+  readonly params: Record<string, unknown>
+}
+
+/** An outbox definition as the SDK records one in the module def. */
+export type TestOutboxDef = {
+  readonly tableName: string
+  readonly remoteReducer: string
+  readonly signatureHash: bigint
+  onResultReducer: string | undefined
 }
 
 type ViewOptions = {
@@ -203,11 +223,13 @@ class TestSchema {
       readonly sourceName: string
       readonly exportName: string
       readonly public: boolean
+      readonly params: Record<string, unknown>
     }>,
     schedules: [] as Array<{
       readonly tableName: string
       readonly functionName: string
     }>,
+    outboxes: [] as Array<TestOutboxDef>,
     explicitNames: {
       entries: [] as Array<ExplicitNameEntry>,
     },
@@ -216,10 +238,24 @@ class TestSchema {
   /** Mirrors the SDK's `tableSourceNames`: a handle registered twice is ambiguous. */
   readonly tableSourceNames = new Map<unknown, Array<string>>()
 
-  constructor(tables: Record<string, unknown> = {}) {
+  /** The `schema()` settings argument as the compiler passed it. */
+  readonly moduleSettings: unknown
+
+  constructor(tables: Record<string, unknown> = {}, moduleSettings?: unknown) {
+    this.moduleSettings = moduleSettings
     for (const [accessorName, tableSchema] of Object.entries(tables)) {
       if (isTableSchema(tableSchema)) {
         this.moduleDef.tables.push(tableSchema.tableDef(this, accessorName))
+        const outbox = (tableSchema as { readonly options?: TableOptions })
+          .options?.outbox
+        if (outbox !== undefined) {
+          this.moduleDef.outboxes.push({
+            tableName: accessorName,
+            remoteReducer: outbox.receiver.name,
+            signatureHash: outbox.receiver.signatureHash,
+            onResultReducer: undefined,
+          })
+        }
         const sourceNames = this.tableSourceNames.get(tableSchema)
         if (sourceNames === undefined) {
           this.tableSourceNames.set(tableSchema, [accessorName])
@@ -252,6 +288,29 @@ class TestSchema {
     this.moduleDef.schedules.push({ tableName, functionName })
   }
 
+  /** Mirrors the SDK's `resolveOutboxCallbacks`. */
+  resolveOutboxResult(table: unknown, functionName: string): void {
+    const sourceNames = this.tableSourceNames.get(table)
+    if (sourceNames?.length !== 1) {
+      throw new TypeError(
+        "onResult must reference an outbox registered exactly once in this schema",
+      )
+    }
+    const outbox = this.moduleDef.outboxes.find(
+      (candidate) => candidate.tableName === sourceNames[0],
+    )
+    if (outbox === undefined) {
+      throw new TypeError("onResult requires an outbox table")
+    }
+    if (
+      outbox.onResultReducer !== undefined &&
+      outbox.onResultReducer !== functionName
+    ) {
+      throw new TypeError("An outbox can only have one onResult reducer")
+    }
+    outbox.onResultReducer = functionName
+  }
+
   reducer(
     ...args:
       | [
@@ -259,17 +318,23 @@ class TestSchema {
           handler: (ctx: unknown, rawArgs: unknown) => unknown,
         ]
       | [
-          options: ScheduleOptions,
+          options: FunctionOptions,
           params: Record<string, unknown>,
           handler: (ctx: unknown, rawArgs: unknown) => unknown,
         ]
   ): ModuleExport {
     const [options, params, handler] =
       args.length === 2 ? [undefined, ...args] : args
+    const { name, onSchedule, onResult } = functionOptionsOf(options)
+    if (onSchedule !== undefined && onResult !== undefined) {
+      throw new TypeError("A reducer cannot use both onSchedule and onResult")
+    }
     return callableModuleExport(handler, {
       kind: "reducer",
       params,
-      ...(isScheduleOptions(options) ? { onSchedule: options.onSchedule } : {}),
+      ...(name === undefined ? {} : { name }),
+      ...(onSchedule === undefined ? {} : { onSchedule }),
+      ...(onResult === undefined ? {} : { onResult }),
     })
   }
 
@@ -281,7 +346,7 @@ class TestSchema {
           handler: (ctx: unknown, rawArgs: unknown) => unknown,
         ]
       | [
-          options: ScheduleOptions,
+          options: FunctionOptions,
           params: Record<string, unknown>,
           returnType: unknown,
           handler: (ctx: unknown, rawArgs: unknown) => unknown,
@@ -289,40 +354,43 @@ class TestSchema {
   ): ModuleExport {
     const [options, params, returnType, handler] =
       args.length === 3 ? [undefined, ...args] : args
+    const { onSchedule } = functionOptionsOf(options)
     return callableModuleExport(handler, {
       kind: "procedure",
       params,
       returnType,
-      ...(isScheduleOptions(options) ? { onSchedule: options.onSchedule } : {}),
+      ...(onSchedule === undefined ? {} : { onSchedule }),
     })
   }
 
   view(
     options: ViewOptions,
+    params: Record<string, unknown>,
     _returnType: unknown,
-    handler: (ctx: unknown) => unknown,
+    handler: (ctx: unknown, rawArgs: unknown) => unknown,
   ): ModuleExport {
-    return viewModuleExport(options, handler)
+    return viewModuleExport(options, params, handler)
   }
 
   anonymousView(
     options: ViewOptions,
+    params: Record<string, unknown>,
     _returnType: unknown,
-    handler: (ctx: unknown) => unknown,
+    handler: (ctx: unknown, rawArgs: unknown) => unknown,
   ): ModuleExport {
-    return viewModuleExport(options, handler)
+    return viewModuleExport(options, params, handler)
   }
 
-  init(): ModuleExport {
-    return emptyModuleExport()
+  init(handler?: (ctx: unknown) => unknown): ModuleExport {
+    return lifecycleModuleExport(handler)
   }
 
-  clientConnected(): ModuleExport {
-    return emptyModuleExport()
+  clientConnected(handler?: (ctx: unknown) => unknown): ModuleExport {
+    return lifecycleModuleExport(handler)
   }
 
-  clientDisconnected(): ModuleExport {
-    return emptyModuleExport()
+  clientDisconnected(handler?: (ctx: unknown) => unknown): ModuleExport {
+    return lifecycleModuleExport(handler)
   }
 
   httpHandler(): ModuleExport {
@@ -364,13 +432,26 @@ const emptyModuleExport = (): ModuleExport => ({
   [registerExport]: () => {},
 })
 
+/**
+ * A lifecycle hook, kept invocable as the host invokes it: with the context
+ * alone, so a test sees what it throws.
+ */
+const lifecycleModuleExport = (
+  handler: ((ctx: unknown) => unknown) | undefined,
+): ModuleExport & { readonly invoke: (ctx: unknown) => unknown } => ({
+  [registerExport]: () => {},
+  invoke: (ctx) => handler?.(ctx),
+})
+
 const callableModuleExport = (
   handler: CallableModuleExport["invoke"],
   options: {
     readonly kind: CallableModuleExport["kind"]
     readonly params: unknown
     readonly returnType?: unknown
+    readonly name?: string
     readonly onSchedule?: unknown
+    readonly onResult?: unknown
   },
 ): CallableModuleExport => ({
   ...options,
@@ -380,6 +461,15 @@ const callableModuleExport = (
         sourceName: exportName,
         params: options.params,
       })
+      if (options.name !== undefined) {
+        schema.moduleDef.explicitNames.entries.push({
+          tag: "Function",
+          value: { sourceName: exportName, canonicalName: options.name },
+        })
+      }
+      if (options.onResult !== undefined) {
+        schema.resolveOutboxResult(options.onResult, exportName)
+      }
     } else {
       schema.moduleDef.procedures.push({
         sourceName: exportName,
@@ -395,8 +485,11 @@ const callableModuleExport = (
   invoke: handler,
 })
 
+// The host deserializes a view's arguments into a params object, `{}` for a
+// view without params, so a view invoked with no arguments receives that.
 const viewModuleExport = (
   options: ViewOptions,
+  params: Record<string, unknown>,
   handler: ViewModuleExport["invoke"],
 ): ViewModuleExport => ({
   [registerExport]: (schema, exportName) => {
@@ -404,9 +497,10 @@ const viewModuleExport = (
       sourceName: options.name,
       exportName,
       public: options.public,
+      params,
     })
   },
-  invoke: handler,
+  invoke: (ctx, rawArgs) => handler(ctx, rawArgs ?? {}),
 })
 
 export const invokeModuleExport = (
@@ -421,8 +515,10 @@ const isModuleExport = (value: unknown): value is ModuleExport =>
 const isTableSchema = (value: unknown): value is TableSchema =>
   typeof value === "object" && value !== null && "tableDef" in value
 
-export const schema = (tables?: Record<string, unknown>): TestSchema =>
-  new TestSchema(tables)
+export const schema = (
+  tables?: Record<string, unknown>,
+  moduleSettings?: unknown,
+): TestSchema => new TestSchema(tables, moduleSettings)
 
 export const registerCompiledModule = (
   schema: unknown,
@@ -451,15 +547,22 @@ type TestBuilderMetadata = {
   readonly columnMetadata?: {
     readonly isPrimaryKey?: boolean
     readonly isAutoIncrement?: boolean
+    readonly isTarget?: boolean
   }
   readonly item?: unknown
   readonly fields?: Record<string, unknown>
   readonly typeName?: string
   readonly isOptional?: boolean
+  readonly receiverModule?: symbol
 }
 
 const makeBuilder = (metadata: TestBuilderMetadata = {}): unknown => ({
   ...metadata,
+  target: () =>
+    makeBuilder({
+      ...metadata,
+      columnMetadata: { ...metadata.columnMetadata, isTarget: true },
+    }),
   optional: () => makeBuilder({ ...metadata, isOptional: true }),
   default: (valueDefault: unknown) =>
     makeBuilder({ ...metadata, valueDefault }),
@@ -481,6 +584,26 @@ const makeBuilder = (metadata: TestBuilderMetadata = {}): unknown => ({
     }),
   name: (columnName: string) => makeBuilder({ ...metadata, columnName }),
   serialize: () => {},
+})
+
+/**
+ * Mirrors `remoteModule` from generated receiver bindings: reducer handles
+ * copied per binding, and an `identity()` builder whose `target()` marks the
+ * outbox target column.
+ */
+export const remoteModule = (
+  reducers: Record<string, RemoteReducerHandle>,
+  module: symbol,
+): {
+  readonly reducers: Record<string, RemoteReducerHandle>
+  readonly identity: () => unknown
+  readonly outbox: Record<string, never>
+} => ({
+  reducers: Object.fromEntries(
+    Object.entries(reducers).map(([key, reducer]) => [key, { ...reducer }]),
+  ),
+  identity: () => makeBuilder({ kind: "identity", receiverModule: module }),
+  outbox: {},
 })
 
 export const t = new Proxy(

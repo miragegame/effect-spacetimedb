@@ -18,7 +18,7 @@
     "codegen:check": "bun --cwd=packages/effect-spacetimedb run codegen:check"
   },
   "patchedDependencies": {
-    "spacetimedb@2.10.1": "patches/spacetimedb@2.10.1.patch"
+    "spacetimedb@2.14.0": "patches/spacetimedb@2.14.0.patch"
   },
   "trustedDependencies": [
     "esbuild"

@@ -13,7 +13,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "effect": "4.0.0-rc.117",
+    "effect": "4.1.1",
     "effect-spacetimedb": "workspace:*"
   },
   "devDependencies": {

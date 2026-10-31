@@ -3,6 +3,7 @@ import * as Stdb from "effect-spacetimedb"
 import { FullModule, MissingAuth, UserMissing } from "../fixtures/full-module"
 import type { Assert, ErrorOf, IsEqual } from "./helpers"
 import { makeFullModuleWsConnection } from "../helpers/ws-fixtures"
+import { fixtureCallDurationMax } from "../helpers/transport-bounds"
 
 const ws = StdbTesting.ClientWs.make({
   module: FullModule,
@@ -17,6 +18,7 @@ const http = StdbTesting.ClientHttp.make({
   module: FullModule,
   uri: "http://localhost:3000",
   databaseName: "example",
+  callDurationMax: fixtureCallDurationMax,
   token: "example-token",
 })
 
@@ -103,6 +105,7 @@ const arrayHttp = StdbTesting.ClientHttp.make({
   module: ArrayErrorModule,
   uri: "http://localhost:3000",
   databaseName: "client_array_errors",
+  callDurationMax: fixtureCallDurationMax,
   token: "example-token",
 })
 type ArrayHttpProcedureError = ErrorOf<

@@ -1,5 +1,3 @@
-import * as Effect from "effect/Effect"
-
 import * as Match from "effect/Match"
 import type { AnyErrorDefinition } from "../contract/error.ts"
 import { type HttpHandlerSpec } from "../contract/http-handler.ts"
@@ -21,8 +19,7 @@ import { type ProcedureSpec } from "../contract/procedure.ts"
 import { type ReducerSpec } from "../contract/reducer.ts"
 import type { AnyTableSpec } from "../contract/table.ts"
 import { type AnyViewSpec } from "../contract/view.ts"
-
-import * as ServerContext from "../server/context.ts"
+import type { Declarations as EnvironmentDeclarations } from "../contract/environment.ts"
 
 import type { HandlerInputDefinitions } from "../server/handler-types.ts"
 
@@ -31,10 +28,10 @@ import type {
   AnyEndpointDecl,
   AnyGroup,
   AnyHttpRouteDecl,
-  ModuleAccessors,
   ModuleSpecFor,
   RuntimeModuleState,
 } from "./declarations.ts"
+import { makeAccessors } from "./module-accessors.ts"
 import {
   mergeGroupErrorDefaults,
   withGroupDefaultErrors,
@@ -45,7 +42,12 @@ import {
   prependMiddleware,
 } from "./group-middleware-runtime.ts"
 import type { AnyStdbModule } from "./handler-types.ts"
-import type { StdbGroup, StdbHttpGroup, StdbModule } from "./http-builders.ts"
+import type {
+  SpecWithEnvironment,
+  StdbGroup,
+  StdbHttpGroup,
+  StdbModule,
+} from "./http-builders.ts"
 import type {
   GroupEndpointPair,
   GroupEndpointPairsOf,
@@ -300,136 +302,6 @@ export const makeHttpGroup = <
   } as unknown as StdbHttpGroup<Id, Endpoints, Errors>
 }
 
-// Module accessors are typed facades over shared runtime tags; this is the
-// single builder-side seam that attaches the module brand to the R channel.
-const moduleScopedAccessor = <
-  Spec extends AnyModuleSpec,
-  A,
-  Requirement extends ServerContext.AnyServerContextRequirements,
->(
-  effect: Effect.Effect<A, never, Requirement>,
-): Effect.Effect<
-  A,
-  never,
-  ServerContext.ModuleScopedRequirement<Spec, Requirement>
-> =>
-  // Builder accessor boundary: the runtime tag is shared; only the R-channel
-  // records which module accessor produced it.
-  // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
-  effect as Effect.Effect<
-    A,
-    never,
-    ServerContext.ModuleScopedRequirement<Spec, Requirement>
-  >
-
-const makeAccessors = <
-  Spec extends AnyModuleSpec,
->(): ModuleAccessors<Spec> => ({
-  Db: moduleScopedAccessor<
-    Spec,
-    ServerContext.DbService<Spec>,
-    ServerContext.Db
-  >(Effect.map(ServerContext.Db, (db) => db as ServerContext.DbService<Spec>)),
-  ReadonlyDb: moduleScopedAccessor<
-    Spec,
-    ServerContext.ReadonlyDbService<Spec>,
-    ServerContext.ReadonlyDb
-  >(
-    Effect.map(
-      ServerContext.ReadonlyDb,
-      (db) => db as ServerContext.ReadonlyDbService<Spec>,
-    ),
-  ),
-  ReducerCtx: moduleScopedAccessor<
-    Spec,
-    ServerContext.ReducerCtxService<Spec>,
-    ServerContext.ReducerCtx
-  >(
-    Effect.map(
-      ServerContext.ReducerCtx,
-      (ctx) => ctx as ServerContext.ReducerCtxService<Spec>,
-    ),
-  ),
-  ProcedureCtx: moduleScopedAccessor<
-    Spec,
-    ServerContext.ProcedureCtxService<Spec>,
-    ServerContext.ProcedureCtx
-  >(
-    Effect.map(
-      ServerContext.ProcedureCtx,
-      (ctx) => ctx as ServerContext.ProcedureCtxService<Spec>,
-    ),
-  ),
-  TxCtx: moduleScopedAccessor<
-    Spec,
-    ServerContext.TxCtxService<Spec>,
-    ServerContext.TxCtx
-  >(
-    Effect.map(
-      ServerContext.TxCtx,
-      (ctx) => ctx as ServerContext.TxCtxService<Spec>,
-    ),
-  ),
-  ViewCtx: moduleScopedAccessor<
-    Spec,
-    ServerContext.ViewCtxService<Spec>,
-    ServerContext.ViewCtx
-  >(
-    Effect.map(
-      ServerContext.ViewCtx,
-      (ctx) => ctx as ServerContext.ViewCtxService<Spec>,
-    ),
-  ),
-  AnonymousViewCtx: moduleScopedAccessor<
-    Spec,
-    ServerContext.AnonymousViewCtxService<Spec>,
-    ServerContext.AnonymousViewCtx
-  >(
-    Effect.map(
-      ServerContext.AnonymousViewCtx,
-      (ctx) => ctx as ServerContext.AnonymousViewCtxService<Spec>,
-    ),
-  ),
-  HttpHandlerCtx: moduleScopedAccessor<
-    Spec,
-    ServerContext.HttpHandlerCtxService<Spec>,
-    ServerContext.HttpHandlerCtx
-  >(
-    Effect.map(
-      ServerContext.HttpHandlerCtx,
-      (ctx) => ctx as ServerContext.HttpHandlerCtxService<Spec>,
-    ),
-  ),
-  MutationCtx: moduleScopedAccessor<
-    Spec,
-    ServerContext.MutationCtxService<Spec>,
-    ServerContext.MutationCtx
-  >(
-    Effect.map(
-      ServerContext.MutationCtx,
-      (ctx) => ctx as ServerContext.MutationCtxService<Spec>,
-    ),
-  ),
-  From: moduleScopedAccessor<
-    Spec,
-    ServerContext.FromService<Spec>,
-    ServerContext.From
-  >(
-    Effect.map(
-      ServerContext.From,
-      (from) => from as ServerContext.FromService<Spec>,
-    ),
-  ),
-  // Http is module-independent and deliberately unbranded.
-  Http: ServerContext.Http,
-  Tx: ServerContext.txRunnerForModule<Spec>(),
-  withTx: (effect) =>
-    Effect.flatMap(ServerContext.txRunnerForModule<Spec>(), (runner) =>
-      runner.run(effect),
-    ),
-  HttpTx: ServerContext.httpTxRunnerForModule<Spec>(),
-})
-
 export const sortedRecord = <Value>(
   entries: ReadonlyArray<readonly [string, Value]>,
 ): Record<string, Value> =>
@@ -443,9 +315,13 @@ const assembleSpec = <
   Groups extends AnyGroup,
   Lifecycle extends LifecycleSpecs,
   HttpGroupPairs extends HttpGroupPair,
+  Environment extends EnvironmentDeclarations,
 >(
   state: RuntimeModuleState,
-): ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs> => {
+): SpecWithEnvironment<
+  ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs>,
+  Environment
+> => {
   const reducerEntries: Array<readonly [string, ReducerSpec]> = []
   const procedureEntries: Array<readonly [string, ProcedureSpec]> = []
   const viewEntries: Array<readonly [string, AnyViewSpec]> = []
@@ -559,6 +435,7 @@ const assembleSpec = <
   return defineModule({
     name: state.id,
     settings: state.settings,
+    environment: state.environment,
     tables: state.tables as Tables,
     views: sortedRecord(viewEntries),
     reducers: sortedRecord(reducerEntries),
@@ -571,7 +448,10 @@ const assembleSpec = <
     // Cast seam: runtime assembly is validated above; ModuleSpecFor reads the
     // groups' eager section-record phantoms. The structure typecheck fixtures pin
     // this boundary against a wrong derived type.
-  }) as unknown as ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs>
+  }) as unknown as SpecWithEnvironment<
+    ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs>,
+    Environment
+  >
 }
 
 export const makeModule = <
@@ -587,6 +467,7 @@ export const makeModule = <
   >,
   SchedulePairs extends SchedulePair = SchedulePairsOf<Groups>,
   GroupEndpointPairs extends GroupEndpointPair = GroupEndpointPairsOf<Groups>,
+  Environment extends EnvironmentDeclarations = {},
 >(
   state: RuntimeModuleState,
 ): StdbModule<
@@ -599,12 +480,17 @@ export const makeModule = <
   HttpGroupPairs,
   ScheduledTableNameUnion,
   SchedulePairs,
-  GroupEndpointPairs
+  GroupEndpointPairs,
+  ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs>,
+  Environment
 > => {
   assertUniqueGroupIds(state.groups)
   const accessors =
     makeAccessors<
-      ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs>
+      SpecWithEnvironment<
+        ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs>,
+        Environment
+      >
     >()
   /*
    * `spec` is a getter, and every builder method returns a *new* module over a
@@ -614,7 +500,7 @@ export const makeModule = <
    * — was re-assembled on each property read, which is O(module size) per
    * access. That is invisible at build time (one read) and brutal at call time:
    * routing code reads `module.spec.procedureGroups` once per request, and a
-   * platform-sized module measured ~32ms per read, so a single in-process
+   * large module measured ~32ms per read, so a single in-process
    * request paid hundreds of milliseconds in nothing but re-assembly.
    *
    * Assembly failures are deliberately not cached: `assembleSpec` throws on a
@@ -622,7 +508,10 @@ export const makeModule = <
    * must observe the same error rather than a silently-empty memo.
    */
   let assembledSpec:
-    | ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs>
+    | SpecWithEnvironment<
+        ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs>,
+        Environment
+      >
     | undefined
   const module = {
     ...state,
@@ -634,7 +523,8 @@ export const makeModule = <
           Tables,
           Groups,
           Lifecycle,
-          HttpGroupPairs
+          HttpGroupPairs,
+          Environment
         >(state)
       }
       return assembledSpec
@@ -652,7 +542,8 @@ export const makeModule = <
         HttpGroupPairs,
         ScheduledTableNameUnion | ScheduledTableNameOf<(typeof tables)[number]>,
         SchedulePairs,
-        GroupEndpointPairs
+        GroupEndpointPairs,
+        Environment
       >({
         ...state,
         tables: {
@@ -672,7 +563,8 @@ export const makeModule = <
         HttpGroupPairs | HttpGroupPairsOf<(typeof groups)[number]>,
         ScheduledTableNameUnion,
         SchedulePairs | SchedulePairsOf<(typeof groups)[number]>,
-        GroupEndpointPairs | GroupEndpointPairsOf<(typeof groups)[number]>
+        GroupEndpointPairs | GroupEndpointPairsOf<(typeof groups)[number]>,
+        Environment
       >({
         ...state,
         groups: [...state.groups, ...groups],
@@ -689,7 +581,9 @@ export const makeModule = <
     HttpGroupPairs,
     ScheduledTableNameUnion,
     SchedulePairs,
-    GroupEndpointPairs
+    GroupEndpointPairs,
+    ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs>,
+    Environment
   >
 }
 

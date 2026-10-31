@@ -22,19 +22,14 @@ API reference — is at **https://effect-stdb.dev**.
 ## Installation
 
 ```sh
-npm install effect-spacetimedb effect@4.0.0-rc.117 spacetimedb@2.10.1
+npm install effect-spacetimedb effect@4.1.1 spacetimedb@2.14.0
 ```
 
-`effect-spacetimedb` targets **Effect v4 (release candidate)** and
-**SpacetimeDB 2.10.x** as required peer dependencies. Pin both explicitly. This
-repository locks the SDK and CLI to exactly **2.10.1** for code generation and
+`effect-spacetimedb` targets **Effect 4.1** and
+**SpacetimeDB 2.14.x** as required peer dependencies. Pin both explicitly. This
+repository locks the SDK and CLI to exactly **2.14.0** for code generation and
 host compatibility; the published peer range intentionally accepts compatible
-2.10.x SDK patches.
-This workspace also carries fixes for four published SDK defects: `Result.err`
-serialization, primitive `Prettify`, native TableCache range comparison, and
-server index uniqueness checks. Bun applies those patches only inside this
-workspace; npm consumers must carry equivalent fixes until upstream publishes
-them.
+2.14.x SDK patches.
 `@effect/atom-react` and `react` are
 optional peers, needed only for the `effect-spacetimedb/client/atom` entrypoint.
 
@@ -43,6 +38,39 @@ The `effect-spacetimedb/server` and `/server-compiler` entrypoints are
 module host, not in app or client runtimes. The `/server-polyfills` side-effect
 entrypoint is also host-only and remains available for standalone compatibility
 shim loading.
+
+### SDK fixes for `spacetimedb` 2.14.0
+
+The published `spacetimedb` 2.14.0 package has three defects, and an npm
+install does not fix them for you:
+
+- `Prettify` rewrites a branded primitive into a mapped object type
+  (https://github.com/clockworklabs/SpacetimeDB/pull/5971, merged upstream but
+  not yet in a release);
+- a client `TableCache` range over an `Identity`, `Timestamp` or other
+  object-backed key compares the wrapper objects rather than their values
+  (https://github.com/clockworklabs/SpacetimeDB/pull/5970, open);
+- a non-unique index whose columns are a strict subset of a unique constraint
+  is built without its range methods
+  (https://github.com/clockworklabs/SpacetimeDB/pull/5969, open).
+
+This repository fixes all three with
+[`patches/spacetimedb@2.14.0.patch`](https://github.com/miragegame/effect-spacetimedb/blob/main/patches/spacetimedb@2.14.0.patch).
+Copy it into your project. Its paths are relative to the `spacetimedb` package
+root, so Bun applies it from your root `package.json`:
+
+```json
+{
+  "patchedDependencies": {
+    "spacetimedb@2.14.0": "patches/spacetimedb@2.14.0.patch"
+  }
+}
+```
+
+pnpm takes the same entry under `pnpm.patchedDependencies` in `package.json`
+or `patchedDependencies` in `pnpm-workspace.yaml`; other package managers need
+their own patch mechanism. Apply it wherever the SDK is installed, module and
+client packages alike.
 
 ## Quick start
 
@@ -81,11 +109,17 @@ export const MessageRow = Stdb.struct({
   text: Stdb.string(MessageText),
 }).named("MessageRow")
 
+// Every array states how many elements it may carry (see "Type helpers").
+export const MessageListLength: Stdb.ArrayLengthBounds = {
+  minimum: 0,
+  maximum: 1_000,
+}
+
 export const MessageFunctions = Stdb.StdbGroup.make("Messages").add(
   Stdb.StdbFn.reducer("messageSend", { params: MessageRow }),
   Stdb.StdbFn.procedure("messageList", {
     params: Stdb.struct({}),
-    returns: Stdb.array(MessageRow),
+    returns: Stdb.array(MessageRow, MessageListLength),
   }),
 )
 
@@ -262,8 +296,11 @@ and all requested targets in one Effect.
 The harness owns one in-memory `DbShape`, runs it through the real Effect DB
 wrapper, and supplies mutation, procedure, HTTP, sender-view, and anonymous-view
 contexts. Transactions snapshot the shared store, roll back while preserving
-original row identity, and reject nesting. Lifecycle handlers use
-`makeMutationCtx()`; scheduled rows are stored without emulating the scheduler.
+original row identity, and reject nesting. A rollback restores rows but not
+sequences, the uuid counter or the random stream; `reset()` empties every table
+and restarts all three, for suites that want a fresh database per call without
+building a new harness. Lifecycle handlers use `makeMutationCtx()`; scheduled
+rows are stored without emulating the scheduler.
 
 ## Dev server
 
@@ -484,7 +521,7 @@ export const Users = Stdb.StdbGroup.make("Users")
   .add(Stdb.StdbFn.reducer("user_require", { params: Stdb.struct({ userId: Stdb.string(UserId) }), errors: AppErrors }))
   .add(Stdb.StdbFn.procedure("user_get", { params: Stdb.struct({ userId: Stdb.string(UserId) }), returns: Stdb.option(user.row), errors: AppErrors }))
   .add(Stdb.StdbFn.view("self_user", { returns: Stdb.option(user.row) }))          // sender view
-  .add(Stdb.StdbFn.anonymousView("all_users", { returns: Stdb.array(user.row) }))  // anonymous view
+  .add(Stdb.StdbFn.anonymousView("all_users", { returns: Stdb.array(user.row, { minimum: 0, maximum: 1_000 }) }))  // anonymous view
 
 // lifecycle hooks are fixed framework hooks; at most one of each per module
 export const Lifecycle = {
@@ -798,7 +835,12 @@ decoded domain error.
 ```ts
 const Example = Stdb.project(Module)
 
-const HttpLive = Example.client.http.layer({ uri, databaseName, token })
+const HttpLive = Example.client.http.layer({
+  uri,
+  databaseName,
+  token,
+  callDurationMax: "10 seconds",
+})
 
 const program = Effect.gen(function* () {
   const client = yield* Example.client.http.Tag
@@ -807,6 +849,15 @@ const program = Effect.gen(function* () {
 }).pipe(Effect.provide(HttpLive))
 ```
 
+`callDurationMax` (any `Duration.Input`) is required and bounds each call from
+request to fully read response; a call still unanswered at the bound fails with
+`TransportError` whose `cause` is `HttpCallDurationExceeded`. There is no
+library default: choose it from your own budget (a request deadline, a lease)
+so a partitioned or paused database cannot hold a call for as long as the
+provided `HttpClient` waits. The bound stops the caller waiting, not the
+database: a request that already arrived may still commit, so treat a
+`TransportError` as "outcome unknown", never as "did not happen".
+
 ### Group-scoped clients
 
 HTTP clients also expose each authored `StdbGroup` / `StdbHttpGroup` as a
@@ -814,7 +865,12 @@ typed namespace. The flat call surface remains available, while group
 namespaces prevent calls from accidentally crossing domain boundaries:
 
 ```ts
-const client = Example.client.http.make({ uri, databaseName, token })
+const client = Example.client.http.make({
+  uri,
+  databaseName,
+  token,
+  callDurationMax: "10 seconds",
+})
 
 yield* client.Users.reducers.user_upsert({ userId, name })
 yield* client.Webhooks.httpHandlers.rotate_token({ userId })
@@ -823,6 +879,7 @@ const users = Example.client.http.group("Users", {
   uri,
   databaseName,
   token,
+  callDurationMax: "10 seconds",
 })
 yield* users.reducers.user_upsert({ userId, name })
 ```
@@ -861,9 +918,9 @@ endpoint/group composition instead of the bespoke `client.httpHandlers.*`
 transport.
 
 ```ts
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpApiClient from "effect/http-api/HttpApiClient"
 
 const api = Stdb.toHttpApi(Module)
 
@@ -921,16 +978,17 @@ with a concrete error context should use `client.ws.tag<ErrorContext>()`; typed
 tags share the same runtime key as `Session`, so do not mix mismatched
 compile-time contexts for the same module/name pair.
 
-Bare scoped acquisition keeps `connectTimeoutMillis` optional and has no
-library default. Set an application-appropriate bound (10 seconds is a
-reasonable starting point) so a native builder that never invokes a connect
-callback cannot strand acquisition.
+`connectTimeoutMillis` is required and has no library default. Set an
+application-appropriate bound (10 seconds is a reasonable starting point) so a
+native builder that never invokes a connect callback cannot strand acquisition;
+acquisition still unfinished at the bound fails with `WsConnectError` whose
+`cause` is `WsConnectTimeoutError`.
 
 Long-lived clients should use a session supervisor. It creates a fresh scoped
 connection after invalidation, re-establishes registered subscription targets,
-and publishes both the current session and its connection phase. A timeout is
-required because connection, subscription, and setup must all complete within
-a bounded activation attempt:
+and publishes both the current session and its connection phase. It reuses
+`connectTimeoutMillis` as the bound on each whole activation attempt, because
+connection, subscription, and setup must all complete within it:
 
 ```ts
 import { wsSupervisorGenerated } from "effect-spacetimedb/client"
@@ -955,8 +1013,10 @@ The default retry schedule is jittered exponential backoff starting at 250 ms
 and capped at 30 seconds. All supervisor constructors park deterministic
 unsupported-builder failures, and generated supervisors additionally park
 artifact-shape failures; `policy` can override the delays, jitter, or retry
-predicate. During reconnect, the session signal retains the previous session as
-`AsyncResult.waiting(previous)` so atoms can keep stale data visible;
+predicate. A predicate that parks on failures of its own keeps the default's by
+ending in `&& wsSupervisorIsRetryableDefault(failure)`. During reconnect, the
+session signal retains the previous session as `AsyncResult.waiting(previous)` so
+atoms can keep stale data visible;
 consumers must resolve the signal again before each operation rather than cache a
 session, connection, or table cache across attempts. Before any session has
 become live, a retryable activation failure is published as a waiting failure so
@@ -986,7 +1046,95 @@ event-processing path.
 A native subscription rejection fails only the owning stream/ref/atom. Other and
 future subscriptions on the same connection remain usable. `isInvalidated()` and
 `observeInvalidation(...)` report connection-level death only, such as a native
-disconnect; they do not report an individual query-set rejection.
+disconnect or the session's own scope releasing the connection; they do not
+report an individual query-set rejection. Releasing a session invalidates its
+connection before disconnecting, because the native SDK never rejects calls
+still waiting when its socket closes: reducer and procedure calls in flight on a
+released session, or made later through a stale handle, fail with
+`ConnectionLostError` instead of waiting forever.
+
+A browser can also tear a socket down without delivering its close event (a
+frozen tab, a sleeping machine, a network change). Every liveness read — each
+reducer or procedure call, each subscribe, `isInvalidated()` — first checks
+the SDK's `isSocketClosed`, so such a socket invalidates its connection on the
+next read: the call fails with `ConnectionLostError` instead of being silently
+dropped, and a supervisor reconnects. A supervised live session is also
+re-checked whenever the page becomes visible, regains focus, comes back online
+or is restored from the back-forward cache. `unsubscribeThen` settles when the
+connection carrying the subscription is lost, since no confirmation can arrive
+after that.
+
+#### Automatic reconnect and per-attempt tokens
+
+Set `automaticReconnect` on a WebSocket config to let the native SDK reconnect
+an established connection itself (SpacetimeDB 2.12+). It keeps one connection
+object, cache, subscription handles and callbacks across a dropped socket,
+replays the subscriptions and reconciles the cache, so unchanged rows fire no
+callbacks. The session stays valid while the SDK reconnects and until the
+replay has re-applied every subscription the session holds: reads return the
+last rows, streams stay open, calls fail unsent with `CallNotSentError` (safe to
+retry once live), and calls in flight at the drop fail with
+`ConnectionLostError` (outcome unknown). Recovery starts once a session is live
+(a supervised one after connect, subscribe and setup); a drop before that ends
+it. The session is invalidated when the SDK schedules no further attempt (a
+protocol-error close, a refused fresh token, `disconnect()`), when a reconnect
+comes back under a different identity (calls then fail with
+`ConnectionIdentityChangedError`), when a token refresh fails, or when an
+attempt or the replay is still unresolved `connectTimeoutMillis` after its
+scheduled start. A socket that any call, subscribe or liveness check finds
+closed without its close event puts the session in recovery: the SDK reconnects
+it if a page-resume event tells it, and the same bound ends it in a host that
+never sends one. A consumer stream whose subscription fails to replay fails on its
+own; a supervisor's subscription target that fails to replay ends the session.
+
+`token` is a fixed string or an Effect evaluated for every connection attempt
+(each acquisition, every session a supervisor builds, and with automatic
+reconnect each SDK token refresh before a reconnect), so a long-lived client
+never reconnects with a token captured once. A failure fails that attempt with
+`WsConnectError`. A reconnect's refresh runs within that attempt's bound, and
+one that fails, dies or overruns it ends the session instead of letting the SDK
+retry a token that may never come back (a signed-out user): a supervisor's
+`isRetryable` decides on a failure or overrun, and a refresh that died parks it
+as `fatal`.
+
+The SDK refreshes only when its token nears expiry or the server refused it
+(HTTP 401), and takes whatever the Effect returns as fresh: if the server
+refuses that one too, the SDK stops reconnecting. So the Effect must return a
+token that is not due for refresh (5% of its lifetime, at least 30 seconds, or
+less left), and never the one it returned last, even while the client clock
+counts it valid: the server may just have refused it (revoked, or the client
+clock runs behind the server's). The pattern: a token cached when the session
+was checked may serve the first attempt while it is not due; every later
+evaluation fetches a fresh token, or fails.
+
+```ts
+const supervisorEffect = wsSupervisorGenerated({
+  module: Example.module,
+  config: {
+    DbConnection,
+    uri,
+    databaseName,
+    // Never a token it already handed out, nor one due for refresh.
+    token: fetchFreshToken,
+    connectTimeoutMillis: 10_000,
+    automaticReconnect: { delayMillisMin: 1_000, delayMillisMax: 30_000 },
+  },
+  setup: registerPresence,
+  onAutomaticReconnect: registerPresence,
+})
+```
+
+Under a supervisor the SDK handles transport blips and the supervisor keeps the
+first connection, terminal failures and per-session setup. While the SDK
+reconnects, the phase is `recovering` (with the SDK's `reconnectAttempt`,
+`reconnectDelayMillis` and `reason`) and the same session is published as
+waiting; it returns to `live` once reconnected and replayed. `setup` still runs once per
+session; `onAutomaticReconnect` runs after every automatic reconnect, before
+`live`, in a scope that lasts until the next drop. Use it to redo
+per-connection server state such as presence, and keep it idempotent: its
+failure ends the session (the supervisor replaces it) and a drop interrupts it.
+An identity change parks the supervisor in `fatal` with a `WsConnectError` whose
+`cause` is `ConnectionIdentityChangedError`.
 
 Persistent-table change streams use a bounded callback queue by default
 (`bufferSize: 1024`) and fail with `TableStreamOverflowError` rather than silently
@@ -1059,7 +1207,7 @@ atoms and table-key arrays return the same memoized atom.
 
 ```tsx
 import * as AtomReact from "@effect/atom-react"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { tableGroupSnapshotAtom } from "effect-spacetimedb/client/atom"
 
 const messages = tableGroupSnapshotAtom(connectionAtom, ["message"] as const)
@@ -1115,6 +1263,7 @@ const iterator = yield* db.user.unsafe.iter()
 Use the helper that matches where optionality lives:
 
 ```ts
+Stdb.array(Stdb.string(), { minimum: 1, maximum: 16 }) // 1..16 elements
 Stdb.option(user.row)                           // value may be undefined
 Stdb.optional(Stdb.string())                    // struct property may be absent
 Stdb.string().optional()                        // table column is optional
@@ -1131,6 +1280,25 @@ SpaceTimeDB identifiers), not a string column. Literal values that are not valid
 identifiers, such as `edit-action`, use the generated-client-safe PascalCase tag
 in the SATS schema while still decoding to the authored value. Generated-client
 WS calls still use SpaceTimeDB's PascalCase variant convention.
+
+`Stdb.array(item, { minimum, maximum })` requires its inclusive length bounds:
+every array that crosses the module boundary states how many elements it may
+carry, so an oversized or empty-when-it-must-not-be array fails at the codec
+instead of deep inside a handler. The bounds are enforced when decoding and
+when encoding (reducer and procedure arguments, returns, rows, and view
+results alike) and are exposed by `Stdb.describe(type).length`. They do not
+reach the wire: SATS `array<T>` has no length, so arrays that differ only in
+their bounds lower to the same SATS type and generated client type, and
+changing a bound is not a schema migration. Stored rows are decoded with the
+reading module's bounds, so tightening a bound on a table column makes
+existing rows that exceed it fail to decode: widen freely, and tighten only
+after checking the stored data. Both bounds must be non-negative
+safe integers with `minimum <= maximum`; anything else throws a `TypeError` at
+construction. Write `minimum: 0` when an empty array is normal and `1` when it
+is a bug, and choose a `maximum` that is a real product limit rather than
+`Number.MAX_SAFE_INTEGER`. `Stdb.bytes()` is not an array of `u8` values in
+this sense; bound it through its domain schema, for example
+`Stdb.bytes(Schema.Uint8Array.check(Schema.isMaxLength(4096)))`.
 
 Nested options (`Stdb.option(Stdb.option(...))`, including an optional struct
 field whose value is already an option) are rejected at construction because the
@@ -1160,8 +1328,8 @@ payloads can use their own semantic names.
 | Connect a generated WebSocket client | `WsConnectError` (its `cause` may be `WsConnectTimeoutError` or `WsUnsupportedBuilderFeatureError`) | `WsConnectError` is root and `/client`; cause classes are `/client` |
 | Subscribe or stream | `SubscriptionRejectedError`, `SubscriptionTransportError`, `SubscriptionInvalidatedError` | Classes are `/client`; root exports the `SubscriptionFailure` union |
 | Supervise a long-lived WebSocket session | Acquisition/setup failures plus `WsSessionSupervisorDefectError` for defects | `/client` |
-| Typed reducer/procedure call | Declared error union, `ConnectionLostError`, `RemoteRejectedError`, `TransportError`, `StdbDecodeError` via `CallFailure<E>` | Root and `/client` |
-| Raw reducer/procedure call | `DomainCallError<E>`, `ConnectionLostError`, `RemoteRejectedError`, `TransportError`, `StdbDecodeError` via `RawCallFailure<E>` | Root and `/client` |
+| Typed reducer/procedure call | Declared error union, `ConnectionLostError`, `CallNotSentError`, `ConnectionIdentityChangedError`, `RemoteRejectedError`, `TransportError`, `StdbDecodeError` via `CallFailure<E>` | Root and `/client` |
+| Raw reducer/procedure call | `DomainCallError<E>`, `ConnectionLostError`, `CallNotSentError`, `ConnectionIdentityChangedError`, `RemoteRejectedError`, `TransportError`, `StdbDecodeError` via `RawCallFailure<E>` | Root and `/client` |
 | Generated-client validation | `GeneratedArtifactShapeError`, `WsUnsupportedBuilderFeatureError` | `/client` |
 | Code generation | `CodegenCliVersionError`, `CodegenCliExecutionError`, `CodegenEsbuildMissingError`, `CodegenBundleError`, `CodegenFileSystemError`, `CodegenArtifactDirectoryError`, `ArtifactDriftError` | `/codegen` only |
 | Server host/database access | `StdbHostCallError`, `StdbValueCodecError`, `StdbHostEncodeError`, and named host failures | Root types and `/server` |
@@ -1195,8 +1363,13 @@ observable current-session signal.
   SpaceTimeDB module entries. Import `build` from here in `src/index.ts`; it
   installs the server compatibility polyfills before compiling.
 - **`effect-spacetimedb/server-polyfills`** — side-effect entrypoint for module
-  host compatibility shims. It is still exported for standalone loading, but
-  normal module entries get it through `server-compiler`.
+  host compatibility shims (Effect's scheduler timers, `Math.random`, and the
+  `TextDecoder` `ignoreBOM` option the host rejects). Normal module entries get
+  it through `server-compiler`; a module entry that loads Effect's HTTP or
+  encoding modules before importing `server-compiler` (for example through a
+  shared contract that declares `HttpApi` routes) imports it first instead,
+  because Effect 4.1 builds a `TextDecoder` with `ignoreBOM` while those
+  modules load.
 - **`effect-spacetimedb/server`** — advanced/internal server primitives; normal
   modules should use `server-compiler` instead.
 - **`effect-spacetimedb/testing`** — curated internals for package tests and

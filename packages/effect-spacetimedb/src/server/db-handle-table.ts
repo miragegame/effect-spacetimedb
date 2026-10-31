@@ -4,6 +4,17 @@ import * as Stream from "effect/Stream"
 
 import { StdbDecodeError } from "../decode-error.ts"
 
+import { identityKey } from "./host-abi-runtime.ts"
+
+import { OutboxRowTooLarge } from "../contract/outbox-table.ts"
+
+import {
+  hostValueBsatnBytes,
+  OutboxSelfTargetDefect,
+  type OutboxSendContext,
+  OutboxSendOutsideMutationDefect,
+} from "./outbox.ts"
+
 import { type StdbHostFailure } from "./services.ts"
 
 import {
@@ -24,6 +35,7 @@ import type { DbCapabilityMode } from "./db-handle-codec.ts"
 
 import type {
   LookupPlan,
+  OutboxTablePlan,
   RawRecord,
   TableCodec,
   TablePlan,
@@ -389,6 +401,90 @@ export const buildReadonlyTable = (
 ): Record<string, unknown> => {
   const tableHandle = { ...buildBaseTable(rawTable, plan) }
 
+  for (const lookupPlan of plan.lookups) {
+    tableHandle[lookupPlan.key] = buildLookup(
+      "readonly",
+      asRecord(rawTable[lookupPlan.key]),
+      plan.codec,
+      lookupPlan,
+    )
+  }
+
+  return Object.freeze(tableHandle)
+}
+
+/**
+ * An outbox's handle: reads and read-only lookups, plus an `insert` that fills
+ * `msgId` (auto-increment) and `enqueuedAt` (the sending transaction's time),
+ * refuses a row whose encoded size is over the outbox bound, and dies on a row
+ * addressed to this database. No update, delete or clear: the host owns a row
+ * from insert until its settle reducer runs.
+ */
+export const buildOutboxTable = (
+  rawTable: RawRecord,
+  plan: TablePlan,
+  outbox: OutboxTablePlan,
+  send: OutboxSendContext | undefined,
+): Record<string, unknown> => {
+  const insert = Effect.fnUntraced(function* (input: unknown) {
+    if (send === undefined) {
+      return yield* Effect.die(
+        new OutboxSendOutsideMutationDefect({ table: outbox.tableName }),
+      )
+    }
+
+    const row = asRecord(input)
+    const targetKey = identityKey(row.target)
+    if (
+      targetKey !== undefined &&
+      targetKey === identityKey(send.databaseIdentity)
+    ) {
+      return yield* Effect.die(
+        new OutboxSelfTargetDefect({
+          table: outbox.tableName,
+          target: targetKey,
+        }),
+      )
+    }
+
+    const encodedRow = yield* encodeCall(
+      "row",
+      () =>
+        plan.codec.encodeRow({
+          ...row,
+          msgId: 0n,
+          enqueuedAt: send.timestamp,
+        }),
+      {
+        ...plan.codec.context,
+        op: `${plan.op}.insert`,
+      },
+    )
+    const rowBytes = hostValueBsatnBytes(outbox.row, encodedRow)
+    if (rowBytes > outbox.rowBytesMax) {
+      return yield* new OutboxRowTooLarge({
+        table: outbox.tableName,
+        rowBytes,
+        rowBytesMax: outbox.rowBytesMax,
+      })
+    }
+
+    return yield* hostCall(`${plan.op}.insert`, () =>
+      callHostMethod(rawTable, "insert", `${plan.op}.insert`, [encodedRow]),
+    ).pipe(
+      Effect.flatMap((nextRow) =>
+        decodeCall(() => plan.codec.decodeRow(nextRow), {
+          ...plan.codec.context,
+          op: `${plan.op}.insert`,
+        }),
+      ),
+    )
+  })
+
+  const tableHandle: Record<string, unknown> = {
+    ...buildBaseTable(rawTable, plan),
+    insert,
+  }
   for (const lookupPlan of plan.lookups) {
     tableHandle[lookupPlan.key] = buildLookup(
       "readonly",

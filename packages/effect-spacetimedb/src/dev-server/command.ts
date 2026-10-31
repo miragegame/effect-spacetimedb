@@ -1,8 +1,8 @@
 import * as Effect from "effect/Effect"
 import type * as PlatformError from "effect/PlatformError"
 import * as Stream from "effect/Stream"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { DevServerBinaryError, DevServerCommandError } from "./model.ts"
 
 type CapturedCommandOutput = {
@@ -11,9 +11,11 @@ type CapturedCommandOutput = {
   readonly stderr: string
 }
 
-type CommandDiagnostics = {
+type CommandRunOptions = {
   readonly displayArgs?: ReadonlyArray<string> | undefined
   readonly sensitiveValues?: ReadonlyArray<string> | undefined
+  /** Fails the command once its stdout passes this many bytes. */
+  readonly stdoutBytesMax?: number | undefined
 }
 
 const commandDisplay = (command: string, args: ReadonlyArray<string>): string =>
@@ -62,22 +64,51 @@ export const splitBinaryCommand = (
   return Effect.succeed([command, prefixArgs] as const)
 }
 
+const limitBytes = (
+  stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
+  command: string,
+  bytesMax: number | undefined,
+): Stream.Stream<
+  Uint8Array,
+  PlatformError.PlatformError | DevServerBinaryError
+> =>
+  bytesMax === undefined
+    ? stream
+    : Stream.suspend(() => {
+        let bytesSeen = 0
+        return stream.pipe(
+          Stream.mapEffect((chunk) => {
+            bytesSeen += chunk.byteLength
+            return bytesSeen > bytesMax
+              ? Effect.fail(
+                  new DevServerBinaryError({
+                    command,
+                    cause: `output exceeded ${bytesMax.toString()} bytes`,
+                  }),
+                )
+              : Effect.succeed(chunk)
+          }),
+        )
+      })
+
 const collectTextStream = (
   stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
   command: string,
   sensitiveValues: ReadonlyArray<string>,
+  bytesMax?: number,
 ) =>
   Stream.runFold(
-    Stream.decodeText(stream),
+    Stream.decodeText(limitBytes(stream, command, bytesMax)),
     () => "",
     (current, chunk) => `${current}${chunk}`,
   ).pipe(
-    Effect.mapError(
-      (cause) =>
-        new DevServerBinaryError({
-          command,
-          cause: redactCause(cause, sensitiveValues),
-        }),
+    Effect.mapError((cause) =>
+      cause instanceof DevServerBinaryError
+        ? cause
+        : new DevServerBinaryError({
+            command,
+            cause: redactCause(cause, sensitiveValues),
+          }),
     ),
   )
 
@@ -85,6 +116,7 @@ const runCapturedCommand = (
   command: ChildProcess.Command,
   commandName: string,
   sensitiveValues: ReadonlyArray<string>,
+  stdoutBytesMax: number | undefined,
 ): Effect.Effect<
   CapturedCommandOutput,
   DevServerBinaryError,
@@ -115,6 +147,7 @@ const runCapturedCommand = (
             process.stdout,
             commandName,
             sensitiveValues,
+            stdoutBytesMax,
           ),
           stderr: collectTextStream(
             process.stderr,
@@ -132,15 +165,15 @@ export const runCommand = Effect.fn(function* (
   binary: ReadonlyArray<string>,
   args: ReadonlyArray<string>,
   options: ChildProcess.CommandOptions,
-  diagnostics: CommandDiagnostics = {},
+  runOptions: CommandRunOptions = {},
 ) {
   const [command, prefixArgs] = yield* splitBinaryCommand(binary, "command")
   const commandArgs = [...prefixArgs, ...args]
-  const sensitiveValues = diagnostics.sensitiveValues ?? []
+  const sensitiveValues = runOptions.sensitiveValues ?? []
   const rendered = redactText(
     commandDisplay(command, [
       ...prefixArgs,
-      ...(diagnostics.displayArgs ?? args),
+      ...(runOptions.displayArgs ?? args),
     ]),
     sensitiveValues,
   )
@@ -154,6 +187,7 @@ export const runCommand = Effect.fn(function* (
     }),
     rendered,
     sensitiveValues,
+    runOptions.stdoutBytesMax,
   )
 
   if (output.exitCode !== 0) {

@@ -5,6 +5,10 @@ import {
   type LifecycleSpec,
 } from "../contract/lifecycle.ts"
 
+import { isReceiverSpec } from "../contract/remote-interface.ts"
+
+import { middlewareForDecl } from "./group-middleware-runtime.ts"
+
 import {
   diagnostic,
   formatCandidateNames,
@@ -58,6 +62,21 @@ const makeGroupImpl = <
       ["groups", name],
       `Module ${module.spec.name} has no group named ${name}. Available groups: ${formatCandidateNames(module.groups.map((candidate) => candidate.id))}`,
     )
+  }
+
+  // A receiver is client-callable, so only a guard stands between it and
+  // any client. Every receiver must run behind its group's reducer middleware.
+  for (const endpoint of group.endpoints) {
+    if (
+      isReceiverSpec(endpoint.spec) &&
+      middlewareForDecl(endpoint, options?.middleware) === undefined
+    ) {
+      throw diagnostic(
+        "ReceiverWithoutGuard",
+        ["groups", group.id, endpoint.name],
+        `Group ${group.id} implements receiver ${endpoint.name} without a guard; pass the peer check as middleware.reducers.`,
+      )
+    }
   }
 
   const built = makeHandlerDefinitionsFromRecord<Module, unknown>(

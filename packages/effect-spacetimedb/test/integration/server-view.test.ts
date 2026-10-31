@@ -1,4 +1,3 @@
-
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { make as makeServer } from "../../src/server/bind.ts"
@@ -21,6 +20,7 @@ import { assertHostBoundaryThrow, hostCause } from "../helpers/server-runtime"
 import { invokeModuleExport } from "../helpers/spacetimedb-server"
 import { TestSyncRunner } from "../helpers/sync-runner"
 import { TestLayer } from "../helpers/test-layer"
+import { testViewRowsLength } from "../helpers/array-bounds"
 
 const describe = EffectVitest.layer(TestLayer)
 
@@ -48,6 +48,7 @@ const ViewModule = Stdb.StdbModule.make("view_module", {})
               id: Stdb.string(),
               name: Stdb.string(),
             }),
+            testViewRowsLength,
           ),
         }),
       )
@@ -218,6 +219,7 @@ describe("server views", (it) => {
             try: () =>
               views.allUsers!.invoke(
                 {
+                  env: { get: () => null },
                   db: malformedDb as never,
                   from,
                 },
@@ -272,6 +274,7 @@ describe("server views", (it) => {
           try: () =>
             views.allUsers!.invoke(
               {
+                env: { get: () => null },
                 db: db as never,
                 from,
               },
@@ -320,6 +323,7 @@ describe("server views", (it) => {
           try: () =>
             views.allUsers!.invoke(
               {
+                env: { get: () => null },
                 db: makeDb() as never,
                 from,
               },

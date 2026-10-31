@@ -38,11 +38,15 @@ export {
   type ModuleBrandTypeId,
   type ModuleSpecFor,
   type ProcedureArgsFor,
+  type OutboxResultDecl,
+  type OutboxResultParams,
+  type OutboxResultSpec,
   type ProcedureDecl,
   type ProcedureErrorsFor,
   type ProcedureSuccessFor,
   type RawHttpRouteDecl,
   type ReducerArgsFor,
+  type ReceiverDecl,
   type ReducerDecl,
   type ReducerErrorsFor,
   type ReducerSuccessFor,
@@ -75,6 +79,8 @@ export {
 } from "./builder.ts"
 export {
   type CallFailure,
+  CallNotSentError,
+  ConnectionIdentityChangedError,
   ConnectionLostError,
   type RawCallFailure,
 } from "./client/call-errors.ts"
@@ -178,8 +184,32 @@ export {
   StdbValidationError,
   validate,
 } from "./contract/module-validation.ts"
+export {
+  type AnyOutboxTableSpec,
+  type OutboxMetadata,
+  type OutboxResultMetadata,
+  type OutboxTableSpec,
+  OutboxRowTooLarge,
+  outboxRowBytesMaxCeiling,
+  outboxRowBytesMaxDefault,
+  outboxTable,
+  outboxTargetIndexName,
+} from "./contract/outbox-table.ts"
+export { OutboxResult } from "./contract/outbox-result.ts"
+export * as RemoteInterface from "./contract/remote-interface.ts"
+export type {
+  AnyRemoteInterface,
+  AnyRemoteInterfaceBinding,
+  PeerIdentity,
+  ReceiverSpec,
+  RemoteInterfaceBinding,
+  RemoteInterfaceOf,
+  RemoteModuleBinding,
+  RemoteReducerBinding,
+} from "./contract/remote-interface.ts"
 export { type ProcedureSpec } from "./contract/procedure.ts"
 export { type ReducerSpec } from "./contract/reducer.ts"
+export * as Environment from "./contract/environment.ts"
 export * as ScheduleAt from "./contract/schedule-at.ts"
 export { type ModuleSettings } from "./contract/settings.ts"
 export {
@@ -209,12 +239,17 @@ export {
 export { StdbHostEncodeError } from "./contract/type/host-codec.ts"
 export type {
   AnyValueType,
+  ArrayLengthBounds,
   ArrayValueType,
   BigIntValueType,
   BoolValueType,
   BytesValueType,
   Encoded,
   EncodedOf,
+  HostOf,
+  HostValue,
+  HostStruct,
+  HostSum,
   F32ValueType,
   F64ValueType,
   I8ValueType,
@@ -299,6 +334,7 @@ export {
   scheduleAt,
   string,
   struct,
+  structFields,
   sum,
   timeDuration,
   timestamp,
@@ -343,3 +379,5 @@ export {
 
 const effectSpacetimeDbEntrypoint = "effect-spacetimedb" as const
 void effectSpacetimeDbEntrypoint
+
+export { HostValueTypeId } from "./contract/type.ts"

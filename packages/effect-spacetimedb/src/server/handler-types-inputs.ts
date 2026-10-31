@@ -287,7 +287,7 @@ export type BoundViewExport<
     ctx: Module["views"][Key]["context"] extends "sender"
       ? ViewCtxLike<Module>
       : AnonymousViewCtxLike<Module>,
-    args: Record<string, never>,
+    args: ViewArgsOf<Module["views"][Key]>,
   ) => ViewSuccessOf<Module["views"][Key]>
 }
 

@@ -1,6 +1,7 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { make as makeServer } from "../../src/server/bind.ts"
+import { fixtureCallDurationMax } from "../helpers/transport-bounds"
 
 const { expect } = EffectVitest
 
@@ -103,6 +104,7 @@ describe("module plan", (it) => {
         config: {
           uri: "http://localhost:3000",
           databaseName: "example",
+          callDurationMax: fixtureCallDurationMax,
         },
       })
       const ws = StdbTesting.ClientWs.makeFromModulePlan({

@@ -1,11 +1,11 @@
 import * as Data from "effect/Data"
 import * as Match from "effect/Match"
 import * as Schema from "effect/Schema"
-import type * as HttpMethod from "effect/unstable/http/HttpMethod"
-import * as HttpApi from "effect/unstable/httpapi/HttpApi"
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint"
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup"
-import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema"
+import type * as HttpMethod from "effect/http/HttpMethod"
+import * as HttpApi from "effect/http-api/HttpApi"
+import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint"
+import * as HttpApiGroup from "effect/http-api/HttpApiGroup"
+import * as HttpApiSchema from "effect/http-api/HttpApiSchema"
 import { statusOf, type AnyErrorDefinition } from "../contract/error.ts"
 import {
   isTypedHttpHandlerSpec,

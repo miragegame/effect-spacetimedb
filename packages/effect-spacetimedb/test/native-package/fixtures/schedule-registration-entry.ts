@@ -1,4 +1,3 @@
-
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 import { StdbValidationError } from "../../../src/contract/module-validation.ts"

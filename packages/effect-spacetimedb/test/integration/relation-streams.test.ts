@@ -1,4 +1,3 @@
-
 import * as EffectVitest from "@effect/vitest"
 import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
@@ -12,8 +11,8 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as TestClock from "effect/testing/TestClock"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
-import * as AtomRegistry from "effect/unstable/reactivity/AtomRegistry"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
+import * as AtomRegistry from "effect/reactivity/AtomRegistry"
 import { Identity } from "spacetimedb"
 
 const { describe, expect, it } = EffectVitest

@@ -27,6 +27,7 @@ import {
   isRowTypedQuery,
   Range,
   Router,
+  remoteModule,
   SenderError,
   schema,
   t,
@@ -41,6 +42,7 @@ assertCompilerHostAbiCapabilities({
   isRowTypedQuery,
   Range,
   Router,
+  remoteModule,
   schema,
   SenderError,
   t,
@@ -86,6 +88,9 @@ export function build<
     internalStdbBuildPlan<BuildSpec<Module, Impls>, RuntimeROfImpls<Impls>>(
       typedPlan,
     ),
+    // Receiver bindings import `spacetimedb/server`, so only this host-only
+    // entrypoint takes them; `StdbBuilder.plan` and the test harness need none.
+    { receiverBindings: options?.receiverBindings ?? [] },
   )
 }
 

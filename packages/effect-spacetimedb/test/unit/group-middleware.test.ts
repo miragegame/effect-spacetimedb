@@ -4,6 +4,7 @@ import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 import { TestLayer } from "../helpers/test-layer"
+import { testViewRowsLength } from "../helpers/array-bounds"
 
 const { expect } = EffectVitest
 const describe = EffectVitest.layer(TestLayer)
@@ -110,7 +111,10 @@ describe("group middleware", (it) => {
         const Mixed = Stdb.StdbGroup.make("Mixed").add(
           Stdb.StdbFn.reducer("reduce", {}),
           Stdb.StdbFn.anonymousView("inspect", {
-            returns: Stdb.array(Stdb.struct({ id: Stdb.string() })),
+            returns: Stdb.array(
+              Stdb.struct({ id: Stdb.string() }),
+              testViewRowsLength,
+            ),
           }),
           Stdb.StdbFn.init(),
         )

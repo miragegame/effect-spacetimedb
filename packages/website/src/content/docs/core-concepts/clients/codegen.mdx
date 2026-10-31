@@ -49,6 +49,7 @@ const WsLive = Example.client.ws.layerGenerated({
   uri,
   databaseName,
   token,
+  connectTimeoutMillis: 10_000,
 })
 ```
 
@@ -88,11 +89,18 @@ regenerate in staging and compare without rewriting the committed artifact.
 Add `.tmp/` to the consumer project's `.gitignore` so generated staging files
 cannot be committed accidentally.
 
-The codegen export runs under plain Node 20 or newer. Install `esbuild@^0.25` as
-an optional peer and provide the platform layer at your executable boundary;
-the example uses `@effect/platform-node`'s `NodeServices.layer`. The pipeline
+The codegen export runs under plain Node 20 or newer. Install `esbuild` (0.25
+through 0.28) as an optional peer and provide the platform layer at your
+executable boundary; the example uses `@effect/platform-node`'s
+`NodeServices.layer`. The pipeline
 asserts the exact SpaceTimeDB CLI version it was built against before
-generating, and fails with `CodegenCliVersionError` on anything else.
+generating, and fails with `CodegenCliVersionError` on anything else. It runs
+the generator with `--no-config`, so a `spacetime.json` above the working
+directory cannot add targets to the run or retarget it.
+
+Receiver bindings for [inter-database calls](/core-concepts/functions/inter-database-calls)
+go through the same quarantine with `generateReceiverArtifact` and
+`checkReceiverArtifact`.
 
 The artifact declaration is deliberately erased. Restore type identity in one
 hand-written facade tied to the same module contract used by the server:

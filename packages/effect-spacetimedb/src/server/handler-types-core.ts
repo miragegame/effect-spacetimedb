@@ -80,7 +80,7 @@ export type ModuleLifecycleKeys<Module extends AnyModuleSpec> = Extract<
 export type ParamsOf<Spec extends { readonly params: StructLikeValueType }> =
   TypeOf<Spec["params"]>
 
-export type ViewArgsOf<_Spec extends AnyViewSpec> = Record<string, never>
+export type ViewArgsOf<Spec extends AnyViewSpec> = TypeOf<Spec["params"]>
 
 export type ReturnsOf<Spec extends { readonly returns: AnyValueType }> = TypeOf<
   Spec["returns"]
@@ -108,9 +108,16 @@ export type HandlerBaseErrors<
   Definition extends ErrorCodec.AnyErrorDefinition | undefined,
 > = DeclaredErrorsOf<Definition> | StdbHostFailure | StdbDecodeError
 
-export type ReducerHandlerErrors<Spec extends ReducerSpec> =
-  | HandlerBaseErrors<Spec["errors"]>
-  | StdbSenderFailure
+/**
+ * A settle reducer (`StdbFn.outboxResult`) may not fail: the host rolls a
+ * failed settle back without retrying it, so its outcome would be lost. Its
+ * handler handles every failure itself; a defect still dies.
+ */
+export type ReducerHandlerErrors<Spec extends ReducerSpec> = Spec extends {
+  readonly outboxResult: object
+}
+  ? never
+  : HandlerBaseErrors<Spec["errors"]> | StdbSenderFailure
 
 export type ProcedureHandlerErrors<Spec extends ProcedureSpec> =
   HandlerBaseErrors<Spec["errors"]>
@@ -135,10 +142,13 @@ export type ExtraRequirements<
   ? Extra
   : never
 
+// Every callable kind may also require the module environment.
 export type HandlerRequirements<
   RuntimeR,
   Allowed extends ServerContext.AnyServerContextRequirements,
-> = Allowed | ExtraRequirements<RuntimeR, Allowed>
+> =
+  | ServerContext.WithEnv<Allowed>
+  | ExtraRequirements<RuntimeR, ServerContext.WithEnv<Allowed>>
 
 export type ReducerHandlerRecord<
   Module extends AnyModuleSpec,

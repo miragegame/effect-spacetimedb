@@ -1,7 +1,8 @@
 import * as Effect from "effect/Effect"
 import * as EffectVitest from "@effect/vitest"
-import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClient from "effect/http/HttpClient"
 import * as Schema from "effect/Schema"
+import { fixtureCallDurationMax } from "../helpers/transport-bounds"
 const { expect } = EffectVitest
 import * as StdbTesting from "effect-spacetimedb/testing"
 import { FullModule, UserMissing } from "../fixtures/full-module"
@@ -68,6 +69,7 @@ describe("HTTP handler client", (it) => {
           module: FullModule,
           uri: "http://stdb.test/",
           databaseName: "full",
+          callDurationMax: fixtureCallDurationMax,
           token: "secret-token",
         })
 
@@ -104,6 +106,7 @@ describe("HTTP handler client", (it) => {
         module: AnyModule,
         uri: "http://stdb.test",
         databaseName: "any",
+        callDurationMax: fixtureCallDurationMax,
       })
 
       const result = yield* runHttp(
@@ -133,6 +136,7 @@ describe("HTTP handler client", (it) => {
           module: FullModule,
           uri: "http://stdb.test",
           databaseName: "full",
+          callDurationMax: fixtureCallDurationMax,
         })
 
         const result = yield* runHttp(
@@ -171,6 +175,7 @@ describe("HTTP handler client", (it) => {
         module: AnyRawModule,
         uri: "http://stdb.test",
         databaseName: "any-raw",
+        callDurationMax: fixtureCallDurationMax,
       })
 
       const result = yield* runHttp(
@@ -198,6 +203,7 @@ describe("HTTP handler client", (it) => {
         module: EmptyBodyModule,
         uri: "http://stdb.test",
         databaseName: "empty",
+        callDurationMax: fixtureCallDurationMax,
       })
 
       const result = yield* runHttp(
@@ -226,6 +232,7 @@ describe("HTTP handler client", (it) => {
         module: EmptyBodyModule,
         uri: "http://stdb.test",
         databaseName: "empty",
+        callDurationMax: fixtureCallDurationMax,
       })
 
       const failure = yield* Effect.flip(
@@ -250,6 +257,7 @@ describe("HTTP handler client", (it) => {
           module: FullModule,
           uri: "http://stdb.test",
           databaseName: "full",
+          callDurationMax: fixtureCallDurationMax,
         })
 
         const failure = yield* Effect.flip(
@@ -273,6 +281,7 @@ describe("HTTP handler client", (it) => {
         module: FullModule,
         uri: "http://stdb.test",
         databaseName: "full",
+        callDurationMax: fixtureCallDurationMax,
       })
 
       const failure = yield* Effect.flip(
@@ -299,6 +308,7 @@ describe("HTTP handler client", (it) => {
         module: FullModule,
         uri: "http://stdb.test",
         databaseName: "full",
+        callDurationMax: fixtureCallDurationMax,
       })
       const serverResponse = UserMissing.make({
         userId: "user-1" as never,

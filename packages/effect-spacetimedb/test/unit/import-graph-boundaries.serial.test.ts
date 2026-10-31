@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process"
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -10,10 +9,10 @@ import {
 } from "node:fs"
 import * as Path from "node:path"
 import { fileURLToPath } from "node:url"
-import * as GetExePath from "@effect/tsgo/lib/getExePath"
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { testEffectCallbackError } from "../helpers/effect-errors"
+import { typescriptCompilerBin } from "../helpers/typescript-compiler"
 
 const { expect, it } = EffectVitest
 const describe = EffectVitest.describe
@@ -340,21 +339,10 @@ const writeDeclarationEmitConfig = (): void => {
   )
 }
 
-// Same two steps the package's `scripts/effect-tsgo.mjs` wrapper performs:
-// resolve the native compiler shipped with @effect/tsgo, then run it. The
-// declaration probe keeps a best-effort chmod because the pool's executable is
-// already runnable; the wrapper additionally copies non-executable read-only
-// binaries into package scratch before launch.
 const runDeclarationEmit = (): void => {
-  const compilerExecutable = GetExePath.default()
-  try {
-    chmodSync(compilerExecutable, 0o755)
-  } catch {
-    // Best effort: the package manager usually installs the binary executable.
-  }
   const emit = spawnSync(
-    compilerExecutable,
-    ["-p", declarationSurfaceConfigPath],
+    process.execPath,
+    [typescriptCompilerBin, "-p", declarationSurfaceConfigPath],
     { cwd: packageRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
   )
   if (emit.status !== 0) {

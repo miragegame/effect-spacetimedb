@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
+import { testViewRowsLength } from "../helpers/array-bounds"
 
 const UserId = Stdb.string(Schema.String.pipe(Schema.brand("ArityUserId")))
 
@@ -32,7 +33,7 @@ const CallableArityGroup = Stdb.StdbGroup.make("CallableArity")
   )
   .add(
     Stdb.StdbFn.view("empty_view", {
-      returns: Stdb.array(UserId),
+      returns: Stdb.array(UserId, testViewRowsLength),
     }),
   )
 

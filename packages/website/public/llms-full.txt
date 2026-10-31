@@ -57,6 +57,7 @@ const WsLive = Example.client.ws.layerGenerated({
   uri,
   databaseName,
   token,
+  connectTimeoutMillis: 10_000,
 })
 ```
 
@@ -96,11 +97,18 @@ regenerate in staging and compare without rewriting the committed artifact.
 Add `.tmp/` to the consumer project's `.gitignore` so generated staging files
 cannot be committed accidentally.
 
-The codegen export runs under plain Node 20 or newer. Install `esbuild@^0.25` as
-an optional peer and provide the platform layer at your executable boundary;
-the example uses `@effect/platform-node`'s `NodeServices.layer`. The pipeline
+The codegen export runs under plain Node 20 or newer. Install `esbuild` (0.25
+through 0.28) as an optional peer and provide the platform layer at your
+executable boundary; the example uses `@effect/platform-node`'s
+`NodeServices.layer`. The pipeline
 asserts the exact SpaceTimeDB CLI version it was built against before
-generating, and fails with `CodegenCliVersionError` on anything else.
+generating, and fails with `CodegenCliVersionError` on anything else. It runs
+the generator with `--no-config`, so a `spacetime.json` above the working
+directory cannot add targets to the run or retarget it.
+
+Receiver bindings for [inter-database calls](/core-concepts/functions/inter-database-calls)
+go through the same quarantine with `generateReceiverArtifact` and
+`checkReceiverArtifact`.
 
 The artifact declaration is deliberately erased. Restore type identity in one
 hand-written facade tied to the same module contract used by the server:
@@ -190,7 +198,12 @@ declare const databaseName: string
 declare const token: string
 
 const Example = Stdb.project(Module)
-const HttpLive = Example.client.http.layer({ uri, databaseName, token })
+const HttpLive = Example.client.http.layer({
+  uri,
+  databaseName,
+  token,
+  callDurationMax: "10 seconds",
+})
 
 const program = Effect.gen(function* () {
   const client = yield* Example.client.http.Tag
@@ -238,6 +251,7 @@ const WsLive = Example.client.ws.layerGenerated({
   uri,
   databaseName,
   token,
+  connectTimeoutMillis: 10_000,
 })
 ```
 
@@ -263,7 +277,7 @@ declare const token: string
 const Example = Stdb.project(Module)
 const MainSession = Example.client.ws.tag("main")
 const MainLive = Example.client.ws.layerGenerated(
-  { DbConnection, uri, databaseName, token },
+  { DbConnection, uri, databaseName, token, connectTimeoutMillis: 10_000 },
   { name: "main" },
 )
 ```
@@ -308,6 +322,164 @@ clients can opt into the package supervisor for bounded acquisition, jittered
 reconnect backoff, scoped per-session setup, and resubscription; a reconnect
 after a causeless close behaves exactly like one after a reported socket error.
 
+## Automatic Reconnect
+
+Set `automaticReconnect` on a WebSocket config to let the native SDK reconnect
+an established connection by itself. After a dropped socket the SDK reopens it
+with exponential, jittered backoff and keeps the same connection object, client
+cache, subscription handles and callbacks. It replays every subscription in one
+batch and reconciles the cache: rows unchanged across the outage fire no
+callbacks, changed rows fire one update, insert or delete, and each replayed
+subscription fires `onApplied` again.
+
+```typescript twoslash
+import * as StdbClient from "effect-spacetimedb/client"
+import * as Stdb from "effect-spacetimedb"
+
+declare const Module: Stdb.AnyStdbModule
+declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
+  typeof Module.spec,
+  unknown
+>
+declare const uri: string
+declare const databaseName: string
+declare const token: string
+
+const Example = Stdb.project(Module)
+
+const WsLive = Example.client.ws.layerGenerated({
+  DbConnection,
+  uri,
+  databaseName,
+  token,
+  connectTimeoutMillis: 10_000,
+  // The SDK raises delays below 500 ms (first) and 1 s (cap) to those floors.
+  automaticReconnect: { delayMillisMin: 1_000, delayMillisMax: 30_000 },
+})
+```
+
+The session outlives the drop. Until the SDK has reconnected and its replay
+has re-applied every subscription the session holds, reads keep returning the
+last rows and streams stay open, while calls are refused without being sent:
+
+| Call | Fails with | Meaning |
+| --- | --- | --- |
+| Made while the SDK reconnects or replays | `CallNotSentError` | The server never saw it; retrying once the session is live is safe. |
+| In flight when the socket dropped | `ConnectionLostError` | The outcome is unknown; it may have committed. |
+| Made on a session whose reconnect changed identity | `ConnectionIdentityChangedError` | The session ended; no retry on it can succeed. |
+
+The SDK does not retry the *initial* connection: that failure still fails the
+acquisition with `WsConnectError`. Recovery starts once the session is live (a
+supervised session after it connected, subscribed and ran `setup`); a drop
+before that ends it. The session is invalidated when the SDK schedules no
+further attempt (a protocol-error close, a refused fresh token, an identity
+change, `disconnect()`), when a token refresh fails (see Tokens), or when a
+reconnect attempt or its replay is still unresolved `connectTimeoutMillis`
+after its scheduled start; the SDK has no handshake or replay timeout of its
+own, so the library ends such a connection.
+
+A socket can also close without delivering its close event. The SDK notices
+only on a page-resume event, so any call, subscribe or liveness check that
+finds the socket closed puts the session in recovery (`reconnectAttempt` 0)
+and the same bound ends it if no reconnect follows, as in a WebView or a
+server runtime that never sends resume events.
+
+A subscription that fails to replay is dropped by the SDK. A consumer stream on
+it fails with `SubscriptionRejectedError` on its own; a supervisor's
+subscription target that fails to replay ends the session, so the supervisor
+replaces it.
+
+## Supervised Sessions With Automatic Reconnect
+
+Automatic reconnect layers under the session supervisor. The SDK handles
+transport blips without replacing the session; the supervisor still owns the
+first connection, terminal failures (rebuilding the session after its own
+backoff), and per-session setup. Its phase reports which one is happening:
+
+| Phase | Session | Who is recovering |
+| --- | --- | --- |
+| `connecting` | none yet | the supervisor's first activation |
+| `live` | current | — |
+| `recovering` | retained (published as waiting); cache readable, calls refused | the SDK, on the same session (`reconnectAttempt`, `reconnectDelayMillis`, `reason`) |
+| `reconnecting` | the previous one, as waiting | the supervisor, building a replacement |
+| `fatal` | the last one | nobody: retrying cannot help |
+
+`setup` runs once per session. Server state that belongs to a connection rather
+than to a session (presence, for example) is discarded when the server sees the
+old socket disconnect, so redo it in `onAutomaticReconnect`, which runs after
+every automatic reconnect (once the replay has re-applied the subscriptions)
+and before the session is published `live` again. Its scope lasts until the
+next drop; a failure ends the session (the supervisor then replaces it), and a
+drop while it runs, including a call it makes being refused by a socket found
+closed, interrupts it instead. Keep it idempotent.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as StdbClient from "effect-spacetimedb/client"
+import * as Stdb from "effect-spacetimedb"
+
+declare const Module: Stdb.AnyStdbModule
+declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
+  typeof Module.spec,
+  unknown
+>
+declare const uri: string
+declare const databaseName: string
+// Never a token it already handed out, nor one due for refresh (see Tokens).
+declare const fetchFreshToken: Effect.Effect<string, Error>
+declare const registerPresence: (
+  session: StdbClient.WsSession<typeof Module.spec>,
+) => Effect.Effect<void>
+
+const supervisor = StdbClient.wsSupervisorGenerated({
+  module: Module.spec,
+  config: {
+    DbConnection,
+    uri,
+    databaseName,
+    token: fetchFreshToken,
+    connectTimeoutMillis: 10_000,
+    automaticReconnect: {},
+  },
+  setup: registerPresence,
+  onAutomaticReconnect: registerPresence,
+})
+```
+
+A reconnect that comes back under a different identity parks the supervisor in
+`fatal` with a `WsConnectError` whose `cause` is `ConnectionIdentityChangedError`:
+replacing the session would silently serve another identity's data, so the owner
+decides, typically by constructing a supervisor for the new credentials.
+
+## Tokens
+
+`token` is either a fixed string or an Effect that produces one. An Effect is
+evaluated for every connection attempt: each scoped acquisition, every session a
+supervisor builds, and with automatic reconnect also whenever the SDK refreshes
+its retained token, which it does before a reconnect when that token has no
+expiry, has 5% of its lifetime (at least 30 seconds) or less left, or was
+rejected. An acquisition's evaluation is bounded by `connectTimeoutMillis`,
+and a failure (any `Error`) fails that attempt with `WsConnectError` carrying
+it as `cause`.
+A refresh runs within its reconnect attempt's bound (the SDK's delay plus
+`connectTimeoutMillis`). One that fails, dies or overruns that bound ends the
+session rather than let the SDK retry a token that may never come back (a
+signed-out user). A supervisor reports a failure as that `WsConnectError` and
+an overrun as `WsConnectError` with a `WsConnectTimeoutError` cause, and its
+`isRetryable` policy decides whether to build a new session; a refresh that
+died parks it as `fatal`, like any defect.
+A token captured once goes stale for a long-lived client; reading the current
+token in an Effect keeps every reconnect authenticated. `session.token` reports
+the token the connection currently uses.
+
+The SDK takes whatever a refresh returns as fresh: if the server refuses that
+token too, the SDK stops reconnecting. So the Effect must return a token that
+is not due for refresh by the rule above, and never the one it returned last,
+even while the client clock counts it valid: the server may just have refused
+it (revoked, or the client clock runs behind the server's). The pattern: a
+token cached when the session was checked may serve the first attempt while
+it is not due; every later evaluation fetches a fresh token, or fails.
+
 
 ---
 
@@ -341,7 +513,12 @@ const Users = Stdb.StdbGroup.make("Users").add(
 
 const Module = Stdb.StdbModule.make("app").add(Users)
 const Example = Stdb.project(Module)
-const HttpLive = Example.client.http.layer({ uri, databaseName, token })
+const HttpLive = Example.client.http.layer({
+  uri,
+  databaseName,
+  token,
+  callDurationMax: "10 seconds",
+})
 
 const program = Effect.gen(function* () {
   const client = yield* Example.client.http.Tag
@@ -392,8 +569,18 @@ const Users = Stdb.StdbGroup.make("Users").add(
 )
 const Module = Stdb.StdbModule.make("app").add(Users)
 const Example = Stdb.project(Module)
-const client = Example.client.http.make({ uri, databaseName, token })
-const users = Example.client.http.group("Users", { uri, databaseName, token })
+const client = Example.client.http.make({
+  uri,
+  databaseName,
+  token,
+  callDurationMax: "10 seconds",
+})
+const users = Example.client.http.group("Users", {
+  uri,
+  databaseName,
+  token,
+  callDurationMax: "10 seconds",
+})
 
 const write = client.Users.reducers.user_upsert({ userId: "u1", name: "Ada" })
 const read = client.Users.procedures.user_get({ userId: "u1" })
@@ -401,7 +588,7 @@ const scopedWrite = users.reducers.user_upsert({ userId: "u1", name: "Ada" })
 ```
 
 For a narrower type at a consumer boundary, construct only one group view:
-`Example.client.http.group("Users", { uri, databaseName, token })`. The result
+`Example.client.http.group("Users", { uri, databaseName, token, callDurationMax })`. The result
 contains only that group's `reducers`, `procedures`, and `httpHandlers`.
 
 Grouped functions—including their `.raw` functions—are the exact same objects
@@ -454,10 +641,12 @@ The exported failure model is:
 
 | Type | Meaning |
 | --- | --- |
-| `CallFailure<E>` | Typed call error union: declared errors, `ConnectionLostError`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
-| `RawCallFailure<E>` | Raw call error union: `DomainCallError<E>`, `ConnectionLostError`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
+| `CallFailure<E>` | Typed call error union: declared errors, `ConnectionLostError`, `CallNotSentError`, `ConnectionIdentityChangedError`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
+| `RawCallFailure<E>` | Raw call error union: `DomainCallError<E>`, `ConnectionLostError`, `CallNotSentError`, `ConnectionIdentityChangedError`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
 | `DomainCallError<E>` | Declared error preserved as a wrapper by `.raw`. |
-| `ConnectionLostError` | The session was invalidated before a terminal response arrived; the call's outcome is unknown. |
+| `ConnectionLostError` | The connection was lost before a terminal response arrived (or the session had already ended); the call's outcome is unknown. |
+| `CallNotSentError` | With automatic reconnect: the session was reconnecting, so the call was never sent. Safe to retry once it is live. |
+| `ConnectionIdentityChangedError` | With automatic reconnect: a reconnect came back under a different identity and ended the session. |
 | `RemoteRejectedError` | The remote side rejected the call without a decodable declared error. |
 | `TransportError` | The HTTP or WebSocket transport failed before a typed response arrived. |
 | `StdbDecodeError` | A response, row, event, or payload could not be decoded with the module contract. |
@@ -474,9 +663,9 @@ stock Effect `HttpApiClient` over typed `post`, `put`, or `patch` routes.
 
 ```typescript twoslash
 import * as Effect from "effect/Effect"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as Stdb from "effect-spacetimedb"
 
 declare const Module: Stdb.AnyStdbModule
@@ -565,6 +754,17 @@ const program = Effect.gen(function* () {
 })
 ```
 
+The runtime is its first database: `runtime.databaseIdentity`, `republish`,
+`updateEnvironment`, `reset` and `remove` act on it. `runtime.publishDatabase`
+publishes another bundle to the same standalone under a name you choose and
+returns the same handle for it, which is how tests run
+[inter-database calls](/core-concepts/functions/inter-database-calls): the host
+delivers them only between databases on one standalone. For the same reason
+every standalone the dev server starts has `localhost` added to its `NO_PROXY`
+unless `standaloneEnvironment` sets `NO_PROXY` or `no_proxy` itself.
+`publishEnvironmentOnly` is exported for tools that drive their own logged-in
+CLI.
+
 The generated server bundle must include
 `effect-spacetimedb/server-compiler`; native `spacetime build` preserves its
 side-effectful server polyfill import. Off-host tests that import server modules
@@ -576,6 +776,219 @@ module exports; SpacetimeDB still controls local dev, publish, runtime storage,
 and the generated client runtime. The optional
 [quarantined codegen path](/core-concepts/clients/codegen) bundles native output
 without replacing the native generator.
+
+
+---
+
+# Source: /core-concepts/databases/environment-variables
+
+---
+draft: false
+title: Environment Variables
+description: Declare typed database environment keys and read them as Effects, with secrets kept Redacted.
+sidebar:
+  order: 4
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/databases/environment-variables" target="_blank" rel="noopener noreferrer">SpacetimeDB: Environment Variables ↗</a>
+
+A module declares the environment keys it reads; the publisher supplies the
+values. The host validates them before `init` or a migration runs and keeps
+them across publishes. Declare keys on the module and read them through its
+`Env` accessor.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Redacted from "effect/Redacted"
+import * as Stdb from "effect-spacetimedb"
+
+const Settings = Stdb.StdbGroup.make("Settings").add(
+  Stdb.StdbFn.procedure("describe_settings", { returns: Stdb.string() }),
+)
+
+const Module = Stdb.StdbModule.make("app", {
+  environment: {
+    API_KEY: Stdb.Environment.secret(),
+    MODE: Stdb.Environment.literal("development", "production"),
+    LOG_LEVEL: Stdb.Environment.optional(
+      Stdb.Environment.literal("info", "debug"),
+    ),
+  },
+}).add(Settings)
+const { Env } = Module
+
+const SettingsLive = Stdb.StdbBuilder.group(Module, "Settings", {
+  describe_settings: Effect.fn(function* () {
+    const env = yield* Env
+    const apiKey = yield* env.API_KEY // Redacted<string>
+    const mode = yield* env.MODE // "development" | "production"
+    const logLevel = yield* env.LOG_LEVEL // "info" | "debug" | undefined
+    return `${mode}/${logLevel ?? "default"}: ${Redacted.value(apiKey).length} chars`
+  }),
+})
+```
+
+## Declarations
+
+| Builder | Accepts | Reads as |
+| --- | --- | --- |
+| `Stdb.Environment.string()` | any string | `string` |
+| `Stdb.Environment.secret()` | any string | `Redacted<string>` |
+| `Stdb.Environment.literal("a", "b")` | one of the listed strings; one value pins the key | `"a" \| "b"` |
+| `Stdb.Environment.optional(declaration)` | the same, or no value | the same, or `undefined` |
+
+Every value is a string. Declarations are checked when the contract is built,
+against the host's own limits:
+
+- keys match `[A-Za-z_][A-Za-z0-9_]*` and are at most 256 UTF-8 bytes;
+- a module declares at most 256 keys;
+- a literal set is non-empty and distinct, with at most 256 values of at most
+  8 KiB each;
+- all keys and literals together are at most 2 MiB.
+
+A violation throws `StdbValidationError` with an `InvalidEnvironmentKey`,
+`InvalidEnvironmentLiteral`, `InvalidEnvironmentDeclaration`,
+`EnvironmentDeclarationCountExceeded`, `EnvironmentUnionEntriesExceeded` or
+`EnvironmentSchemaBytesExceeded` diagnostic, so a module the host would refuse
+never reaches publish. The
+compiler hands the declarations, and never a value, to the SDK's `schema()`
+`env` setting.
+
+## Reading values
+
+`Env` is a module-scoped service, like `Db`. Once a module declares at least
+one key, its reducers, lifecycle hooks, procedures, views, HTTP handlers and
+transaction bodies (`Tx.run`, `HttpTx.run`) can all yield it. A key the module
+did not declare does not type-check, and another module's `Env` is refused like
+another module's `Db`. A module that declares nothing keeps the handler types
+it had before environments existed, so its handlers cannot require `Env`.
+
+Each declared key is an Effect that reads the host when it runs. Nothing is
+cached:
+
+- inside a transaction, a read sees that transaction's snapshot;
+- in a procedure outside a transaction, every read is its own snapshot, so read
+  several keys inside one `Tx.run` when they must agree;
+- after an environment-only update, the next call reads the new values. Views
+  that read a key are refreshed when its value changes.
+
+A read never fails in the error channel. The host validated the environment at
+publish, so a failed host read is a defect (`StdbEnvironmentHostReadDefect`),
+and so is a value that contradicts its declaration
+(`StdbEnvironmentValueDefect`). Both name the key, never the value.
+
+## Secrets
+
+A secret reads back as `Redacted<string>`: logging, tracing or printing it
+shows `<redacted:KEY>`. Call `Redacted.value` only where the plain string is
+needed. The library never writes environment values into its own logs, spans
+or error messages. Redaction is a read-side guard, not storage encryption:
+values are stored in the private `st_env` table, which the database owner can
+read, and module code that returns a secret from a public view or procedure
+exposes it.
+
+## Supplying values
+
+Values are supplied by the publisher, not by module code:
+
+- the `spacetime publish` CLI takes declared keys from its own process
+  environment, then from `spacetime.json` `env`. A shell variable named like a
+  declared key wins even when it is empty, so build the publishing process's
+  environment deliberately;
+- the HTTP publish API takes repeated `spacetime-environment: KEY=VALUE`
+  headers;
+- `spacetime publish --env-only` (or `PATCH /v1/database/:db/environment`)
+  changes values without uploading a module;
+- `--delete-data` deletes stored values along with the data, so a reset publish
+  must supply the required values again.
+
+See the [upstream guide](https://spacetimedb.com/docs/databases/environment-variables)
+for precedence, `--unset-env` and `--replace-env`.
+
+### Dev servers
+
+`makeDevServer` publishes with an `environment`. The CLI it runs receives
+exactly those values: its environment is built from scratch, never inherited,
+and it runs with `--no-config`, so no `spacetime.json` above the working
+directory contributes values either. Pass secrets as `Redacted` so command
+diagnostics print `<redacted>` in their place.
+
+The CLI still needs a few process variables to run, listed in
+`environmentKeysReserved`: `PATH`, `HOME`, `TMPDIR`, `TEMP`, `TMP`,
+`SystemRoot`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `LD_LIBRARY_PATH` and
+`SPACETIMEDB_SCHEMA_EXTRACTOR`. The CLI starts its schema extractor with an
+empty environment, so an extractor that needs `LD_LIBRARY_PATH` to load is
+named through `SPACETIMEDB_SCHEMA_EXTRACTOR` (a wrapper that sets the path and
+runs `spacetimedb-standalone`). Because the CLI publishes any process variable
+named like a declared key, the dev server refuses, before publishing anything,
+a supplied value or a module declaration that uses one of these names
+(compared case-insensitively) with `DevServerReservedEnvironmentKeyError`. It
+reads the bundle's declarations with the same `extract-schema` step the CLI
+uses. The variables come from `processEnvironment` (default: `process.env`),
+not from the ambient `ConfigProvider`.
+
+```ts
+const runtime = yield* makeDevServer({
+  bundlePath: "dist/bundle.js",
+  dbNamePrefix: "app",
+  environment: {
+    API_KEY: Redacted.make(apiKey),
+    MODE: "development",
+  },
+})
+
+// Environment-only update: no module upload, no init or migration.
+yield* runtime.updateEnvironment({ LOG_LEVEL: "debug" })
+yield* runtime.updateEnvironment({}, { unset: ["LOG_LEVEL"] })
+
+// A plain republish keeps the stored values and supplies only its own.
+yield* runtime.republish("dist/bundle.js", { environment: { MODE: "production" } })
+```
+
+The CLI forwards only keys the bundle being published declares, so the dev
+server refuses a supplied key the bundle does not declare
+(`DevServerEnvironmentValueError` with reason `keyNotDeclared`) rather than
+letting its value vanish. A republish or `reset` that clears data resupplies
+the values the runtime has published so far, dropping any the new bundle no
+longer declares. Before every publish the dev server also checks the values
+against the bundle's declarations the way the host will: required keys
+present, literals inside their declared sets, at most 8 KiB per value and 256
+values. A refusal publishes nothing.
+
+`updateEnvironment` has no bundle to read, so it cannot run these checks: the
+CLI fetches the deployed module's declarations itself and silently drops an
+undeclared key, while the host still refuses a bad value for a declared one.
+
+`reset` (`runtime.reset({ environment })` replaces the values) is one clearing
+publish, which the host turns into its own reset: it builds the bundle and runs
+`init` with the replacement values before it deletes anything, and keeps the
+database's identity. If `init` or anything else refuses, the database and its
+stored values stay as they were, and the runtime keeps tracking the old values.
+A refused update leaves the stored values unchanged.
+
+## Testing
+
+The module test harness takes values the way a publish does, and refuses an
+environment the host would refuse with `TestModuleEnvironmentError`:
+
+```ts
+const harness = StdbTesting.makeTestModuleHarness(Module.spec, {
+  environment: { API_KEY: "test-key", MODE: "development" },
+})
+
+harness.updateEnvironment({ LOG_LEVEL: "debug" }) // the next call reads it
+```
+
+Every harness context carries the harness's reader as `ctx.env`. Off-host code
+that calls the SDK's own `env_get` can be backed by the same values with
+`StdbTesting.SpacetimeSysStub.withEnvironment(harness.environment, body)` for a
+synchronous body, or `withEnvironmentAsync` for one that awaits; outside such a
+scope the stub refuses, like every other host call.
+
+## Not supported
+
+Only a root module can declare an environment. The contract DSL does not model
+upstream submodules, which cannot declare one either.
 
 
 ---
@@ -866,9 +1279,9 @@ Effect `HttpApi` client:
 
 ```typescript twoslash
 import * as Effect from "effect/Effect"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as Stdb from "effect-spacetimedb"
 
 declare const uri: string
@@ -902,7 +1315,12 @@ const UserRoutes = Stdb.StdbHttpGroup.make("UserRoutes").add(
 
 const Module = Stdb.StdbModule.make("app").add(Users).add(UserRoutes)
 const Example = Stdb.project(Module)
-const rpcClient = Example.client.http.make({ uri, databaseName, token })
+const rpcClient = Example.client.http.make({
+  uri,
+  databaseName,
+  token,
+  callDurationMax: "10 seconds",
+})
 
 const requireUser = rpcClient.reducers.user_require({ userId }).pipe(
   Effect.catchTag("AppUserMissing", (error) =>
@@ -1042,9 +1460,9 @@ and the route name becomes the typed endpoint method.
 
 ```typescript twoslash
 import * as Effect from "effect/Effect"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as Stdb from "effect-spacetimedb"
 
 declare const uri: string
@@ -1080,6 +1498,343 @@ const program = Effect.gen(function* () {
   return response.token
 })
 ```
+
+
+---
+
+# Source: /core-concepts/functions/inter-database-calls
+
+---
+draft: false
+title: Inter-Database Calls
+description: Call another database's reducers through outbox tables, receivers and settle reducers.
+sidebar:
+  order: 6
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/cli-reference/spacetime-json#receiver-dependencies" target="_blank" rel="noopener noreferrer">SpacetimeDB: Receiver dependencies ↗</a>
+
+SpacetimeDB 2.14 lets one database call a reducer of another. The calling
+database inserts a row into an **outbox table**; once that transaction commits,
+the host delivers the row as one call to the **receiver** reducer it is bound to,
+then runs the caller's **settle reducer** with the outcome. effect-spacetimedb
+declares all three in the contract, checks the rules SpacetimeDB leaves to you,
+and generates the binding the caller compiles against with native codegen.
+
+The pieces, using the `examples/idc-pair` modules from the repository:
+
+| Piece | Declared with | Lives in |
+| --- | --- | --- |
+| Interface | a group of `Stdb.StdbFn.receiver(...)` | a package both sides import |
+| Receiver binding | `generateReceiverArtifact` (`effect-spacetimedb/codegen`) | committed next to the caller, bound in its module entry |
+| Inbox | `Stdb.StdbBuilder.group(...)` with a guard | the receiving module |
+| Outbox | `Stdb.outboxTable(...)` | the calling module |
+| Settle reducer | `Stdb.StdbFn.outboxResult(...)` | the calling module |
+
+## Interface
+
+An interface is a group whose endpoints are all receivers. Its declared errors
+are how the receiver refuses a call.
+
+```ts
+export const IdcPairInbox = Stdb.StdbGroup.make("IdcPairInbox", {
+  errors: Stdb.errors(IdcPairUnknownSender, IdcPairBlankNote),
+}).add(
+  Stdb.StdbFn.receiver("receiveNote", {
+    params: Stdb.struct({ note: Stdb.string() }),
+  }),
+)
+```
+
+A call names its receiver and carries a signature hash of the receiver's
+parameter names and types; the host refuses a call whose hash differs. Both
+must survive either module's case policy, so validation refuses a receiver
+unless:
+
+- its wire name is `snakeCase(key)` (`receive_note` here), whatever the
+  module's policy;
+- every parameter, field and variant name reachable from its params is one
+  lowercase word (`^[a-z][a-z0-9]*$`), and no parameter is named `msgId`,
+  `target` or `enqueuedAt`, which the outbox row reserves;
+- it is client-callable and neither scheduled nor a lifecycle hook.
+
+A changed signature is a new receiver: keep the old one until every caller has
+moved.
+
+## Receiver binding
+
+The caller compiles against a binding that native
+`spacetime generate --bindings module` writes from the receiver's bundle. Native
+codegen writes every client-callable reducer of the bundle into it, so generate
+it from an **interface fixture**: a module entry that composes only the
+interface group.
+
+```ts
+import { generateReceiverArtifact } from "effect-spacetimedb/codegen"
+
+yield* generateReceiverArtifact({
+  interfaceName: "pair_inbox",
+  receiverBundlePath: ".tmp/pair-inbox/receiver.js",
+  stagingDir: ".tmp/pair-inbox/staging",
+  artifactDir: "src/remote/pair_inbox",
+  spacetimeCommand: ["spacetime"],
+})
+```
+
+The artifact is quarantined like a generated client: `index.js` is the native
+output bundled verbatim, `index.d.ts` declares its default export as a
+`RemoteModuleBinding` with one `RemoteReducerBinding` per receiver, and both
+start with a banner recording the CLI and esbuild versions. The native module
+names its types through SDK internals that no declaration file can carry into a
+consumer, which is why the declaration is structural. `interfaceName` namespaces
+the binding's type names, so use the interface's own name.
+`checkReceiverArtifact(target)` regenerates the binding and fails with
+`ArtifactDriftError` when the committed one differs, including after a
+toolchain bump; run it wherever you check generated clients.
+
+Name the group as an interface once, in the package both sides import:
+
+```ts
+export const PairInboxInterface = Stdb.RemoteInterface.make({
+  name: "pair_inbox",
+  group: IdcPairInbox,
+})
+```
+
+`RemoteInterface.make` throws `StdbValidationError` (`InvalidRemoteInterface`)
+at load when an endpoint of the group is not a receiver or the name is not a
+SpacetimeDB identifier.
+
+A package that emits declarations annotates the exported group with
+`Stdb.StdbGroup<...>` and the interface with
+`Stdb.RemoteInterfaceOf<"pair_inbox", typeof IdcPairInbox>`: their inferred
+types are built from internal helpers that a consumer's declaration emit
+cannot name.
+
+The interface carries no binding, so neither does a contract that declares an
+outbox against it. A generated binding imports `spacetimedb/server`, which
+loads only inside a SpacetimeDB host, while a module's contract is also
+imported by workers, browsers, CLIs and tests: a bundler cannot resolve the
+host's `spacetime:sys` import, and a plain runtime fails to load it. The calling
+module therefore pairs each interface with its binding in its module entry, the
+one file only the host runs, and passes the pairs to `build` from
+`effect-spacetimedb/server-compiler`, the entrypoint that already keeps
+host-only code apart:
+
+```ts
+import pairInboxBinding from "./remote/pair_inbox/index.js"
+
+const compiled = build(
+  IdcPairSenderModule,
+  [IdcPairSendsLive, IdcPairSettlesLive],
+  {
+    runtimeMode: "dev-guarded",
+    receiverBindings: [
+      Stdb.RemoteInterface.bind(PairInboxInterface, pairInboxBinding),
+    ],
+  },
+)
+```
+
+`RemoteInterface.bind` throws `StdbValidationError`
+(`RemoteInterfaceBindingMismatch`) at load when the binding no longer carries a
+receiver of the interface under its wire name with its parameters in order, and
+a receiver missing from the binding's declaration is a type error. `build`
+refuses a module with an outbox whose interface has no binding
+(`OutboxReceiverBindingMissing`) or an interface bound twice
+(`DuplicateReceiverBinding`); a binding no outbox uses is accepted.
+`StdbBuilder.plan` and the test harness never read a binding.
+
+## Inbox
+
+The receiving module adds the group like any other and implements it. A group
+implementing a receiver must declare a guard as its `middleware.reducers`;
+`StdbBuilder.group` throws `StdbValidationError` (`ReceiverWithoutGuard`)
+otherwise.
+
+```ts
+export const requireTrustedSender = Effect.gen(function* () {
+  const ctx = yield* ReducerCtx
+  const env = yield* Env
+  const trusted = yield* env.IDC_PAIR_TRUSTED_SENDER
+  const caller = StdbServer.databaseCaller(ctx)
+  if (
+    trusted === undefined ||
+    Option.isNone(caller) ||
+    !Stdb.identityEquals(caller.value, trusted)
+  ) {
+    return yield* IdcPairUnknownSender.make()
+  }
+})
+
+export const IdcPairInboxLive = Stdb.StdbBuilder.group(
+  IdcPairReceiverModule,
+  "IdcPairInbox",
+  {
+    receiveNote: Effect.fn(function* ({ note }) {
+      if (note.trim().length === 0) {
+        return yield* IdcPairBlankNote.make()
+      }
+      const ctx = yield* ReducerCtx
+      const db = yield* Db
+      yield* db.receivedNote.insert({ id: 0n, sender: ctx.sender, note })
+    }),
+  },
+  { middleware: { reducers: requireTrustedSender } },
+)
+```
+
+`StdbServer.databaseCaller(ctx)` is the calling database's identity, which its
+host signs, when the call is an inter-database delivery, and `None` for every
+other caller. Take peers from configuration or your own registry rows, never
+from a call argument.
+
+A receiver refuses by failing with a declared error. The refusal is final: the
+host rolls the receiver back, settles the row as `Refused` with the encoded
+error, and moves on to the stream's next row. Every delivery also runs your
+`clientConnected` hook, as a caller with no JWT; a hook that refuses it makes
+the host retry that row until the hook admits it, so admit the databases you
+expect.
+
+## Outbox
+
+An outbox table is bound to one receiver of one interface. Its row is the
+call: `msgId` (`u64`, primary key, auto-increment), `target` (the receiving
+database), the receiver's parameters as the binding defines them, any local
+columns you add (stored, never sent), and `enqueuedAt`. It has a `byTarget`
+index over `[target, msgId]`, is always private, and states its encoded size
+bound.
+
+```ts
+export const noteOutbox = Stdb.outboxTable("noteOutbox", {
+  interface: PairInboxInterface,
+  reducer: "receiveNote",
+  rowBytesMax: 4 * 1024,
+})
+```
+
+`rowBytesMax` defaults to `Stdb.outboxRowBytesMaxDefault` (64 KiB) and may not
+exceed `Stdb.outboxRowBytesMaxCeiling` (1 MiB), half of the 2 MiB request body
+a standalone host accepts: a row over that limit can never be delivered and
+would block its stream. Send ids and digests, never blobs.
+
+The insert is the send. The handle fills `msgId` and `enqueuedAt`, and its
+error channel carries `OutboxRowTooLarge` for a row over the bound, which your
+handler must handle: drop the call, or refuse its own caller with an error it
+declares.
+
+```ts
+export const resolveReceiver = Effect.gen(function* () {
+  const env = yield* Env
+  const hex = yield* env.IDC_PAIR_RECEIVER
+  return Stdb.RemoteInterface.peer(PairInboxInterface, new Identity(hex))
+})
+
+sendNote: Effect.fn(function* ({ note }) {
+  const target = yield* resolveReceiver
+  const db = yield* Db
+  yield* db.noteOutbox.insert({ target, note }).pipe(
+    Effect.catchTag("OutboxRowTooLarge", (tooLarge) =>
+      Effect.fail(IdcPairNoteTooLarge.make({ rowBytes: tooLarge.rowBytes })),
+    ),
+  )
+})
+```
+
+`target` is a `PeerIdentity` of the interface, which only
+`RemoteInterface.peer` mints; call it from the module's peer resolver. The
+handle is insert-only (plus `iter`, `count` and the read-only `byTarget`), and
+it dies with `OutboxSelfTargetDefect` on a row addressed to the database itself.
+Insert only in reducers, scheduled reducers, settle reducers and procedure
+`withTx` blocks: an HTTP handler's transaction dies with
+`OutboxSendOutsideMutationDefect`, and views have no insert.
+
+## Settle reducer
+
+Each outbox has exactly one settle reducer. It receives the row and an
+`OutboxResult`: `Delivered` when the receiver committed, `Refused` with the
+receiver's failure text otherwise. Transport failures never settle; the host
+retries them.
+
+```ts
+export const IdcPairSettles = Stdb.StdbGroup.make("IdcPairSettles").add(
+  Stdb.StdbFn.outboxResult("noteSettled", { table: noteOutbox }),
+)
+
+noteSettled: ({ row, result }) =>
+  Effect.gen(function* () {
+    const db = yield* Db
+    yield* db.noteDelivery.insert({
+      msgId: row.msgId,
+      note: row.note,
+      ...StdbServer.OutboxResult.$match(result, {
+        Delivered: () => ({ delivered: true, message: "" }),
+        Refused: ({ message }) => ({ delivered: false, message }),
+      }),
+    })
+  }).pipe(Effect.orDie)
+```
+
+A settle handler's error type is `never`: the host does not retry a failed
+settle, so its outcome would be lost. Handle what can fail, and let a bug die;
+the host rolls the settle back and still deletes the row. The host runs it as
+the zero identity, and the compiled module refuses any other caller, the owner
+included, so nobody can forge an outcome. A settle reducer can share a group
+with player-facing reducers: the group's `middleware.reducers` does not run
+for it, since that middleware would refuse the host.
+
+## Delivery
+
+| What SpacetimeDB 2.14 does | What it means for your modules |
+| --- | --- |
+| Delivers each row exactly once, in order per outbox and target, after the sending transaction is durable | A rolled-back transaction sends nothing. Rows of different outboxes, or to different targets, may arrive in any order |
+| Retries transport failures without end; there is no dead letter | An unreachable target, a refusing connection hook or an oversized row holds its stream's later rows forever |
+| Posts deliveries to `http://localhost:<port>` | Caller and receiver must share one host. A proxy set through `HTTP_PROXY` must exempt `localhost` |
+| Keeps each side's stream state with its database | Reset connected databases together. A database keeps its identity through `--delete-data`, and a deleted database republished under its name gets it back, so a stream reset on one side only meets stale state on the other |
+
+The database owner can read the host's stream bookkeeping over SQL:
+`st_outbound_msg` holds each undelivered row's `retry_count` and
+`last_transport_error`, which is how to tell a stuck stream from a slow one.
+
+## Testing
+
+`StdbTesting.makeIdcPump` delivers rows between module harnesses in memory, one
+stream at a time, the way the host does: the receiver runs as the calling
+database with no JWT, a failure settles `Refused`, the settle runs as the zero
+identity and the row is deleted. Tests choose every interleaving explicitly.
+
+```ts
+const pump = StdbTesting.makeIdcPump({
+  links: [{ sender, receivers: [receiver] }],
+})
+pump.deliverNext("noteOutbox") // the head row of one stream
+pump.drain({ deliveriesMax: 100 })
+```
+
+`IdcPump.recording({ databaseIdentity })` stands in for a receiver you do not
+run, and records each call.
+
+For real delivery, publish both modules to one dev server. The runtime is its
+first database, `publishDatabase` adds others on the same standalone, and every
+database exposes the `databaseIdentity` its peers need:
+
+```ts
+const receiver = yield* makeDevServer({
+  bundlePath: "receiver/dist/bundle.js",
+  dbNamePrefix: "receiver",
+})
+const sender = yield* receiver.publishDatabase({
+  bundlePath: "sender/dist/bundle.js",
+  databaseName: "sender",
+  environment: { IDC_PAIR_RECEIVER: receiver.databaseIdentity },
+})
+yield* receiver.updateEnvironment({
+  IDC_PAIR_TRUSTED_SENDER: sender.databaseIdentity,
+})
+```
+
+The dev server adds `localhost` to every standalone's `NO_PROXY` unless your
+`standaloneEnvironment` sets it.
 
 
 ---
@@ -1547,7 +2302,7 @@ const user = Stdb.table("user", {
 
 const Users = Stdb.StdbGroup.make("Users")
   .add(Stdb.StdbFn.view("self_user", { returns: Stdb.option(user.row) }))
-  .add(Stdb.StdbFn.anonymousView("all_users", { returns: Stdb.array(user.row) }))
+  .add(Stdb.StdbFn.anonymousView("all_users", { returns: Stdb.array(user.row, { minimum: 0, maximum: 1_000 }) }))
 
 const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
 const { ReadonlyDb, ViewCtx } = Module
@@ -1568,6 +2323,73 @@ const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
 Views are read-only Effect handlers. Sender views may yield
 `ViewCtx`; anonymous views may yield `AnonymousViewCtx`. Both may yield
 `ReadonlyDb` and `From`.
+
+## Views with arguments
+
+A view may declare `params`, a struct of named arguments, like a reducer. The
+handler receives them decoded, and the host computes one answer per distinct
+argument tuple: an anonymous view's answer is shared by every caller passing
+the same arguments, a sender view's is per caller.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const post = Stdb.table("post", {
+  public: true,
+  columns: {
+    id: Stdb.string().primaryKey(),
+    authorId: Stdb.string(),
+    title: Stdb.string(),
+  },
+  indexes: (columns) => [Stdb.index("byAuthor", [columns.authorId])],
+})
+
+const Posts = Stdb.StdbGroup.make("Posts").add(
+  Stdb.StdbFn.anonymousView("postsByAuthor", {
+    params: Stdb.struct({ authorId: Stdb.string() }),
+    returns: Stdb.array(post.row, { minimum: 0, maximum: 1_000 }),
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").addTables(post).add(Posts)
+const { ReadonlyDb } = Module
+
+const PostsLive = Stdb.StdbBuilder.group(Module, "Posts", {
+  postsByAuthor: Effect.fn(function* ({ authorId }) {
+    const db = yield* ReadonlyDb
+    return yield* db.post.byAuthor.filterToArray(authorId)
+  }),
+})
+```
+
+A client subscribes to a call. The projected target is a function of the
+arguments, and the WebSocket session's `viewGroup`, `streamViewRows` and
+`waitUntilView` take them under `args`, required exactly when a view has
+params:
+
+```typescript
+session.viewGroup(["postsByAuthor"] as const, {
+  args: { postsByAuthor: { authorId: "ada" } },
+})
+```
+
+The session sends `SELECT * FROM "posts_by_author"('ada')`: SpacetimeDB runs no
+other query on a view with arguments, and the SDK's query builder cannot call
+one. What SpacetimeDB 2.13 allows:
+
+- A param is a `bool`, an integer, a `string`, an `identity`, a
+  `connectionId` or a `uuid`. Floats, options, structs, sums and literal
+  unions fail validation with `UnsupportedViewParam`; timestamps and byte
+  arrays, which SpacetimeDB accepts, are not supported here yet.
+- The returned rows carry no primary key, so a changed row arrives as a
+  delete and an insert.
+- Every call a connection holds answers into the view's one client cache, so
+  two calls of one view leave the union of their rows there. Return the
+  columns that carry the arguments when you subscribe to more than one call.
+- Arguments are positional, in the order the params struct declares its
+  fields. Reordering a view's params changes what an older client's call
+  means, so treat it as a breaking change to the view.
 
 
 ---
@@ -2380,21 +3202,21 @@ then build native module exports and generated clients from the same contract.
   <TabItem label="npm">
 
     ```sh
-    npm install effect-spacetimedb effect@4.0.0-rc.117 spacetimedb@2.10.1
+    npm install effect-spacetimedb effect@4.1.1 spacetimedb@2.14.0
     ```
 
   </TabItem>
   <TabItem label="pnpm">
 
     ```sh
-    pnpm add effect-spacetimedb effect@4.0.0-rc.117 spacetimedb@2.10.1
+    pnpm add effect-spacetimedb effect@4.1.1 spacetimedb@2.14.0
     ```
 
   </TabItem>
   <TabItem label="bun">
 
     ```sh
-    bun add effect-spacetimedb effect@4.0.0-rc.117 spacetimedb@2.10.1
+    bun add effect-spacetimedb effect@4.1.1 spacetimedb@2.14.0
     ```
 
   </TabItem>
@@ -2414,6 +3236,35 @@ If several CLI versions are installed, make sure the matching `spacetime` is the
 one on your `PATH`, or invoke it by full path in your build scripts.
 
 :::
+
+### Patch the SDK
+
+The published `spacetimedb` 2.14.0 package has three defects that an install
+does not fix: `Prettify` turns branded primitives into object types
+([upstream fix](https://github.com/clockworklabs/SpacetimeDB/pull/5971), merged
+but not yet released), the client `TableCache` compares ranges over
+`Identity`, `Timestamp` and other object-backed keys by wrapper rather than
+value ([open PR](https://github.com/clockworklabs/SpacetimeDB/pull/5970)), and
+a non-unique index whose columns are a strict subset of a unique constraint
+loses its range methods
+([open PR](https://github.com/clockworklabs/SpacetimeDB/pull/5969)).
+
+Copy
+[`patches/spacetimedb@2.14.0.patch`](https://github.com/miragegame/effect-spacetimedb/blob/main/patches/spacetimedb@2.14.0.patch)
+into your project. Its paths are relative to the `spacetimedb` package root, so
+Bun applies it from your root `package.json`, and pnpm from the same entry
+under `pnpm.patchedDependencies` or in `pnpm-workspace.yaml`:
+
+```json
+{
+  "patchedDependencies": {
+    "spacetimedb@2.14.0": "patches/spacetimedb@2.14.0.patch"
+  }
+}
+```
+
+Other package managers need their own patch mechanism. Apply it wherever the
+SDK is installed, module and client packages alike.
 
 ## Minimal Module
 
@@ -2601,11 +3452,11 @@ hand-written; there is no generated API reference.
 | `effect-spacetimedb` | Contract builders, value types, tables, declared errors, module assembly, builder APIs, and client projection. |
 | `effect-spacetimedb/client` | WebSocket generated-client adapters and client transport helpers. |
 | `effect-spacetimedb/client/atom` | Effect Atom bindings for React consumers; needs the optional `@effect/atom-react` and `react` peers. |
-| `effect-spacetimedb/codegen` | Quarantined client generation: runs the native generator and emits an erased artifact. |
+| `effect-spacetimedb/codegen` | Quarantined generation: runs the native generator and emits an erased client artifact (`generateArtifact`) or receiver binding (`generateReceiverArtifact`), each with a drift check. |
 | `effect-spacetimedb/server` | Advanced server primitives for integrations that bypass normal builder flow. |
 | `effect-spacetimedb/server-compiler` | Host-only compiler entrypoint for module entries; import `build` from here. |
-| `effect-spacetimedb/server-polyfills` | Standalone side-effect import for host compatibility shims; normal module entries get these through `server-compiler`. |
-| `effect-spacetimedb/dev-server` | Programmatic local `spacetimedb-standalone` orchestration for tests and tools that publish a prebuilt bundle. |
+| `effect-spacetimedb/server-polyfills` | Side-effect import for host compatibility shims; normal module entries get these through `server-compiler`, and an entry that loads Effect's HTTP or encoding modules first imports it first. |
+| `effect-spacetimedb/dev-server` | Programmatic local `spacetimedb-standalone` orchestration for tests and tools that publish prebuilt bundles, one database or several on one standalone. |
 | `effect-spacetimedb/testing` | Test-oriented helpers, package-local fixtures, and the `spacetimeSysAlias` preset for off-host server imports. |
 | `effect-spacetimedb/testing/spacetime-sys` | Direct `spacetime:sys` host-surface stub for off-host module imports. |
 
@@ -2622,6 +3473,7 @@ sessions, `effect-spacetimedb/client`.
 | HTTP handler | `HttpTx`, `HttpHandlerCtx` |
 | sender view | `ReadonlyDb`, `From`, `ViewCtx` |
 | anonymous view | `ReadonlyDb`, `From`, `AnonymousViewCtx` |
+| every scope above, once the module declares an environment | `Env` |
 
 Use `MutationCtx` for helpers that must run in both reducers and transaction
 bodies. Do not yield accessors from another module.
@@ -2645,7 +3497,7 @@ bodies. Do not yield accessors from another module.
 | `Stdb.option(T)` | Nullable value type, decoded as `T` or `undefined`. |
 | `Stdb.optional(T)` | Optional struct field annotation. |
 | `T.optional()` | Optional table column annotation. |
-| `Stdb.array(T)` | SATS array/list. |
+| `Stdb.array(T, { minimum, maximum })` | SATS array/list with required inclusive length bounds (enforced by the codecs, not on the wire). |
 | `Stdb.struct({...})` | Named object shape for params, rows, returns, and errors. |
 | `Stdb.sum({...})` | Tagged union with payload variants; key- and index-capable, never auto-increment. |
 | `T.named("Name")` | Set the generated SATS/client type name for an anonymous struct, sum, or string-literal enum; the default name is content-addressed. |
@@ -2674,6 +3526,7 @@ TypeScript values, SATS lowering, bounds, and transport encoding notes.
 | `Stdb.project(Module)` | Build client projections, targets, and generated-client adapters. |
 | `Stdb.toHttpApi(Module)` / `httpApiBaseUrl(...)` | Project typed HTTP routes into Effect `HttpApi`. |
 | `Stdb.ScheduleAt.*` | Build scheduled table `scheduledAt` values. |
+| `Stdb.Environment.*` | Declare typed database environment keys for `StdbModule.make(id, { environment })`. |
 | `Stdb.validate(...)` / `assertValid(...)` / `formatModuleDiagnostics(...)` | Run module validation manually. |
 
 Builder impl values are sealed. `GroupImpl<Name, RuntimeR, ModuleName>` and
@@ -2733,7 +3586,9 @@ Only Effect failures are encoded as declared errors. Defects remain defects.
 | `CallFailure<E>` / `RawCallFailure<E>` | Projected client call failure unions. |
 | `RemoteRejectedError` / `TransportError` / `DomainCallError<E>` | Projected client remote, transport, and raw declared-error failures. |
 | `WsConnectError` / `WsConnectTimeoutError` | WebSocket acquisition failed, or did not complete in time. |
-| `ConnectionLostError` | An established session was invalidated; the call's outcome is unknown. |
+| `ConnectionLostError` | An established connection was lost while the call was in flight, or the session had ended; the call's outcome is unknown. |
+| `CallNotSentError` | Automatic reconnect: the call was refused unsent while the session reconnected. |
+| `ConnectionIdentityChangedError` | Automatic reconnect: a reconnect changed the identity and ended the session. |
 | `GeneratedArtifactShapeError` | The generated client is missing relations the contract declares. |
 
 
@@ -2750,7 +3605,7 @@ sidebar:
 ---
 
 This map tracks the SpacetimeDB Core Concepts taxonomy against these docs, as of
-SpacetimeDB 2.10.1. Every upstream topic has exactly one row.
+SpacetimeDB 2.14.0. Every upstream topic has exactly one row.
 
 | Upstream Core Concept topic | Upstream link | Our status | Our page / note |
 | --- | --- | --- | --- |
@@ -2762,6 +3617,7 @@ SpacetimeDB 2.10.1. Every upstream topic has exactly one row.
 | Databases / Cheat Sheet | [SpacetimeDB -> Cheat Sheet](https://spacetimedb.com/docs/databases/cheat-sheet) | mirrored | Covered by [Getting Started](/getting-started) and [Reference](/reference); no separate Effect delta. |
 | Databases / Migrations / Automatic Migrations | [SpacetimeDB -> Automatic Migrations](https://spacetimedb.com/docs/databases/automatic-migrations) | mirrored | [Migrations](/core-concepts/databases/migrations) |
 | Databases / Migrations / Incremental Migrations | [SpacetimeDB -> Incremental Migrations](https://spacetimedb.com/docs/databases/incremental-migrations) | mirrored | [Migrations](/core-concepts/databases/migrations) |
+| Databases / Environment Variables | [SpacetimeDB -> Environment Variables](https://spacetimedb.com/docs/databases/environment-variables) | mirrored | [Environment Variables](/core-concepts/databases/environment-variables); declarations are typed contract members, reads are per-call `Env` effects, secrets read back `Redacted`. |
 | Databases / Submodules | [SpacetimeDB -> Submodules](https://spacetimedb.com/docs/submodules) | not covered | Upstream 2.8.0 lets a TypeScript module mount another module under a namespace (`schema({ tbl, lib })`, `ctx.db.<ns>`, `ctx.as.<ns>`). The contract DSL does not expose it yet; the runtime tolerates the SDK's always-present namespaces. |
 | Functions | [SpacetimeDB -> Functions](https://spacetimedb.com/docs/functions) | mirrored | Section root represented by the Functions sidebar group. |
 | Functions / Reducers | [SpacetimeDB -> Reducers](https://spacetimedb.com/docs/functions/reducers) | mirrored | [Reducers](/core-concepts/functions/reducers) |
@@ -2769,8 +3625,9 @@ SpacetimeDB 2.10.1. Every upstream topic has exactly one row.
 | Functions / Reducers / Lifecycle | [SpacetimeDB -> Lifecycle](https://spacetimedb.com/docs/functions/reducers/lifecycle) | mirrored | [Lifecycle](/core-concepts/functions/lifecycle) |
 | Functions / Reducers / Error Handling | [SpacetimeDB -> Error Handling](https://spacetimedb.com/docs/functions/reducers/error-handling) | mirrored | [Error Handling](/core-concepts/functions/error-handling) |
 | Functions / Procedures | [SpacetimeDB -> Procedures](https://spacetimedb.com/docs/functions/procedures) | mirrored | [Procedures](/core-concepts/functions/procedures) |
-| Functions / Views | [SpacetimeDB -> Views](https://spacetimedb.com/docs/functions/views) | mirrored | [Views](/core-concepts/functions/views) |
+| Functions / Views | [SpacetimeDB -> Views](https://spacetimedb.com/docs/functions/views) | mirrored | [Views](/core-concepts/functions/views), including views with parameters (SpacetimeDB 2.13): params are a struct, and a client subscribes to one call per argument tuple. |
 | Functions / HTTP Handlers | [SpacetimeDB -> HTTP Handlers](https://spacetimedb.com/docs/functions/http-handlers) | mirrored | [HTTP Handlers](/core-concepts/functions/http-handlers) |
+| Functions / Inter-Database Calls | [SpacetimeDB -> Receiver dependencies](https://spacetimedb.com/docs/cli-reference/spacetime-json#receiver-dependencies) | mirrored | [Inter-Database Calls](/core-concepts/functions/inter-database-calls); added in SpacetimeDB 2.14, which documents it only in the CLI reference. Outboxes, guarded receivers and settle reducers are contract members, and receiver bindings come from native module-binding codegen. |
 | Tables | [SpacetimeDB -> Tables](https://spacetimedb.com/docs/tables) | mirrored | Section root represented by the Tables sidebar group. |
 | Tables / Column Types | [SpacetimeDB -> Column Types](https://spacetimedb.com/docs/tables/column-types) | mirrored | [Column Types](/core-concepts/tables/column-types) |
 | Tables / File Storage | [SpacetimeDB -> File Storage](https://spacetimedb.com/docs/tables/file-storage) | mirrored | [File Storage](/core-concepts/tables/file-storage) |
@@ -3036,6 +3893,18 @@ const ids = Effect.gen(function* () {
   }
 })
 ```
+
+:::caution
+
+These helpers are not unique across transactions. SpaceTimeDB 2.14 seeds each
+call's random stream from that call's timestamp alone and restarts the UUID v7
+counter, so two transactions the host gives the same timestamp draw the same
+UUIDs, and the 32-bit seed makes repeats likely between nearby timestamps too.
+A key inserted from them can fail as a duplicate under concurrent calls. When an
+identifier must be unique across transactions, mix in state the module owns,
+such as a counter row that every mint reads and advances in its transaction.
+
+:::
 
 ## Runtime Wiring
 
@@ -3446,8 +4315,8 @@ integers beyond `Number.MAX_SAFE_INTEGER` are rejected.
 
 If the union is a core shared domain schema also consumed by HTTP DTOs, keep
 `Stdb.custom(CoreSchema, { type: <string scalar> })` so the values have one
-source of truth. A lint rule enforces that custom inline literals do not replace
-`Stdb.literal(...)` for local SATS-only unions.
+source of truth. For a union that exists only in your module, use
+`Stdb.literal(...)` rather than an inline custom literal.
 
 ## Optional Fields
 
@@ -3541,7 +4410,7 @@ stay a `bigint`.
 
 | Helper | Authored TypeScript value | SATS lowering | Notes |
 | --- | --- | --- | --- |
-| `Stdb.array(T)` | `ReadonlyArray<TypeOf<T>>` | array/list | Recurses through the inner value type. |
+| `Stdb.array(T, { minimum, maximum })` | `ReadonlyArray<TypeOf<T>>` | array/list | Recurses through the inner value type. The inclusive length bounds are required and enforced on decode and encode; they never reach the wire, so arrays differing only in bounds lower identically. |
 | `Stdb.option(T)` | `TypeOf<T>` or `undefined` | `option<T>` | Present field whose value can be absent. |
 | `Stdb.optional(T)` | optional struct field | `option<T>` in structs | Produces an optional TypeScript property. |
 | `T.optional()` | optional table column | `option<T>` column | Column may be omitted on inserts. |

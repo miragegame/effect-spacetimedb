@@ -1,4 +1,3 @@
-
 import type { BinaryWriter } from "spacetimedb"
 import type {
   HttpHandlerExport,
@@ -19,6 +18,7 @@ import type {
   ServerAnonymousViewCtx,
   ServerConnectionId,
   ServerDatabaseIdentity,
+  ServerEnvironmentReader,
   ServerHttpHandlerCtx,
   ServerIdentity,
   ServerProcedureCtx,
@@ -76,12 +76,25 @@ export type CompilerScheduleOptions = {
   readonly onSchedule: unknown
 }
 
+/**
+ * Function-side reducer options. `name` pins the canonical name the host
+ * records, whatever the module's case policy (a receiver's binding calls it by
+ * that name); `onResult` makes the reducer the settle reducer of the outbox
+ * table handle `schema()` registered. Upstream refuses `onSchedule` together
+ * with `onResult`.
+ */
+export type CompilerReducerOptions = {
+  readonly name?: string
+  readonly onSchedule?: unknown
+  readonly onResult?: unknown
+}
+
 export type CompilerSchemaBridge = {
   readonly reducer: (
     ...args:
       | [params: unknown, handler: (ctx: unknown, rawArgs: unknown) => void]
       | [
-          options: CompilerScheduleOptions,
+          options: CompilerReducerOptions,
           params: unknown,
           handler: (ctx: unknown, rawArgs: unknown) => void,
         ]
@@ -102,13 +115,15 @@ export type CompilerSchemaBridge = {
   ) => ModuleExport
   readonly view: (
     options: { readonly name: string; readonly public: boolean },
+    params: unknown,
     returnType: unknown,
-    handler: (ctx: unknown) => unknown,
+    handler: (ctx: unknown, rawArgs: unknown) => unknown,
   ) => ModuleExport
   readonly anonymousView: (
     options: { readonly name: string; readonly public: boolean },
+    params: unknown,
     returnType: unknown,
-    handler: (ctx: unknown) => unknown,
+    handler: (ctx: unknown, rawArgs: unknown) => unknown,
   ) => ModuleExport
   readonly httpHandler: (
     handler: (ctx: unknown, req: Request) => SyncResponse,
@@ -121,6 +136,7 @@ export type CompilerSchemaBridge = {
 }
 
 export type CompilerReducerHostCtx = {
+  readonly env: ServerEnvironmentReader
   readonly sender: ServerSender
   readonly databaseIdentity: ServerDatabaseIdentity
   /** @deprecated Use `databaseIdentity` instead. */
@@ -151,6 +167,7 @@ export type CompilerProcedureHostCtx = CompilerCallableHostCtx & {
 }
 
 export type CompilerHttpHandlerHostCtx = {
+  readonly env: ServerEnvironmentReader
   readonly timestamp: ServerTimestamp
   readonly http: CompilerProcedureHostCtx["http"]
   readonly identity: ServerDatabaseIdentity
@@ -192,6 +209,21 @@ export const applyCompilerColumnName = (
 
 export const defineCompilerTable = (options: unknown, row: unknown): unknown =>
   table(options as never, row as never)
+
+/**
+ * An outbox table bound to one reducer of a generated receiver binding. The
+ * row must use the binding's own `identity().target()` builder and parameter
+ * builders; upstream checks both by identity when it builds the outbox.
+ */
+export const defineCompilerOutboxTable = (
+  options: object,
+  row: unknown,
+  receiver: unknown,
+): unknown => table({ ...options, outbox: { receiver } } as never, row as never)
+
+/** The `Result<(), String>` parameter every settle reducer takes. */
+export const compilerOutboxResultType = (): unknown =>
+  t.result(t.unit(), t.string())
 
 export const defineCompilerRow = (
   row: Record<string, unknown>,
@@ -242,23 +274,37 @@ export const defineCompilerReducer = (
   schema: CompilerSchemaBridge,
   params: unknown,
   handler: (ctx: unknown, rawArgs: unknown) => void,
-  onSchedule?: unknown,
+  options: CompilerReducerOptions = {},
 ): ModuleExport =>
-  onSchedule === undefined
+  options.name === undefined &&
+  options.onSchedule === undefined &&
+  options.onResult === undefined
     ? schema.reducer(params as never, handler as never)
-    : schema.reducer({ onSchedule }, params as never, handler as never)
+    : schema.reducer(
+        {
+          ...(options.name === undefined ? {} : { name: options.name }),
+          ...(options.onSchedule === undefined
+            ? {}
+            : { onSchedule: options.onSchedule }),
+          ...(options.onResult === undefined
+            ? {}
+            : { onResult: options.onResult }),
+        },
+        params as never,
+        handler as never,
+      )
 
 export const defineCompilerHostReducer = (
   schema: CompilerSchemaBridge,
   params: unknown,
   handler: (ctx: CompilerReducerHostCtx, rawArgs: unknown) => void,
-  onSchedule?: unknown,
+  options: CompilerReducerOptions = {},
 ): ModuleExport =>
   defineCompilerReducer(
     schema,
     params,
     (ctx, rawArgs) => handler(ctx as CompilerReducerHostCtx, rawArgs),
-    onSchedule,
+    options,
   )
 
 export const defineCompilerProcedure = (
@@ -292,39 +338,55 @@ export const defineCompilerHostProcedure = (
     onSchedule,
   )
 
+// The SDK's view overloads take a params object before the return type; an
+// empty one declares a view without arguments, as the two-argument form does.
 export const defineCompilerView = (
   schema: CompilerSchemaBridge,
   options: { readonly name: string; readonly public: boolean },
+  params: unknown,
   returnType: unknown,
-  handler: (ctx: unknown) => unknown,
-): ModuleExport => schema.view(options, returnType as never, handler as never)
+  handler: (ctx: unknown, rawArgs: unknown) => unknown,
+): ModuleExport =>
+  schema.view(options, params as never, returnType as never, handler as never)
 
 export const defineCompilerHostView = (
   schema: CompilerSchemaBridge,
   options: { readonly name: string; readonly public: boolean },
+  params: unknown,
   returnType: unknown,
-  handler: (ctx: CompilerSenderViewHostCtx) => unknown,
+  handler: (ctx: CompilerSenderViewHostCtx, rawArgs: unknown) => unknown,
 ): ModuleExport =>
-  defineCompilerView(schema, options, returnType, (ctx) =>
-    handler(ctx as CompilerSenderViewHostCtx),
+  defineCompilerView(schema, options, params, returnType, (ctx, rawArgs) =>
+    handler(ctx as CompilerSenderViewHostCtx, rawArgs),
   )
 
 export const defineCompilerAnonymousView = (
   schema: CompilerSchemaBridge,
   options: { readonly name: string; readonly public: boolean },
+  params: unknown,
   returnType: unknown,
-  handler: (ctx: unknown) => unknown,
+  handler: (ctx: unknown, rawArgs: unknown) => unknown,
 ): ModuleExport =>
-  schema.anonymousView(options, returnType as never, handler as never)
+  schema.anonymousView(
+    options,
+    params as never,
+    returnType as never,
+    handler as never,
+  )
 
 export const defineCompilerHostAnonymousView = (
   schema: CompilerSchemaBridge,
   options: { readonly name: string; readonly public: boolean },
+  params: unknown,
   returnType: unknown,
-  handler: (ctx: CompilerAnonymousViewHostCtx) => unknown,
+  handler: (ctx: CompilerAnonymousViewHostCtx, rawArgs: unknown) => unknown,
 ): ModuleExport =>
-  defineCompilerAnonymousView(schema, options, returnType, (ctx) =>
-    handler(ctx as CompilerAnonymousViewHostCtx),
+  defineCompilerAnonymousView(
+    schema,
+    options,
+    params,
+    returnType,
+    (ctx, rawArgs) => handler(ctx as CompilerAnonymousViewHostCtx, rawArgs),
   )
 
 export const defineCompilerHttpHandler = (
@@ -399,6 +461,7 @@ export const toCompilerHttpHandlerCtx = <Module extends AnyModuleSpec>(
   ctx: CompilerHttpHandlerHostCtx,
 ): ServerHttpHandlerCtx<Module> =>
   ({
+    env: ctx.env,
     timestamp: ctx.timestamp,
     http: ctx.http,
     databaseIdentity: ctx.identity,
@@ -418,31 +481,34 @@ export const toCompilerAnonymousViewCtx = <Module extends AnyModuleSpec>(
 ): ServerAnonymousViewCtx<Module> =>
   ctx as unknown as ServerAnonymousViewCtx<Module>
 
-export const invokeCompilerSenderView = <Module extends AnyModuleSpec, Result>(
+export const invokeCompilerSenderView = <
+  Module extends AnyModuleSpec,
+  Result,
+  Args,
+>(
   view: {
     readonly invoke: unknown
   },
   ctx: CompilerSenderViewHostCtx,
+  args: Args,
 ): Result =>
-  (
-    view.invoke as (
-      ctx: ServerSenderViewCtx<Module>,
-      args: Record<string, never>,
-    ) => Result
-  )(toCompilerSenderViewCtx<Module>(ctx), {})
+  (view.invoke as (ctx: ServerSenderViewCtx<Module>, args: Args) => Result)(
+    toCompilerSenderViewCtx<Module>(ctx),
+    args,
+  )
 
 export const invokeCompilerAnonymousView = <
   Module extends AnyModuleSpec,
   Result,
+  Args,
 >(
   view: {
     readonly invoke: unknown
   },
   ctx: CompilerAnonymousViewHostCtx,
+  args: Args,
 ): Result =>
-  (
-    view.invoke as (
-      ctx: ServerAnonymousViewCtx<Module>,
-      args: Record<string, never>,
-    ) => Result
-  )(toCompilerAnonymousViewCtx<Module>(ctx), {})
+  (view.invoke as (ctx: ServerAnonymousViewCtx<Module>, args: Args) => Result)(
+    toCompilerAnonymousViewCtx<Module>(ctx),
+    args,
+  )

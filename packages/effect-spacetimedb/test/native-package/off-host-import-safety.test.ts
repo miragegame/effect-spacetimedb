@@ -1,4 +1,3 @@
-
 import * as os from "node:os"
 import * as path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -50,7 +49,7 @@ const installThrowingRandom = () => {
 const sysStubPlugin = {
   name: "spacetime-sys-stub",
   setup(build: Bun.PluginBuilder) {
-    build.onResolve({ filter: /^spacetime:sys@2\.[01]$/ }, () => ({
+    build.onResolve({ filter: /^spacetime:sys@2\.[012]$/ }, () => ({
       path: spacetimeSysStub,
     }))
   },
@@ -121,7 +120,7 @@ describe("native package import safety", () => {
       ],
       format: "esm",
       target: "bun",
-      external: ["spacetime:sys@2.0", "spacetime:sys@2.1"],
+      external: ["spacetime:sys@2.0", "spacetime:sys@2.1", "spacetime:sys@2.2"],
     })
 
     expect(result.success).toBe(true)

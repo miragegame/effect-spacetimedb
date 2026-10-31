@@ -283,12 +283,74 @@ export const markIntegerNumbers = (body: string): string => {
   return output
 }
 
+/**
+ * Deepest array/object nesting accepted in an HTTP JSON response body. The
+ * limit protects the recursive walks below (`restoreMarkedJson`, value
+ * normalization, schema decode): on Node 24's default V8 stack a recursive
+ * `Stdb.lazy` value overflows them between 450 and 520 JSON levels (measured
+ * 2026-09-27; Bun's larger stack holds to about 2,000), so 128 keeps a margin
+ * of more than three on the smallest engine. It also equals serde_json's
+ * default recursion limit, which SpaceTimeDB applies when it deserializes HTTP
+ * JSON arguments (`serde_json::Deserializer::from_str` in
+ * `crates/core/src/host/mod.rs`), so every value that can be sent back as an
+ * argument can be received. The host serializes responses without that limit,
+ * so a recursive return value deeper than this (a `Stdb.lazy` tree with more
+ * than 64 nodes on one root-to-leaf path: each node is a struct holding an
+ * array) fails with a typed parse error instead of decoding. Every SATS
+ * container (struct, array, option, sum) costs one level; non-recursive schemas
+ * sit an order of magnitude below the limit.
+ */
+export const jsonNestingDepthMax = 128
+
+/**
+ * Whether `body` nests arrays/objects deeper than `depthMax`, counting
+ * brackets outside string literals. It runs before parsing so no recursive
+ * walk ever sees an over-deep value, and it is linear in the body length.
+ * Malformed bodies are left to the parser to reject.
+ */
+export const jsonNestingExceeds = (body: string, depthMax: number): boolean => {
+  let depth = 0
+  let inString = false
+  let escaped = false
+
+  for (let index = 0; index < body.length; index += 1) {
+    const char = body[index]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (char === "\\") {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+    } else if (char === '"') {
+      inString = true
+    } else if (char === "[" || char === "{") {
+      depth += 1
+      if (depth > depthMax) {
+        return true
+      }
+    } else if (char === "]" || char === "}") {
+      depth -= 1
+    }
+  }
+
+  return false
+}
+
 export const parseJsonPreservingIntegers = (
   body: string,
 ): Effect.Effect<unknown, ParseResult.ParseError> =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
-    markIntegerNumbers(body),
-  ).pipe(Effect.map(restoreMarkedJson))
+  jsonNestingExceeds(body, jsonNestingDepthMax)
+    ? Effect.fail(
+        parseFailure(
+          body,
+          `JSON nesting exceeds the maximum depth of ${jsonNestingDepthMax}`,
+        ),
+      )
+    : Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
+        markIntegerNumbers(body),
+      ).pipe(Effect.map(restoreMarkedJson))
 
 export const parseFailure = (
   input: unknown,

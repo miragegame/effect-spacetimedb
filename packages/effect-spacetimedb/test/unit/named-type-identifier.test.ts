@@ -1,4 +1,3 @@
-
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
@@ -12,6 +11,7 @@ import { valueSchemaFromAst } from "../../src/contract/type/schema-from-ast.ts"
 import { compileModule } from "../helpers/compile-module"
 import { TestSyncRunner } from "../helpers/sync-runner"
 import { builderTypeName, typeBuilder } from "../helpers/type-builder"
+import { testArrayLength } from "../helpers/array-bounds"
 
 const T = StdbTesting.ContractType
 
@@ -197,7 +197,7 @@ describe("semantic SATS type identifiers", () => {
       ["bool", () => T.bool()],
       ["timestamp", () => T.timestamp()],
       ["option", () => T.option(T.string())],
-      ["array", () => T.array(T.string())],
+      ["array", () => T.array(T.string(), testArrayLength)],
       ["unit", () => T.unit()],
       ["lazy", () => T.lazy(() => T.struct({ id: T.string() }))],
       ["custom", () => T.custom(Schema.String, { type: T.string() })],

@@ -20,6 +20,7 @@ export const liveTestPatterns = [
 export const spacetimeSysAlias = {
   "spacetime:sys@2.0": spacetimeSysStub,
   "spacetime:sys@2.1": spacetimeSysStub,
+  "spacetime:sys@2.2": spacetimeSysStub,
 } as const
 
 const fakeSpacetimeServerAlias = {

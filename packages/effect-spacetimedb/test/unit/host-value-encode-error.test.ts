@@ -1,6 +1,7 @@
 import * as EffectVitest from "@effect/vitest"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import { TestLayer } from "../helpers/test-layer"
+import { testArrayLength } from "../helpers/array-bounds"
 
 const { expect } = EffectVitest
 const describe = EffectVitest.layer(TestLayer)
@@ -44,7 +45,7 @@ const expectHostEncodeError = (
 describe("effect-spacetimedb host value encode errors", (it) => {
   it("throws structured errors for host shape mismatches", () => {
     const String = StdbTesting.ContractType.string()
-    const StringArray = StdbTesting.ContractType.array(String)
+    const StringArray = StdbTesting.ContractType.array(String, testArrayLength)
     const User = StdbTesting.ContractType.struct({
       id: String,
       displayName: String,

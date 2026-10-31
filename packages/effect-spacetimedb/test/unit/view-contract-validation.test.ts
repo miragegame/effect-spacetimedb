@@ -7,6 +7,7 @@ import * as Stdb from "effect-spacetimedb"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import { generatedArtifactShapeError } from "../../src/client/generated-artifact-shape.ts"
 import { TestLayer } from "../helpers/test-layer"
+import { testViewRowsLength } from "../helpers/array-bounds"
 
 const describe = EffectVitest.layer(TestLayer)
 
@@ -29,6 +30,7 @@ const ViewModule = Stdb.StdbModule.make("view_contract_validation", {})
               id: Stdb.string(),
               name: Stdb.string(),
             }),
+            testViewRowsLength,
           ),
         }),
       )
@@ -60,6 +62,7 @@ const NonePolicyViewModule = Stdb.StdbModule.make(
             id: Stdb.string(),
             name: Stdb.string(),
           }),
+          testViewRowsLength,
         ),
       }),
     ),
@@ -100,15 +103,15 @@ describe("view contract validation", (it) => {
       Effect.gen(function* () {
         const plan = StdbTesting.makeModulePlan(ViewModule)
 
-        expect("params" in ViewModule.views.allUsers).toBe(false)
         expect(ViewModule.views.allUsers.public).toBe(true)
-        expect("params" in ViewModule.views.selfUser).toBe(false)
         expect(ViewModule.views.selfUser.public).toBe(false)
         expect(Object.keys(plan.publicViews)).toEqual(["allUsers"])
+        // A view without params projects its target, called with nothing.
         expect(plan.targets.views.allUsers).toMatchObject({
           kind: "view",
           key: "allUsers",
           name: "all_users",
+          args: {},
         })
       }),
   )
@@ -263,7 +266,7 @@ describe("view contract validation", (it) => {
             Stdb.StdbModule.make("unsupported_scalar_array_view", {}).add(
               Stdb.StdbGroup.make("Views").add(
                 Stdb.StdbFn.anonymousView("names", {
-                  returns: Stdb.array(Stdb.string()),
+                  returns: Stdb.array(Stdb.string(), testViewRowsLength),
                 }),
               ),
             ).spec,

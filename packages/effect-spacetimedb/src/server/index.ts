@@ -22,9 +22,11 @@ export type {
   ServerReducerCtx,
   ServerSenderViewCtx,
 } from "./bind.ts"
+export type { ServerSenderAuth } from "./runtime-types.ts"
 export type {
   AnonymousViewCtxService,
   DbService,
+  EnvService,
   FromService,
   HttpHandlerCtxService,
   HttpService,
@@ -41,6 +43,7 @@ export type {
 export {
   AnonymousViewCtx,
   Db,
+  Env,
   From,
   Http,
   HttpHandlerCtx,
@@ -54,6 +57,12 @@ export {
   ViewCtx,
 } from "./context.ts"
 export {
+  type EnvServiceFor,
+  type ServerEnvironmentReader,
+  StdbEnvironmentHostReadDefect,
+  StdbEnvironmentValueDefect,
+} from "./environment.ts"
+export {
   type ConstrainedServerRuntimeMode,
   serverRuntimeModeDefault,
   makeServerClock,
@@ -66,6 +75,8 @@ export type {
   DbHandleFor,
   EffectDbView,
   EffectHttpClient,
+  OutboxInsertRow,
+  OutboxTableHandle,
   RawProcedureHttp,
   EffectTableHandle,
   ProcedureHttpRequestOptions,
@@ -89,6 +100,16 @@ export {
   StdbUniqueAlreadyExistsError,
   RuntimeLayerAsyncError,
 } from "./services.ts"
+export {
+  databaseCaller,
+  OutboxResult,
+  OutboxRowTooLarge,
+  OutboxSelfTargetDefect,
+  OutboxSendOutsideMutationDefect,
+  outboxBacklog,
+  type OutboxBacklogEntry,
+  type OutboxSendContext,
+} from "./outbox.ts"
 export {
   scopedDbTx,
   scopedDbTxFromCtx,

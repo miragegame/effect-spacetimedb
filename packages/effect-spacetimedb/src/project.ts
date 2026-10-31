@@ -15,8 +15,8 @@ import type {
   MismatchedGeneratedModuleDiagnostic,
   WsBuilderConfig,
   WsGeneratedConfig,
-  WsSessionTag,
 } from "./client/ws-resource.ts"
+import type { WsSessionTag } from "./client/ws-session-tag.ts"
 import type { AnyModuleSpec } from "./contract/module.ts"
 import {
   moduleSpecOf,

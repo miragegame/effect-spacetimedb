@@ -1,0 +1,207 @@
+---
+draft: false
+title: Environment Variables
+description: Declare typed database environment keys and read them as Effects, with secrets kept Redacted.
+sidebar:
+  order: 4
+---
+
+<a class="upstream-doc" href="https://spacetimedb.com/docs/databases/environment-variables" target="_blank" rel="noopener noreferrer">SpacetimeDB: Environment Variables ↗</a>
+
+A module declares the environment keys it reads; the publisher supplies the
+values. The host validates them before `init` or a migration runs and keeps
+them across publishes. Declare keys on the module and read them through its
+`Env` accessor.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Redacted from "effect/Redacted"
+import * as Stdb from "effect-spacetimedb"
+
+const Settings = Stdb.StdbGroup.make("Settings").add(
+  Stdb.StdbFn.procedure("describe_settings", { returns: Stdb.string() }),
+)
+
+const Module = Stdb.StdbModule.make("app", {
+  environment: {
+    API_KEY: Stdb.Environment.secret(),
+    MODE: Stdb.Environment.literal("development", "production"),
+    LOG_LEVEL: Stdb.Environment.optional(
+      Stdb.Environment.literal("info", "debug"),
+    ),
+  },
+}).add(Settings)
+const { Env } = Module
+
+const SettingsLive = Stdb.StdbBuilder.group(Module, "Settings", {
+  describe_settings: Effect.fn(function* () {
+    const env = yield* Env
+    const apiKey = yield* env.API_KEY // Redacted<string>
+    const mode = yield* env.MODE // "development" | "production"
+    const logLevel = yield* env.LOG_LEVEL // "info" | "debug" | undefined
+    return `${mode}/${logLevel ?? "default"}: ${Redacted.value(apiKey).length} chars`
+  }),
+})
+```
+
+## Declarations
+
+| Builder | Accepts | Reads as |
+| --- | --- | --- |
+| `Stdb.Environment.string()` | any string | `string` |
+| `Stdb.Environment.secret()` | any string | `Redacted<string>` |
+| `Stdb.Environment.literal("a", "b")` | one of the listed strings; one value pins the key | `"a" \| "b"` |
+| `Stdb.Environment.optional(declaration)` | the same, or no value | the same, or `undefined` |
+
+Every value is a string. Declarations are checked when the contract is built,
+against the host's own limits:
+
+- keys match `[A-Za-z_][A-Za-z0-9_]*` and are at most 256 UTF-8 bytes;
+- a module declares at most 256 keys;
+- a literal set is non-empty and distinct, with at most 256 values of at most
+  8 KiB each;
+- all keys and literals together are at most 2 MiB.
+
+A violation throws `StdbValidationError` with an `InvalidEnvironmentKey`,
+`InvalidEnvironmentLiteral`, `InvalidEnvironmentDeclaration`,
+`EnvironmentDeclarationCountExceeded`, `EnvironmentUnionEntriesExceeded` or
+`EnvironmentSchemaBytesExceeded` diagnostic, so a module the host would refuse
+never reaches publish. The
+compiler hands the declarations, and never a value, to the SDK's `schema()`
+`env` setting.
+
+## Reading values
+
+`Env` is a module-scoped service, like `Db`. Once a module declares at least
+one key, its reducers, lifecycle hooks, procedures, views, HTTP handlers and
+transaction bodies (`Tx.run`, `HttpTx.run`) can all yield it. A key the module
+did not declare does not type-check, and another module's `Env` is refused like
+another module's `Db`. A module that declares nothing keeps the handler types
+it had before environments existed, so its handlers cannot require `Env`.
+
+Each declared key is an Effect that reads the host when it runs. Nothing is
+cached:
+
+- inside a transaction, a read sees that transaction's snapshot;
+- in a procedure outside a transaction, every read is its own snapshot, so read
+  several keys inside one `Tx.run` when they must agree;
+- after an environment-only update, the next call reads the new values. Views
+  that read a key are refreshed when its value changes.
+
+A read never fails in the error channel. The host validated the environment at
+publish, so a failed host read is a defect (`StdbEnvironmentHostReadDefect`),
+and so is a value that contradicts its declaration
+(`StdbEnvironmentValueDefect`). Both name the key, never the value.
+
+## Secrets
+
+A secret reads back as `Redacted<string>`: logging, tracing or printing it
+shows `<redacted:KEY>`. Call `Redacted.value` only where the plain string is
+needed. The library never writes environment values into its own logs, spans
+or error messages. Redaction is a read-side guard, not storage encryption:
+values are stored in the private `st_env` table, which the database owner can
+read, and module code that returns a secret from a public view or procedure
+exposes it.
+
+## Supplying values
+
+Values are supplied by the publisher, not by module code:
+
+- the `spacetime publish` CLI takes declared keys from its own process
+  environment, then from `spacetime.json` `env`. A shell variable named like a
+  declared key wins even when it is empty, so build the publishing process's
+  environment deliberately;
+- the HTTP publish API takes repeated `spacetime-environment: KEY=VALUE`
+  headers;
+- `spacetime publish --env-only` (or `PATCH /v1/database/:db/environment`)
+  changes values without uploading a module;
+- `--delete-data` deletes stored values along with the data, so a reset publish
+  must supply the required values again.
+
+See the [upstream guide](https://spacetimedb.com/docs/databases/environment-variables)
+for precedence, `--unset-env` and `--replace-env`.
+
+### Dev servers
+
+`makeDevServer` publishes with an `environment`. The CLI it runs receives
+exactly those values: its environment is built from scratch, never inherited,
+and it runs with `--no-config`, so no `spacetime.json` above the working
+directory contributes values either. Pass secrets as `Redacted` so command
+diagnostics print `<redacted>` in their place.
+
+The CLI still needs a few process variables to run, listed in
+`environmentKeysReserved`: `PATH`, `HOME`, `TMPDIR`, `TEMP`, `TMP`,
+`SystemRoot`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `LD_LIBRARY_PATH` and
+`SPACETIMEDB_SCHEMA_EXTRACTOR`. The CLI starts its schema extractor with an
+empty environment, so an extractor that needs `LD_LIBRARY_PATH` to load is
+named through `SPACETIMEDB_SCHEMA_EXTRACTOR` (a wrapper that sets the path and
+runs `spacetimedb-standalone`). Because the CLI publishes any process variable
+named like a declared key, the dev server refuses, before publishing anything,
+a supplied value or a module declaration that uses one of these names
+(compared case-insensitively) with `DevServerReservedEnvironmentKeyError`. It
+reads the bundle's declarations with the same `extract-schema` step the CLI
+uses. The variables come from `processEnvironment` (default: `process.env`),
+not from the ambient `ConfigProvider`.
+
+```ts
+const runtime = yield* makeDevServer({
+  bundlePath: "dist/bundle.js",
+  dbNamePrefix: "app",
+  environment: {
+    API_KEY: Redacted.make(apiKey),
+    MODE: "development",
+  },
+})
+
+// Environment-only update: no module upload, no init or migration.
+yield* runtime.updateEnvironment({ LOG_LEVEL: "debug" })
+yield* runtime.updateEnvironment({}, { unset: ["LOG_LEVEL"] })
+
+// A plain republish keeps the stored values and supplies only its own.
+yield* runtime.republish("dist/bundle.js", { environment: { MODE: "production" } })
+```
+
+The CLI forwards only keys the bundle being published declares, so the dev
+server refuses a supplied key the bundle does not declare
+(`DevServerEnvironmentValueError` with reason `keyNotDeclared`) rather than
+letting its value vanish. A republish or `reset` that clears data resupplies
+the values the runtime has published so far, dropping any the new bundle no
+longer declares. Before every publish the dev server also checks the values
+against the bundle's declarations the way the host will: required keys
+present, literals inside their declared sets, at most 8 KiB per value and 256
+values. A refusal publishes nothing.
+
+`updateEnvironment` has no bundle to read, so it cannot run these checks: the
+CLI fetches the deployed module's declarations itself and silently drops an
+undeclared key, while the host still refuses a bad value for a declared one.
+
+`reset` (`runtime.reset({ environment })` replaces the values) is one clearing
+publish, which the host turns into its own reset: it builds the bundle and runs
+`init` with the replacement values before it deletes anything, and keeps the
+database's identity. If `init` or anything else refuses, the database and its
+stored values stay as they were, and the runtime keeps tracking the old values.
+A refused update leaves the stored values unchanged.
+
+## Testing
+
+The module test harness takes values the way a publish does, and refuses an
+environment the host would refuse with `TestModuleEnvironmentError`:
+
+```ts
+const harness = StdbTesting.makeTestModuleHarness(Module.spec, {
+  environment: { API_KEY: "test-key", MODE: "development" },
+})
+
+harness.updateEnvironment({ LOG_LEVEL: "debug" }) // the next call reads it
+```
+
+Every harness context carries the harness's reader as `ctx.env`. Off-host code
+that calls the SDK's own `env_get` can be backed by the same values with
+`StdbTesting.SpacetimeSysStub.withEnvironment(harness.environment, body)` for a
+synchronous body, or `withEnvironmentAsync` for one that awaits; outside such a
+scope the stub refuses, like every other host call.
+
+## Not supported
+
+Only a root module can declare an environment. The contract DSL does not model
+upstream submodules, which cannot declare one either.

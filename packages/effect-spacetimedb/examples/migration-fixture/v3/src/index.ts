@@ -11,6 +11,10 @@ const U64 = Stdb.u64(
   Schema.BigInt.check(Schema.isGreaterThanOrEqualToBigInt(0n)),
 )
 
+// Result sets returned by the fixture's views and procedures; the migration
+// suite seeds a handful of rows.
+const ResultRowsLength: Stdb.ArrayLengthBounds = { minimum: 0, maximum: 1_000 }
+
 const account = Stdb.table("account", {
   public: true,
   columns: {
@@ -54,7 +58,7 @@ const AccountFunctions = Stdb.StdbGroup.make("Account")
   .add(
     Stdb.StdbFn.procedure("accountOwners", {
       params: Stdb.struct({}),
-      returns: Stdb.array(String255),
+      returns: Stdb.array(String255, ResultRowsLength),
     }),
   )
   .add(
@@ -62,7 +66,7 @@ const AccountFunctions = Stdb.StdbGroup.make("Account")
       params: Stdb.struct({
         accountId: U64,
       }),
-      returns: Stdb.array(accountTag.row),
+      returns: Stdb.array(accountTag.row, ResultRowsLength),
     }),
   )
   .add(
@@ -70,12 +74,12 @@ const AccountFunctions = Stdb.StdbGroup.make("Account")
       params: Stdb.struct({
         owner: String255,
       }),
-      returns: Stdb.array(account.row),
+      returns: Stdb.array(account.row, ResultRowsLength),
     }),
   )
   .add(
     Stdb.StdbFn.anonymousView("allAccounts", {
-      returns: Stdb.array(account.row),
+      returns: Stdb.array(account.row, ResultRowsLength),
     }),
   )
 

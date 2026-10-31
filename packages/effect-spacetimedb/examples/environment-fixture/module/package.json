@@ -1,0 +1,11 @@
+{
+  "name": "effect-spacetimedb-environment-fixture",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "dependencies": {
+    "effect": "4.1.1",
+    "effect-spacetimedb": "workspace:*",
+    "spacetimedb": "2.14.0"
+  }
+}

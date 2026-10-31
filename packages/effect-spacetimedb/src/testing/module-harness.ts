@@ -1,14 +1,16 @@
 import * as Data from "effect/Data"
 import * as Match from "effect/Match"
 import { ConnectionId, deepEqual, Identity, Timestamp, Uuid } from "spacetimedb"
-import { type AnyFieldType, fieldOptions } from "../contract/field.ts"
+import { type FieldTypeId, fieldOptions } from "../contract/field.ts"
 import type { AnyModuleSpec } from "../contract/module.ts"
-import type { AnyTableSpec } from "../contract/table.ts"
-import { type AnyValueType, type TypeKind, typeInfo } from "../contract/type.ts"
+import { outboxMetadataOf } from "../contract/outbox-table.ts"
+import type { AnyTableSpec, TableRow } from "../contract/table.ts"
+import type { HostOf, ValueType } from "../contract/type.ts"
 import type { ServerQueryRoot } from "../query/types.ts"
 import { makeDbHandleFactory } from "../server/db-handle.ts"
-import { lookupPlansOf } from "../server/db-handle-codec.ts"
+import { lookupPlansOf, tableCodecOf } from "../server/db-handle-codec.ts"
 import { SpacetimeHostErrors } from "../server/host-errors.ts"
+import { identityKey } from "../server/host-abi-runtime.ts"
 import {
   type BaseReducerCtx,
   type DbShape,
@@ -16,18 +18,61 @@ import {
   ProcedureClockNow,
   type ProcedureCtxLike,
   type ServerAnonymousViewCtx,
+  type ServerEnvironmentReader,
   type ServerRandom,
+  type ServerSenderAuth,
   type ServerSenderViewCtx,
 } from "../server/runtime-types.ts"
 import type { EffectDbView } from "../server/services.ts"
 import type { RawProcedureHttp } from "../server/services.ts"
+import {
+  makeTestModuleEnvironment,
+  type TestModuleEnvironmentUpdate,
+  type TestModuleEnvironmentValues,
+} from "./module-environment.ts"
+import { compareRowsByColumns, matchesRange } from "./module-harness-order.ts"
 import { TestHarnessTransaction } from "./transaction.ts"
 
 export class NestedTestTransactionError extends Data.TaggedError(
   "NestedTestTransactionError",
 ) {}
 
+/**
+ * The seam the in-memory inter-database pump settles through: it removes one
+ * outbox row, as the host does after the row's settle reducer ran. Outbox
+ * handles themselves expose no delete.
+ */
+export const TestHarnessOutboxRemove = Symbol.for(
+  "effect-spacetimedb/testing/TestHarnessOutboxRemove",
+)
+
+/** Table keys of the module's outboxes. */
+export type OutboxTableKeys<Module extends AnyModuleSpec> = {
+  readonly [Key in keyof Module["tables"] &
+    string]: Module["tables"][Key] extends {
+    readonly outbox: object
+  }
+    ? Key
+    : never
+}[keyof Module["tables"] & string]
+
 type MutableStore = Map<string, Array<Record<string, unknown>>>
+
+/**
+ * The sender auth the host gives a transaction that presented no JWT: internal
+ * exactly when the sender is the database itself (SpacetimeDB 2.14), the same
+ * comparison the compiled scheduler guard makes.
+ */
+const unauthenticatedSenderAuth = (context: {
+  readonly sender: unknown
+  readonly databaseIdentity: unknown
+}): ServerSenderAuth => {
+  const senderKey = identityKey(context.sender)
+  return senderKey !== undefined &&
+    senderKey === identityKey(context.databaseIdentity)
+    ? { isInternal: true, hasJWT: false, jwt: null }
+    : { isInternal: false, hasJWT: false, jwt: null }
+}
 
 type HarnessOverrides<Ctx> = Partial<Omit<Ctx, "db" | "from" | "withTx">>
 type ProcedureHarnessOverrides<Module extends AnyModuleSpec> = HarnessOverrides<
@@ -36,9 +81,67 @@ type ProcedureHarnessOverrides<Module extends AnyModuleSpec> = HarnessOverrides<
   readonly transaction?: HarnessOverrides<BaseReducerCtx<Module>> | undefined
 }
 
+type EncodedTable<Table extends AnyTableSpec> = Omit<Table, "columns"> & {
+  readonly columns: {
+    readonly [Key in keyof Table["columns"]]: ValueType<
+      HostOf<Table["columns"][Key]>,
+      HostOf<Table["columns"][Key]>
+    > &
+      Pick<Table["columns"][Key], typeof FieldTypeId>
+  }
+}
+
+type EncodedModule<Module extends AnyModuleSpec> = Omit<Module, "tables"> & {
+  readonly tables: {
+    readonly [Key in keyof Module["tables"]]: EncodedTable<
+      Module["tables"][Key]
+    >
+  }
+}
+
+/** The SDK-shaped raw store accepts and returns native host column values (including encoded numeric magnitudes). */
+export type TestModuleRawDb<Module extends AnyModuleSpec> = DbShape<
+  EncodedModule<Module>
+>
+
 export type TestModuleHarness<Module extends AnyModuleSpec> = {
-  readonly db: DbShape<Module>
+  readonly db: TestModuleRawDb<Module>
   readonly effectDb: EffectDbView<Module>
+  /** This database's identity: every context's `databaseIdentity`. */
+  readonly databaseIdentity: Identity
+  /**
+   * The rows waiting in an outbox, decoded, oldest first. A row stays until a
+   * pump delivers it and its settle reducer runs.
+   */
+  readonly outboxRows: <Key extends OutboxTableKeys<Module>>(
+    key: Key,
+  ) => ReadonlyArray<TableRow<Module["tables"][Key]>>
+  readonly [TestHarnessOutboxRemove]: (key: string, msgId: bigint) => void
+  /**
+   * The reader every harness context carries as `ctx.env`, with host
+   * semantics: a declared key returns its value or `null`, an undeclared key
+   * throws. Pass it to `SpacetimeSysStub.withEnvironment` to back the stub's
+   * `env_get` while compiled SDK code runs off-host.
+   */
+  readonly environment: ServerEnvironmentReader
+  /**
+   * Applies an environment-only update, validated atomically: an invalid
+   * result throws `TestModuleEnvironmentError` and leaves the values unchanged.
+   * The next read in any context sees the new values.
+   */
+  readonly updateEnvironment: (
+    values: TestModuleEnvironmentUpdate<Module>,
+  ) => void
+  /**
+   * Returns the database to the state the harness was built in: every table
+   * empty, auto-increment sequences and the uuid counter restarted, the random
+   * stream reseeded. The environment keeps its current values, and write
+   * observers are not told about the cleared rows. A rolled-back transaction
+   * restores rows but not sequences, uuids or randomness, so a suite that
+   * needs a fresh database per call resets rather than relying on rollback,
+   * and a reset skips the per-table setup that building a new harness repeats.
+   */
+  readonly reset: () => void
   readonly makeMutationCtx: (
     overrides?: HarnessOverrides<BaseReducerCtx<Module>>,
   ) => BaseReducerCtx<Module>
@@ -114,224 +217,6 @@ const keyEquals = (
   columns: ReadonlyArray<string>,
 ) => columns.every((column) => deepEqual(left[column], right[column]))
 
-const comparisonKindOf = (
-  valueType: AnyValueType,
-  seen = new WeakSet<object>(),
-): TypeKind | undefined => {
-  if (seen.has(valueType)) return undefined
-  seen.add(valueType)
-  const info = typeInfo(valueType)
-  if (info === undefined) return undefined
-  return Match.value(info.kind).pipe(
-    Match.when(Match.is("custom", "option"), (kind) =>
-      info.item !== undefined ? comparisonKindOf(info.item, seen) : kind,
-    ),
-    Match.when("lazy", (kind) =>
-      info.lazy !== undefined ? comparisonKindOf(info.lazy(), seen) : kind,
-    ),
-    Match.when(
-      Match.is(
-        "array",
-        "bigint",
-        "bool",
-        "bytes",
-        "connectionId",
-        "f32",
-        "f64",
-        "i8",
-        "i16",
-        "i32",
-        "i64",
-        "i128",
-        "i256",
-        "identity",
-        "literal",
-        "result",
-        "scheduleAt",
-        "string",
-        "struct",
-        "sum",
-        "timeDuration",
-        "timestamp",
-        "u8",
-        "u16",
-        "u32",
-        "u64",
-        "u128",
-        "u256",
-        "unit",
-        "uuid",
-      ),
-      (kind) => kind,
-    ),
-    Match.exhaustive,
-  )
-}
-
-const ownBigInt = (value: unknown, key: string): bigint | undefined => {
-  if (typeof value !== "object" || value === null || !(key in value)) {
-    return undefined
-  }
-  const candidate = Reflect.get(value, key)
-  return typeof candidate === "bigint" ? candidate : undefined
-}
-
-const nativeScalarBigIntKeys: Partial<Record<TypeKind, string>> = {
-  connectionId: "__connection_id__",
-  identity: "__identity__",
-  timeDuration: "__time_duration_micros__",
-  timestamp: "__timestamp_micros_since_unix_epoch__",
-  uuid: "__uuid__",
-}
-
-const nativeScalarBigInt = (
-  kind: TypeKind | undefined,
-  value: unknown,
-): bigint | undefined => {
-  if (kind === undefined) return undefined
-  const bigintKey = nativeScalarBigIntKeys[kind]
-  return bigintKey === undefined ? undefined : ownBigInt(value, bigintKey)
-}
-
-const orderableComparisonKinds: ReadonlySet<TypeKind> = new Set([
-  "bigint",
-  "bool",
-  "bytes",
-  "connectionId",
-  "f32",
-  "f64",
-  "i8",
-  "i16",
-  "i32",
-  "i64",
-  "i128",
-  "i256",
-  "identity",
-  "literal",
-  "string",
-  "timeDuration",
-  "timestamp",
-  "u8",
-  "u16",
-  "u32",
-  "u64",
-  "u128",
-  "u256",
-  "uuid",
-])
-
-const compareBigInt = (left: bigint, right: bigint): number =>
-  left < right ? -1 : left > right ? 1 : 0
-
-const compareBytes = (left: Uint8Array, right: Uint8Array): number => {
-  const length = Math.min(left.length, right.length)
-  for (let index = 0; index < length; index++) {
-    const comparison = (left[index] ?? 0) - (right[index] ?? 0)
-    if (comparison !== 0) return comparison < 0 ? -1 : 1
-  }
-  return left.length < right.length ? -1 : left.length > right.length ? 1 : 0
-}
-
-const compareScalar = (
-  field: AnyFieldType,
-  left: unknown,
-  right: unknown,
-): number => {
-  const kind = comparisonKindOf(field)
-  if (kind === undefined || !orderableComparisonKinds.has(kind)) {
-    throw new TypeError(
-      `Test module harness cannot order ${kind ?? "unknown"} range values`,
-    )
-  }
-  if (deepEqual(left, right)) return 0
-  // SpacetimeDB encodes Option as Some | None, in that variant order.
-  // Consequently every present value sorts before an absent one.
-  if (left === undefined || left === null) return 1
-  if (right === undefined || right === null) return -1
-
-  const leftNative = nativeScalarBigInt(kind, left)
-  const rightNative = nativeScalarBigInt(kind, right)
-  if (leftNative !== undefined && rightNative !== undefined) {
-    return compareBigInt(leftNative, rightNative)
-  }
-  if (left instanceof Uint8Array && right instanceof Uint8Array) {
-    return compareBytes(left, right)
-  }
-  if (typeof left === "bigint" && typeof right === "bigint") {
-    return compareBigInt(left, right)
-  }
-  if (typeof left === "number" && typeof right === "number") {
-    return left < right ? -1 : left > right ? 1 : 0
-  }
-  if (typeof left === "string" && typeof right === "string") {
-    return left < right ? -1 : left > right ? 1 : 0
-  }
-  if (typeof left === "boolean" && typeof right === "boolean") {
-    return left === right ? 0 : left ? 1 : -1
-  }
-  throw new TypeError(`Test module harness cannot order ${kind} range values`)
-}
-
-const compareRowsByColumns = (
-  table: AnyTableSpec,
-  columns: ReadonlyArray<string>,
-  left: Record<string, unknown>,
-  right: Record<string, unknown>,
-): number => {
-  for (const column of columns) {
-    const comparison = compareScalar(
-      table.columns[column]!,
-      left[column],
-      right[column],
-    )
-    if (comparison !== 0) return comparison
-  }
-  return 0
-}
-
-const matchesRange = (
-  row: Record<string, unknown>,
-  table: AnyTableSpec,
-  columns: ReadonlyArray<string>,
-  input: unknown,
-): boolean => {
-  const values = Array.isArray(input) ? input : [input]
-  const prefixLength = Math.max(0, values.length - 1)
-  for (let index = 0; index < prefixLength; index++) {
-    if (!deepEqual(row[columns[index]!], values[index])) return false
-  }
-  const term = values.at(-1)
-  const rowValue = row[columns[prefixLength]!]
-  if (
-    typeof term === "object" &&
-    term !== null &&
-    "from" in term &&
-    "to" in term
-  ) {
-    const range = term as {
-      readonly from: { readonly tag: string; readonly value?: unknown }
-      readonly to: { readonly tag: string; readonly value?: unknown }
-    }
-    const field = table.columns[columns[prefixLength]!]!
-    if (range.from.tag !== "unbounded") {
-      const comparison = compareScalar(field, rowValue, range.from.value)
-      if (comparison < 0) return false
-      if (comparison === 0 && range.from.tag === "excluded") {
-        return false
-      }
-    }
-    if (range.to.tag !== "unbounded") {
-      const comparison = compareScalar(field, rowValue, range.to.value)
-      if (comparison > 0) return false
-      if (comparison === 0 && range.to.tag === "excluded") {
-        return false
-      }
-    }
-    return true
-  }
-  return deepEqual(rowValue, term)
-}
-
 /**
  * A single row write, reported once the transaction that performed it has
  * committed.
@@ -372,6 +257,12 @@ export type TestModuleRowWrite =
 export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
   module: Module,
   options?: {
+    /**
+     * Values for the module's declared environment, validated like a publish:
+     * a missing required key or a literal outside its set throws
+     * `TestModuleEnvironmentError` here.
+     */
+    readonly environment?: TestModuleEnvironmentValues<Module> | undefined
     readonly http?: RawProcedureHttp | undefined
     /**
      * Called for every insert, update and delete the module commits, in write
@@ -380,8 +271,18 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
      */
     readonly observeWrite?: ((write: TestModuleRowWrite) => void) | undefined
     readonly seed?: bigint | undefined
+    /**
+     * This database's identity. Harnesses linked by an inter-database pump
+     * need distinct ones: a row's `target` names its receiver by it.
+     */
+    readonly databaseIdentity?: Identity | undefined
   },
 ): TestModuleHarness<Module> => {
+  const databaseIdentity = options?.databaseIdentity ?? new Identity(2n)
+  const { environment, updateEnvironment } = makeTestModuleEnvironment(
+    module.environment ?? {},
+    options?.environment,
+  )
   const notifyWrite =
     options?.observeWrite ?? ((_write: TestModuleRowWrite) => {})
   // Writes are buffered while a transaction is open and flushed on commit, so a
@@ -404,8 +305,10 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
     .map(([key]) => key)
   const rawDb: Record<string, unknown> = {}
 
+  const outboxRemovers = new Map<string, (msgId: bigint) => void>()
   for (const [tableKey, table] of Object.entries(module.tables)) {
     const rows = store.get(tableKey)!
+    const isOutbox = outboxMetadataOf(table) !== undefined
     const uniqueColumns = uniqueColumnsOf(table)
     const assertUnique = (
       row: Record<string, unknown>,
@@ -481,6 +384,23 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
         }
         return count
       },
+    }
+    if (isOutbox) {
+      // Mirrors the SDK's outbox view: insert and reads only. The pump removes
+      // a settled row through the harness seam instead.
+      outboxRemovers.set(tableKey, (msgId) => {
+        const index = rows.findIndex((candidate) => candidate.msgId === msgId)
+        if (index < 0) return
+        const [removed] = rows.splice(index, 1)
+        if (removed !== undefined) {
+          observeWrite({
+            kind: "delete",
+            next: undefined,
+            previous: removed,
+            table: tableKey,
+          })
+        }
+      })
     }
     for (const plan of lookupPlansOf(table, `db.${tableKey}`)) {
       const matchesPoint = (
@@ -578,15 +498,41 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
         }),
       )
     }
+    if (isOutbox) {
+      const { delete: _delete, clear: _clear, ...outboxHandle } = tableHandle
+      for (const plan of lookupPlansOf(table, `db.${tableKey}`)) {
+        const lookup = tableHandle[plan.key] as Record<string, unknown>
+        const { delete: _lookupDelete, update: _update, ...readOnly } = lookup
+        outboxHandle[plan.key] = readOnly
+      }
+      rawDb[tableKey] = outboxHandle
+      continue
+    }
     rawDb[tableKey] = tableHandle
   }
 
   const db = rawDb as DbShape<Module>
   const dbHandles = makeDbHandleFactory(module)
-  const effectDb = dbHandles.readwrite(db)
+  const effectDb = dbHandles.readwrite(db, {
+    timestamp: new Timestamp(1_000n),
+    databaseIdentity,
+  })
+  const outboxRows = (key: string): ReadonlyArray<Record<string, unknown>> => {
+    const table = module.tables[key]
+    if (table === undefined || outboxMetadataOf(table) === undefined) {
+      throw new TypeError(`${key} is not an outbox of module ${module.name}`)
+    }
+    const codec = tableCodecOf(table, `outboxRows.${key}`)
+    return (store.get(key) ?? [])
+      .map((row) => codec.decodeRow(row) as Record<string, unknown>)
+      .sort((left, right) =>
+        (left.msgId as bigint) < (right.msgId as bigint) ? -1 : 1,
+      )
+  }
   let transactionActive = false
   let uuidCounter = 0n
-  const random = makeRandom(options?.seed ?? 1n)
+  const randomSeed = options?.seed ?? 1n
+  let random = makeRandom(randomSeed)
   const httpDefault: RawProcedureHttp = options?.http ?? {
     fetch: () => ({
       status: 200,
@@ -596,9 +542,10 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
     }),
   }
   const base = () => ({
+    env: environment,
     sender: new Identity(1n),
-    databaseIdentity: new Identity(2n),
-    identity: new Identity(2n),
+    databaseIdentity,
+    identity: databaseIdentity,
     timestamp: new Timestamp(1_000n),
     connectionId: new ConnectionId(1n),
     newUuidV4: () => new Uuid(++uuidCounter),
@@ -640,13 +587,15 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
     overrides: HarnessOverrides<BaseReducerCtx<Module>> = {},
   ): A => runTransaction(() => body(makeMutationCtx(overrides)))
 
-  makeMutationCtx = (overrides = {}) => ({
-    ...base(),
-    db,
-    senderAuth: { isInternal: false, hasJWT: false, jwt: null },
-    [TestHarnessTransaction]: runTransaction,
-    ...overrides,
-  })
+  makeMutationCtx = (overrides = {}) => {
+    const context = { ...base(), ...overrides }
+    return {
+      db,
+      [TestHarnessTransaction]: runTransaction,
+      ...context,
+      senderAuth: context.senderAuth ?? unauthenticatedSenderAuth(context),
+    }
+  }
   const queryRoot = Object.fromEntries(
     [...store].map(([key, rows]) => {
       const relation = {
@@ -679,6 +628,7 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
         (() => Number(context.timestamp.microsSinceUnixEpoch / 1_000n)),
       withTx: (body) =>
         withTx(body, {
+          env: context.env,
           sender: context.sender,
           databaseIdentity: context.databaseIdentity,
           identity: context.identity,
@@ -692,15 +642,35 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
     }
   }
 
+  const reset = () => {
+    for (const rows of store.values()) rows.splice(0, rows.length)
+    autoIncrement.clear()
+    uuidCounter = 0n
+    random = makeRandom(randomSeed)
+  }
+
   return {
-    db,
+    db: rawDb as TestModuleRawDb<Module>,
     effectDb,
+    databaseIdentity,
+    outboxRows: outboxRows as TestModuleHarness<Module>["outboxRows"],
+    [TestHarnessOutboxRemove]: (key, msgId) => {
+      const remove = outboxRemovers.get(key)
+      if (remove === undefined) {
+        throw new TypeError(`${key} is not an outbox of module ${module.name}`)
+      }
+      remove(msgId)
+    },
+    environment,
+    updateEnvironment,
+    reset,
     makeMutationCtx,
     makeProcedureCtx,
     makeHttpHandlerCtx: (overrides = {}) => ({
+      env: environment,
       timestamp: new Timestamp(1_000n),
       http: httpDefault,
-      databaseIdentity: new Identity(2n),
+      databaseIdentity,
       withTx: (body) => withTx((ctx) => body({ db: ctx.db })),
       newUuidV4: () => new Uuid(++uuidCounter),
       newUuidV7: () => new Uuid(++uuidCounter),
@@ -708,12 +678,14 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
       ...overrides,
     }),
     makeViewCtx: (overrides = {}) => ({
+      env: environment,
       sender: new Identity(1n),
       db,
       from: queryRoot,
       ...overrides,
     }),
     makeAnonymousViewCtx: (overrides = {}) => ({
+      env: environment,
       db,
       from: queryRoot,
       ...overrides,

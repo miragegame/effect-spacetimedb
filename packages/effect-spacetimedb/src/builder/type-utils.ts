@@ -487,6 +487,24 @@ export type ScheduledTableNameOf<Table> = Table extends {
   ? Name
   : never
 
+export type OutboxTableNameOf<Table> = Table extends {
+  readonly outbox: object
+  readonly name: infer Name extends string
+}
+  ? Name
+  : never
+
+/** Names of the outbox tables the module's settle reducers reference. */
+export type SettledOutboxTableNamesOf<Reducers> = {
+  readonly [Key in keyof Reducers]: Reducers[Key] extends {
+    readonly outboxResult: {
+      readonly table: { readonly name: infer Table extends string }
+    }
+  }
+    ? Table
+    : never
+}[keyof Reducers]
+
 export type SchedulePair = { readonly target: string; readonly table: string }
 
 export type SchedulePairsOf<Groups> = Groups extends {

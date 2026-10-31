@@ -1,4 +1,3 @@
-
 import * as EffectVitest from "@effect/vitest"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
@@ -13,6 +12,7 @@ const { expect } = EffectVitest
 import * as Stdb from "effect-spacetimedb"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import { TestLayer } from "../helpers/test-layer"
+import { testViewRowsLength } from "../helpers/array-bounds"
 
 const describe = EffectVitest.layer(TestLayer)
 const emptyWireNames: Stdb.AnyModuleSpec["wireNames"] = {
@@ -121,6 +121,7 @@ describe("module validation diagnostics", (it) => {
               Stdb.struct({
                 id: Stdb.string(),
               }),
+              testViewRowsLength,
             ),
           }).spec,
         },
@@ -373,12 +374,18 @@ describe("module validation diagnostics", (it) => {
       ).add(
         Stdb.StdbGroup.make("FirstViews").add(
           Stdb.StdbFn.anonymousView("duplicate_view", {
-            returns: Stdb.array(Stdb.struct({ id: Stdb.string() })),
+            returns: Stdb.array(
+              Stdb.struct({ id: Stdb.string() }),
+              testViewRowsLength,
+            ),
           }),
         ),
         Stdb.StdbGroup.make("SecondViews").add(
           Stdb.StdbFn.anonymousView("duplicate_view", {
-            returns: Stdb.array(Stdb.struct({ id: Stdb.string() })),
+            returns: Stdb.array(
+              Stdb.struct({ id: Stdb.string() }),
+              testViewRowsLength,
+            ),
           }),
         ),
       )
@@ -419,7 +426,10 @@ describe("module validation diagnostics", (it) => {
           params: Stdb.struct({}),
         }
         const viewSpec = Stdb.StdbFn.anonymousView("sharedName", {
-          returns: Stdb.array(Stdb.struct({ id: Stdb.string() })),
+          returns: Stdb.array(
+            Stdb.struct({ id: Stdb.string() }),
+            testViewRowsLength,
+          ),
         }).spec
         const lifecycleSpec = Stdb.StdbFn.init().spec
 
@@ -488,7 +498,10 @@ describe("module validation diagnostics", (it) => {
           tables: {},
           views: {
             clientConnected: Stdb.StdbFn.anonymousView("clientConnected", {
-              returns: Stdb.array(Stdb.struct({ id: Stdb.string() })),
+              returns: Stdb.array(
+                Stdb.struct({ id: Stdb.string() }),
+                testViewRowsLength,
+              ),
             }).spec,
           },
           reducers: {},
@@ -1094,7 +1107,10 @@ describe("module validation diagnostics", (it) => {
         },
         views: {
           snake_view: Stdb.StdbFn.anonymousView("snake_view", {
-            returns: Stdb.array(Stdb.struct({ id: Stdb.string() })),
+            returns: Stdb.array(
+              Stdb.struct({ id: Stdb.string() }),
+              testViewRowsLength,
+            ),
           }).spec,
         },
         reducers: {
@@ -1199,7 +1215,10 @@ describe("module validation diagnostics", (it) => {
         },
         views: {
           reportRun: Stdb.StdbFn.anonymousView("reportRun", {
-            returns: Stdb.array(Stdb.struct({ id: Stdb.string() })),
+            returns: Stdb.array(
+              Stdb.struct({ id: Stdb.string() }),
+              testViewRowsLength,
+            ),
           }).spec,
         },
         reducers: {

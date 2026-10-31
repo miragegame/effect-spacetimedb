@@ -55,7 +55,108 @@ const assertServerPolyfilledMathRandom = Effect.try({
   catch: testEffectCallbackError("effect-spacetimedb/unit/compat"),
 }).pipe(Effect.orDie)
 
+/**
+ * SpacetimeDB's module host decoder, as `text_encoding.js` writes it: it refuses
+ * the `ignoreBOM` constructor option and the `stream` decode option, reports
+ * `ignoreBOM` as false, and converts bytes straight to a string, so a leading
+ * BOM always survives.
+ */
+const HostTextDecoder = class extends globalThis.TextDecoder {
+  constructor(label?: string, options?: TextDecoderOptions) {
+    if (options?.ignoreBOM === true) {
+      throw new TypeError("Option 'ignoreBOM' not supported")
+    }
+    super(label, { fatal: options?.fatal === true, ignoreBOM: true })
+  }
+
+  override get ignoreBOM(): boolean {
+    return false
+  }
+
+  override decode(
+    input?: AllowSharedBufferSource,
+    options?: TextDecodeOptions,
+  ): string {
+    if (options?.stream === true) {
+      throw new TypeError("Option 'stream' not supported")
+    }
+    return super.decode(input)
+  }
+}
+
+const withHostTextDecoder = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  Effect.acquireRelease(
+    Effect.try({
+      try: () => {
+        const original = Object.getOwnPropertyDescriptor(
+          globalThis,
+          "TextDecoder",
+        )
+        Object.defineProperty(globalThis, "TextDecoder", {
+          configurable: true,
+          enumerable: false,
+          writable: true,
+          value: HostTextDecoder,
+        })
+        return original
+      },
+      catch: testEffectCallbackError("effect-spacetimedb/unit/compat"),
+    }).pipe(Effect.orDie),
+    (original) =>
+      Effect.try({
+        try: () => {
+          if (original != null) {
+            Object.defineProperty(globalThis, "TextDecoder", original)
+          }
+        },
+        catch: testEffectCallbackError("effect-spacetimedb/unit/compat"),
+      }).pipe(Effect.orDie),
+  ).pipe(Effect.andThen(effect), Effect.scoped)
+
+const bomA = new Uint8Array([0xef, 0xbb, 0xbf, 0x61])
+
 describe("compat", (it) => {
+  it.effect(
+    "accepts ignoreBOM on a host TextDecoder that rejects it, and keeps one BOM",
+    () =>
+      withHostTextDecoder(
+        Effect.try({
+          try: () => {
+            expect(() => new TextDecoder("utf-8", { ignoreBOM: true })).toThrow(
+              "ignoreBOM",
+            )
+            StdbTesting.ensureServerPolyfills()
+
+            const keeping = new TextDecoder("utf-8", { ignoreBOM: true })
+            expect(keeping.ignoreBOM).toBe(true)
+            expect(keeping.decode(bomA)).toBe("\uFEFFa")
+            expect(keeping.decode(bomA)).toBe("\uFEFFa")
+            expect(keeping.decode(new Uint8Array([0x61, 0x62]))).toBe("ab")
+
+            const fatal = new TextDecoder("utf-8", {
+              fatal: true,
+              ignoreBOM: true,
+            })
+            expect(fatal.fatal).toBe(true)
+            expect(fatal.decode(bomA)).toBe("\uFEFFa")
+            expect(() => fatal.decode(new Uint8Array([0xff]))).toThrow()
+
+            // The host's own limits stand: the shim adds no streaming.
+            expect(() => keeping.decode(bomA, { stream: true })).toThrow(
+              "stream",
+            )
+
+            const plain = new TextDecoder()
+            expect(plain.ignoreBOM).toBe(false)
+            expect(plain.decode(bomA)).toBe("\uFEFFa")
+          },
+          catch: testEffectCallbackError("effect-spacetimedb/unit/compat"),
+        }).pipe(Effect.orDie),
+      ),
+  )
+
   it.effect("installs Math.random fallback when Math.random is missing", () =>
     withMathRandomDescriptor(undefined, assertServerPolyfilledMathRandom),
   )

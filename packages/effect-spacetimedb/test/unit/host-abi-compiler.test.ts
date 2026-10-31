@@ -18,6 +18,7 @@ const validCompilerHostAbi = {
   isRowTypedQuery: () => false,
   Range: class {},
   Router: class {},
+  remoteModule: () => ({}),
   schema: () => ({}),
   SenderError: TestSenderError,
   t: {},

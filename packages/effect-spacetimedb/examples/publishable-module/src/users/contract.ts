@@ -1,6 +1,13 @@
 import * as Stdb from "effect-spacetimedb"
 import { ExampleErrors } from "../errors"
-import { String255, U64, UserId, UserName, user } from "../schema"
+import {
+  ResultRowsLength,
+  String255,
+  U64,
+  UserId,
+  UserName,
+  user,
+} from "../schema"
 
 export const UserFunctions = Stdb.StdbGroup.make("Users")
   .add(
@@ -50,12 +57,12 @@ export const UserFunctions = Stdb.StdbGroup.make("Users")
   )
   .add(
     Stdb.StdbFn.anonymousView("allUsers", {
-      returns: Stdb.array(user.row),
+      returns: Stdb.array(user.row, ResultRowsLength),
     }),
   )
   .add(
     Stdb.StdbFn.anonymousView("allUsersQuery", {
-      returns: Stdb.array(user.row),
+      returns: Stdb.array(user.row, ResultRowsLength),
     }),
   )
   .add(
@@ -64,9 +71,27 @@ export const UserFunctions = Stdb.StdbGroup.make("Users")
     }),
   )
   .add(
+    // Called as `SELECT * FROM "users_named"('Grace')`, one shared answer per
+    // name; a view with params returns its rows without the primary key.
+    Stdb.StdbFn.anonymousView("usersNamed", {
+      params: Stdb.struct({
+        name: Stdb.string(UserName),
+      }),
+      returns: Stdb.array(user.row, ResultRowsLength),
+    }),
+  )
+  .add(
+    Stdb.StdbFn.anonymousView("userOfIdentity", {
+      params: Stdb.struct({
+        identity: Stdb.identity(),
+      }),
+      returns: Stdb.option(user.row),
+    }),
+  )
+  .add(
     Stdb.StdbFn.anonymousView("privateAuditLog", {
       public: false,
-      returns: Stdb.array(user.row),
+      returns: Stdb.array(user.row, ResultRowsLength),
     }),
   )
 

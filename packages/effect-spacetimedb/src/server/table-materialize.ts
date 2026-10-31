@@ -1,6 +1,20 @@
 import { pascalCaseName } from "../contract/canonical-name.ts"
+import {
+  makeStdbDiagnostic,
+  type StdbDiagnostic,
+  StdbValidationError,
+} from "../contract/diagnostic.ts"
 import { type AnyFieldType, fieldOptions } from "../contract/field.ts"
 import type { AnyModuleSpec } from "../contract/module.ts"
+import {
+  type OutboxMetadata,
+  outboxMetadataOf,
+} from "../contract/outbox-table.ts"
+import type {
+  AnyRemoteInterface,
+  AnyRemoteInterfaceBinding,
+  RemoteModuleBinding,
+} from "../contract/remote-interface.ts"
 import { tableRowSource, type AnyTableSpec } from "../contract/table.ts"
 import { encodeHostValue } from "../contract/type/host-codec.ts"
 import * as Type from "../contract/type.ts"
@@ -10,6 +24,7 @@ import {
   applyCompilerDefault,
   applyCompilerPrimaryKey,
   applyOptional,
+  defineCompilerOutboxTable,
   defineCompilerRow,
   defineCompilerTable,
   seedCompilerNamedTypeBuilder,
@@ -110,13 +125,7 @@ const materializeRow = (
     fields.map(([columnName, field]) => [columnName, field.builder]),
   )
 
-const materializeTable = (
-  tableSpec: AnyTableSpec,
-  policy: AnyModuleSpec["settings"]["caseConversionPolicy"],
-): unknown => {
-  const options = materializeTableOptions(tableSpec, policy)
-  const fields = materializeFields(tableSpec)
-  const row = defineCompilerRow(materializeRow(fields))
+const nameMaterializedRow = (tableSpec: AnyTableSpec, row: unknown): void => {
   const rowName = pascalCaseName(tableSpec.name)
   setCompilerTypeBuilderName(row, rowName)
   seedCompilerNamedTypeBuilder(
@@ -125,6 +134,142 @@ const materializeTable = (
     Type.satsTypeFingerprint(tableSpec.row),
     row,
   )
+}
+
+type ReceiverBindingHandle = {
+  readonly params: Readonly<Record<string, unknown>>
+}
+
+type ReceiverIdentityBuilder = {
+  readonly target: () => unknown
+}
+
+/**
+ * The key a remote interface is told apart by: its name, which namespaces its
+ * binding's type names, and the group it names. `make` admits only identifier
+ * names, so the name holds no `:` and the key is unambiguous.
+ */
+const remoteInterfaceKey = (remoteInterface: AnyRemoteInterface): string =>
+  `${remoteInterface.name}:${remoteInterface.groupId}`
+
+/** The generated binding of each remote interface, by `remoteInterfaceKey`. */
+type ReceiverBindingsByInterface = ReadonlyMap<string, RemoteModuleBinding>
+
+/**
+ * Indexes the module entry's receiver bindings and refuses a build that cannot
+ * materialize every outbox: an interface bound twice, or an outbox whose
+ * interface has no binding. A binding no outbox uses is harmless.
+ */
+const indexReceiverBindings = (
+  module: AnyModuleSpec,
+  receiverBindings: ReadonlyArray<AnyRemoteInterfaceBinding>,
+): ReceiverBindingsByInterface => {
+  const diagnostics: Array<StdbDiagnostic> = []
+  const bindings = new Map<string, RemoteModuleBinding>()
+  for (const [index, bound] of receiverBindings.entries()) {
+    const key = remoteInterfaceKey(bound.interface)
+    if (bindings.has(key)) {
+      diagnostics.push(
+        makeStdbDiagnostic(
+          "DuplicateReceiverBinding",
+          ["receiverBindings", index],
+          `Remote interface ${bound.interface.name} (group ${bound.interface.groupId}) is bound more than once; pass one binding per interface.`,
+        ),
+      )
+      continue
+    }
+    bindings.set(key, bound.binding)
+  }
+
+  for (const tableSpec of Object.values(module.tables)) {
+    const outbox = outboxMetadataOf(tableSpec)
+    if (
+      outbox === undefined ||
+      bindings.has(remoteInterfaceKey(outbox.interface))
+    ) {
+      continue
+    }
+    diagnostics.push(
+      makeStdbDiagnostic(
+        "OutboxReceiverBindingMissing",
+        ["tables", tableSpec.name, "outbox", "interface"],
+        `Outbox ${tableSpec.name} calls remote interface ${outbox.interface.name}, which has no receiver binding; pass RemoteInterface.bind(interface, binding) in build's receiverBindings.`,
+      ),
+    )
+  }
+
+  if (diagnostics.length > 0) {
+    throw new StdbValidationError({ diagnostics })
+  }
+  return bindings
+}
+
+/**
+ * An outbox row passes the receiver binding's own builders through: its
+ * `identity().target()` for `target` and its parameter builders for the
+ * parameter columns, which upstream checks by identity and structure when it
+ * builds the outbox. Their type names stay scoped by the interface name.
+ * `msgId`, `enqueuedAt` and local columns materialize like any column.
+ */
+const materializeOutboxTable = (
+  tableSpec: AnyTableSpec,
+  outbox: OutboxMetadata,
+  receiverBindings: ReceiverBindingsByInterface,
+  policy: AnyModuleSpec["settings"]["caseConversionPolicy"],
+): unknown => {
+  const binding = receiverBindings.get(remoteInterfaceKey(outbox.interface))
+  if (binding === undefined) {
+    throw new Error(
+      `Outbox ${tableSpec.name} has no receiver binding, which indexReceiverBindings refuses before materializing`,
+    )
+  }
+  const receiver = binding.reducers[outbox.reducer] as
+    | ReceiverBindingHandle
+    | undefined
+  if (receiver === undefined) {
+    throw new Error(
+      `Outbox ${tableSpec.name} targets ${outbox.reducer}, which the binding of remote interface ${outbox.interface.name} does not carry`,
+    )
+  }
+  const target = (binding.identity() as ReceiverIdentityBuilder).target()
+  const row = defineCompilerRow(
+    Object.fromEntries(
+      Object.entries(tableSpec.columns).map(([columnName, field]) => [
+        columnName,
+        columnName === "target"
+          ? target
+          : Object.hasOwn(receiver.params, columnName)
+            ? receiver.params[columnName]
+            : materializeField(
+                `tables.${tableSpec.name}.columns.${columnName}`,
+                field,
+              ).builder,
+      ]),
+    ),
+  )
+  nameMaterializedRow(tableSpec, row)
+
+  return defineCompilerOutboxTable(
+    materializeTableOptions(tableSpec, policy),
+    row,
+    receiver,
+  )
+}
+
+const materializeTable = (
+  tableSpec: AnyTableSpec,
+  receiverBindings: ReceiverBindingsByInterface,
+  policy: AnyModuleSpec["settings"]["caseConversionPolicy"],
+): unknown => {
+  const outbox = outboxMetadataOf(tableSpec)
+  if (outbox !== undefined) {
+    return materializeOutboxTable(tableSpec, outbox, receiverBindings, policy)
+  }
+
+  const options = materializeTableOptions(tableSpec, policy)
+  const fields = materializeFields(tableSpec)
+  const row = defineCompilerRow(materializeRow(fields))
+  nameMaterializedRow(tableSpec, row)
 
   // Schedules are registered on the reducer/procedure side (`onSchedule`), so
   // the table itself carries no schedule option. Upstream still derives the
@@ -283,15 +428,22 @@ const tableEntriesInDependencyOrder = (
 
 export const materializeTables = <Module extends AnyModuleSpec>(options: {
   readonly module: Module
-}): Record<string, unknown> =>
-  Object.fromEntries(
+  readonly receiverBindings: ReadonlyArray<AnyRemoteInterfaceBinding>
+}): Record<string, unknown> => {
+  const receiverBindings = indexReceiverBindings(
+    options.module,
+    options.receiverBindings,
+  )
+  return Object.fromEntries(
     tableEntriesInDependencyOrder(options.module.tables).map(
       ([tableKey, tableSpec]) => [
         tableKey,
         materializeTable(
           tableSpec,
+          receiverBindings,
           options.module.settings.caseConversionPolicy,
         ),
       ],
     ),
   )
+}

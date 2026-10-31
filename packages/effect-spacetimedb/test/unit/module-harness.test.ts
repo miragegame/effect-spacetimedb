@@ -335,6 +335,66 @@ describe("test module harness", () => {
     expect(harness.db.record.count()).toBe(0n)
   })
 
+  it("marks a transaction internal exactly when the database sent it", () => {
+    const harness = StdbTesting.makeTestModuleHarness(HarnessModule)
+    const database = harness.makeMutationCtx().databaseIdentity
+    const external = { isInternal: false, hasJWT: false, jwt: null } as const
+    const internal = { isInternal: true, hasJWT: false, jwt: null } as const
+
+    expect(harness.makeMutationCtx().senderAuth).toEqual(external)
+    expect(harness.makeMutationCtx({ sender: database }).senderAuth).toEqual(
+      internal,
+    )
+    expect(
+      harness
+        .makeProcedureCtx({ sender: database })
+        .withTx((ctx) => ctx.senderAuth),
+    ).toEqual(internal)
+    expect(harness.makeProcedureCtx().withTx((ctx) => ctx.senderAuth)).toEqual(
+      external,
+    )
+    expect(
+      harness.makeMutationCtx({ sender: database, senderAuth: external })
+        .senderAuth,
+    ).toEqual(external)
+  })
+
+  it("resets rows, sequences and the uuid and random streams", () => {
+    const harness = StdbTesting.makeTestModuleHarness(HarnessModule, {
+      seed: 7n,
+    })
+    const callables = StdbTesting.bindCallables(HarnessModuleBuilder, [
+      MutationsLive,
+    ])
+    const draws = () => {
+      const ctx = harness.makeMutationCtx()
+      return [ctx.newUuidV4(), ctx.newUuidV7(), ctx.random.uint32()]
+    }
+    const freshDraws = draws()
+    harness.db.record.insert({
+      id: 0n,
+      code: "a",
+      tenant: "alpha",
+      sequence: 1n,
+    })
+    expect(() =>
+      callables.insertThenFail?.invoke(harness.makeMutationCtx(), {}),
+    ).toThrow()
+
+    harness.reset()
+
+    expect(harness.db.record.count()).toBe(0n)
+    expect(draws()).toEqual(freshDraws)
+    expect(
+      harness.db.record.insert({
+        id: 0n,
+        code: "b",
+        tenant: "alpha",
+        sequence: 1n,
+      }).id,
+    ).toBe(1n)
+  })
+
   it("clears event rows after a successful bound transaction", () => {
     const harness = StdbTesting.makeTestModuleHarness(HarnessModule)
     const callables = StdbTesting.bindCallables(HarnessModuleBuilder, [
@@ -346,7 +406,7 @@ describe("test module harness", () => {
 
     const inserted = harness.db.harnessEvent.insert({
       id: 0n,
-      kind: "emitted",
+      kind: { tag: "emitted" },
     })
     expect(inserted.id).toBe(2n)
   })
