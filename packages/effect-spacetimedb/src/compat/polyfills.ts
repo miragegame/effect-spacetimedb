@@ -104,8 +104,50 @@ const installServerPolyfills = () => {
     }
   }
 
+  const ensureTextDecoderIgnoreBom = () => {
+    // SpacetimeDB's module host implements TextDecoder without the WHATWG
+    // `ignoreBOM` option and throws when it is passed. Effect 4.1 constructs
+    // `new TextDecoder("utf-8", { ignoreBOM: true })` while its HTTP and
+    // encoding modules load, so without this a module whose import graph
+    // reaches them fails before it registers anything. The host decodes bytes
+    // straight to a string and never strips a BOM, which is what the option
+    // asks for, so it only has to stop reaching the host's constructor. Hosts
+    // that accept the option keep their own decoder.
+    const Native = globalThis.TextDecoder
+    if (typeof Native !== "function") {
+      return
+    }
+    try {
+      new Native("utf-8", { ignoreBOM: true })
+      return
+    } catch {
+      // The host rejects the option.
+    }
+
+    class TextDecoderAcceptingIgnoreBom extends Native {
+      readonly #ignoreBOM: boolean
+
+      constructor(label?: string, options?: TextDecoderOptions) {
+        super(label, { fatal: options?.fatal === true })
+        this.#ignoreBOM = options?.ignoreBOM === true
+      }
+
+      override get ignoreBOM(): boolean {
+        return this.#ignoreBOM
+      }
+    }
+
+    Object.defineProperty(globalThis, "TextDecoder", {
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: TextDecoderAcceptingIgnoreBom,
+    })
+  }
+
   ensureMathRandom()
   ensureSchedulerTimers()
+  ensureTextDecoderIgnoreBom()
 }
 
 export const ensureServerPolyfills = installServerPolyfills

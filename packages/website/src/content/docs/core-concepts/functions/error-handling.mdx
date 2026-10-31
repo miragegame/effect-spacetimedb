@@ -63,9 +63,9 @@ Effect `HttpApi` client:
 
 ```typescript twoslash
 import * as Effect from "effect/Effect"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as Stdb from "effect-spacetimedb"
 
 declare const uri: string
@@ -99,7 +99,12 @@ const UserRoutes = Stdb.StdbHttpGroup.make("UserRoutes").add(
 
 const Module = Stdb.StdbModule.make("app").add(Users).add(UserRoutes)
 const Example = Stdb.project(Module)
-const rpcClient = Example.client.http.make({ uri, databaseName, token })
+const rpcClient = Example.client.http.make({
+  uri,
+  databaseName,
+  token,
+  callDurationMax: "10 seconds",
+})
 
 const requireUser = rpcClient.reducers.user_require({ userId }).pipe(
   Effect.catchTag("AppUserMissing", (error) =>

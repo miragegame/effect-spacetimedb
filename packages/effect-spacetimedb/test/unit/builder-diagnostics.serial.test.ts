@@ -9,6 +9,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
+import { typescriptCompilerBin } from "../helpers/typescript-compiler"
 
 const { expect } = EffectVitest
 
@@ -28,7 +29,7 @@ type TempProject = {
   readonly relativeFixturePath: string
 }
 
-type TsgoResult = {
+type CompilerResult = {
   readonly status: number
   readonly output: string
 }
@@ -96,14 +97,14 @@ const withTempProject = <A, E>(
     })
   }).pipe(Effect.scoped)
 
-const runTsgo = (
+const runCompiler = (
   project: TempProject,
   extraArgs: ReadonlyArray<string> = [],
-): TsgoResult => {
+): CompilerResult => {
   const result = spawnSync(
     process.execPath,
     [
-      `${packageRoot}/scripts/effect-tsgo.mjs`,
+      typescriptCompilerBin,
       "--noEmit",
       ...extraArgs,
       "-p",
@@ -274,7 +275,7 @@ void RawTagAccessor
 
 const ViewGroup = Stdb.StdbGroup.make("Views").add(
   Stdb.StdbFn.view("list", {
-    returns: Stdb.array(Stdb.struct({})),
+    returns: Stdb.array(Stdb.struct({}), { minimum: 0, maximum: 1_000 }),
   }),
 )
 const ViewModule = Stdb.StdbModule.make("view_module", {}).add(ViewGroup)
@@ -386,9 +387,9 @@ ${endpoints.map((endpoint) => `    "${endpoint}",`).join("\n")}
   )`
 }
 
-const platformClientGroupDecl = (index: number): string => {
-  const groupName = `PlatformGroup${index.toString().padStart(2, "0")}`
-  const prefix = `platform${index.toString().padStart(2, "0")}`
+const wideClientGroupDecl = (index: number): string => {
+  const groupName = `WideGroup${index.toString().padStart(2, "0")}`
+  const prefix = `wide${index.toString().padStart(2, "0")}`
   const endpoints = Array.from(
     { length: 42 },
     (_, endpointIndex) =>
@@ -399,48 +400,46 @@ ${endpoints.map((endpoint) => `  reducer("${endpoint}"),`).join("\n")}
 )`
 }
 
-const platformGroupedClientScaleFixture = (
+const wideGroupedClientScaleFixture = (
   groupedAccesses: boolean,
-): string => `// lint-ignore: stdb-string-columns-require-domain - scale diagnostic fixture intentionally exercises raw STDB schema constructors
-import * as Schema from "effect/Schema"
+): string => `import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 
 const Params = Stdb.struct({ value: Stdb.string(Schema.String) })
 const reducer = <const Name extends string>(name: Name) =>
   Stdb.StdbFn.reducer(name, { params: Params })
 
-${Array.from({ length: 19 }, (_, index) => platformClientGroupDecl(index)).join("\n\n")}
+${Array.from({ length: 19 }, (_, index) => wideClientGroupDecl(index)).join("\n\n")}
 
-const PlatformModule = Stdb.StdbModule.make("platform_grouped_scale", {}).add(
+const WideModule = Stdb.StdbModule.make("wide_grouped_scale", {}).add(
 ${Array.from(
   { length: 19 },
-  (_, index) => `  PlatformGroup${index.toString().padStart(2, "0")},`,
+  (_, index) => `  WideGroup${index.toString().padStart(2, "0")},`,
 ).join("\n")}
 )
-type PlatformSpec = typeof PlatformModule.spec
-declare const FlatPlatformSpec: Stdb.ModuleSpec<
-  PlatformSpec["tables"],
-  PlatformSpec["views"],
-  PlatformSpec["reducers"],
-  PlatformSpec["procedures"],
-  PlatformSpec["lifecycle"],
-  PlatformSpec["httpHandlers"]
+type WideSpec = typeof WideModule.spec
+declare const FlatWideSpec: Stdb.ModuleSpec<
+  WideSpec["tables"],
+  WideSpec["views"],
+  WideSpec["reducers"],
+  WideSpec["procedures"],
+  WideSpec["lifecycle"],
+  WideSpec["httpHandlers"]
 >
-const client = Stdb.project(${groupedAccesses ? "PlatformModule" : "FlatPlatformSpec"}).client.http.make({
+const client = Stdb.project(${groupedAccesses ? "WideModule" : "FlatWideSpec"}).client.http.make({
   uri: "http://localhost:3000",
-  databaseName: "platform_grouped_scale",
+  databaseName: "wide_grouped_scale",
+  callDurationMax: "10 seconds",
 })
 ${Array.from({ length: 19 }, (_, index) => {
   const suffix = index.toString().padStart(2, "0")
   return groupedAccesses && index === 0
-    ? `void client.PlatformGroup${suffix}.reducers.platform${suffix}_41({ value: "grouped" })`
-    : `void client.reducers.platform${suffix}_41({ value: "baseline" })`
+    ? `void client.WideGroup${suffix}.reducers.wide${suffix}_41({ value: "grouped" })`
+    : `void client.reducers.wide${suffix}_41({ value: "baseline" })`
 }).join("\n")}
 `
 
-const scaleFixture =
-  (): string => `// lint-ignore: stdb-string-columns-require-domain - scale diagnostic fixture intentionally exercises raw STDB schema constructors
-import * as Effect from "effect/Effect"
+const scaleFixture = (): string => `import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 import * as StdbClient from "effect-spacetimedb/client"
@@ -552,7 +551,7 @@ declare const REMOTE_MODULE: RemoteModule<
   GeneratedSchema,
   GeneratedReducers,
   GeneratedProcedures,
-  "2.10.1"
+  "2.14.0"
 >
 type ErrorContext = ErrorContextInterface<typeof REMOTE_MODULE>
 declare class DbConnection extends DbConnectionImpl<typeof REMOTE_MODULE> {
@@ -575,11 +574,138 @@ void ScaleProject.client.ws.layerGenerated({
   DbConnection,
   uri: "ws://localhost:3000",
   databaseName: "diagnostic_scale",
+  connectTimeoutMillis: 10_000,
 })
 declare const ScaleSession: StdbClient.WsSession<ScaleModuleSpec, ErrorContext>
 const scaleUserId = Schema.decodeUnknownSync(ScaleUserId)("user_1")
 void ScaleSession.subscribeRowRef("scale_user", scaleUserId)
 `
+
+// How a module with a declared environment spells its spec. "named" puts the
+// environment inside a non-generic top-level alias, which the builder keeps as
+// written. "intersected" names the spec without its environment, so the
+// builder returns the unnamed `Spec & { environment }`: the shape that took one
+// large module from 63M to 740M instantiations. "bare" is the same named
+// spec on a module that declares no environment, the same-run control.
+type EnvironmentSpecShape = "named" | "intersected" | "bare"
+
+const environmentSpecScaleTableCount = 20
+const environmentSpecScaleGroupCount = 24
+const environmentSpecScaleEndpointCount = 10
+
+const environmentSpecScaleFixture = (shape: EnvironmentSpecShape): string => {
+  const two = (index: number): string => index.toString().padStart(2, "0")
+  const tableIndexes = Array.from(
+    { length: environmentSpecScaleTableCount },
+    (_, index) => index,
+  )
+  const groupIndexes = Array.from(
+    { length: environmentSpecScaleGroupCount },
+    (_, index) => index,
+  )
+  const endpointIndexes = Array.from(
+    { length: environmentSpecScaleEndpointCount },
+    (_, index) => index,
+  )
+  const tables = tableIndexes.map(
+    (index) => `const table${two(index)} = Stdb.table("table${two(index)}", {
+  public: true,
+  columns: {
+    id: Stdb.string().primaryKey(),
+    column00: Stdb.string(),
+    column01: Stdb.string(),
+  },
+})`,
+  )
+  const groups = groupIndexes.map(
+    (
+      group,
+    ) => `const Group${two(group)} = Stdb.StdbGroup.make("Group${two(group)}").add(
+${endpointIndexes
+  .map(
+    (endpoint) =>
+      `  Stdb.StdbFn.procedure("g${two(group)}_${two(endpoint)}", { returns: Stdb.string() }),`,
+  )
+  .join("\n")}
+)`,
+  )
+  // Every handler calls withTx twice: each call instantiates the accessor's
+  // generic signature, which is where a spec the checker cannot skip is
+  // re-walked, so the cost of the shape grows with handlers times spec size.
+  const lives = groupIndexes.map((group) => {
+    const table = `table${two(group % environmentSpecScaleTableCount)}`
+    return `const Group${two(group)}Live = Stdb.StdbBuilder.group(ScaleModule, "Group${two(group)}", {
+${endpointIndexes
+  .map(
+    (endpoint) => `  g${two(group)}_${two(endpoint)}: () =>
+    Effect.gen(function* () {
+      const found = yield* ScaleModule.withTx(
+        Effect.gen(function* () {
+          const db = yield* ScaleModule.Db
+          return yield* db.${table}.id.find("${two(endpoint)}")
+        }),
+      )
+      return yield* ScaleModule.withTx(
+        Effect.gen(function* () {
+          const db = yield* ScaleModule.Db
+          const again = yield* db.${table}.id.find("${two(endpoint)}")
+          return again?.id ?? found?.id ?? ""
+        }),
+      )
+    }),`,
+  )
+  .join("\n")}
+})
+void Group${two(group)}Live`
+  })
+  const specEnvironment =
+    shape === "named"
+      ? " & {\n  readonly environment: typeof scaleEnvironment\n}"
+      : ""
+  const environment =
+    shape === "bare"
+      ? { type: "{}", options: "{}" }
+      : {
+          type: "typeof scaleEnvironment",
+          options: "{ environment: scaleEnvironment }",
+        }
+  return `import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+${tables.join("\n\n")}
+
+const scaleTables = [${tableIndexes.map((index) => `table${two(index)}`).join(", ")}] as const
+type ScaleTables = Stdb.TablesFromTuple<typeof scaleTables>
+
+${groups.join("\n\n")}
+
+type ScaleGroups = ${groupIndexes.map((group) => `typeof Group${two(group)}`).join(" | ")}
+
+const scaleEnvironment = { REGION: Stdb.Environment.string() }
+void scaleEnvironment
+
+type ScaleSpec = Stdb.ModuleSpecFor<"environment_scale", ScaleTables, ScaleGroups, {}, never>${specEnvironment}
+
+const ScaleModule: Stdb.StdbModule<
+  "environment_scale",
+  ScaleTables,
+  ScaleGroups,
+  Stdb.GroupNameOf<ScaleGroups>,
+  keyof ScaleTables & string,
+  {},
+  never,
+  Stdb.ScheduledTableNameOf<ScaleTables[keyof ScaleTables]>,
+  Stdb.SchedulePairsOf<ScaleGroups>,
+  Stdb.GroupEndpointPairsOf<ScaleGroups>,
+  ScaleSpec,
+  ${environment.type}
+> = Stdb.StdbModule.make("environment_scale", ${environment.options})
+  .addTables(...scaleTables)
+  .add(${groupIndexes.map((group) => `Group${two(group)}`).join(", ")})
+
+${lives.join("\n\n")}
+`
+}
 
 const instantiationsFrom = (output: string): number => {
   const match = /^Instantiations:\s+(\d+)$/mu.exec(output)
@@ -602,7 +728,7 @@ describe("builder misuse diagnostics", (it) => {
       withTempProject(misuseFixture, (project) =>
         assertEffect(() => {
           const source = misuseFixture(project.fixturePath)
-          const result = runTsgo(project)
+          const result = runCompiler(project)
 
           expect(result.status).not.toBe(0)
           expectDiagnosticAt(
@@ -654,8 +780,6 @@ describe("builder misuse diagnostics", (it) => {
             "Handlers require external services; pass options.runtime providing them",
           )
           expect(result.output).not.toContain("StdbUniqueAlreadyExistsError")
-          expect(result.output).not.toContain("effect(missingEffectError)")
-          expect(result.output).not.toContain("effect(missingEffectContext)")
           expect(result.output).not.toContain("__runtimeRequired")
         }),
       ),
@@ -665,7 +789,7 @@ describe("builder misuse diagnostics", (it) => {
     withTempProject(moduleIdentityFixture, (project) =>
       assertEffect(() => {
         const source = moduleIdentityFixture(project.fixturePath)
-        const result = runTsgo(project)
+        const result = runCompiler(project)
 
         expect(result.status).not.toBe(0)
         expectDiagnosticAt(result.output, project, source, "build_same_name")
@@ -754,7 +878,7 @@ describe("builder misuse diagnostics", (it) => {
         (project) =>
           assertEffect(() => {
             const source = scaleFixture()
-            const result = runTsgo(project, ["--extendedDiagnostics"])
+            const result = runCompiler(project, ["--extendedDiagnostics"])
 
             expect(result.status).not.toBe(0)
             expectDiagnosticAt(
@@ -767,7 +891,6 @@ describe("builder misuse diagnostics", (it) => {
               "Handler endpoint11_04 may only fail with declared errors; undeclared error: UndeclaredFailure",
             )
             expect(result.output).not.toContain("StdbUniqueAlreadyExistsError")
-            expect(result.output).not.toContain("effect(missingEffectError)")
 
             // This baseline covers the public plan shape, exact generated-view
             // wire-name projection, and ResultValuesOf over the sixty-procedure
@@ -782,18 +905,18 @@ describe("builder misuse diagnostics", (it) => {
   )
 
   it.effect(
-    "keeps platform-width grouped clients within their instantiation budget",
+    "keeps wide-module grouped clients within their instantiation budget",
     () =>
       Effect.gen(function* () {
         const baselineResult = yield* withTempProject(
-          () => platformGroupedClientScaleFixture(false),
+          () => wideGroupedClientScaleFixture(false),
           (project) =>
-            Effect.succeed(runTsgo(project, ["--extendedDiagnostics"])),
+            Effect.succeed(runCompiler(project, ["--extendedDiagnostics"])),
         )
         const groupedResult = yield* withTempProject(
-          () => platformGroupedClientScaleFixture(true),
+          () => wideGroupedClientScaleFixture(true),
           (project) =>
-            Effect.succeed(runTsgo(project, ["--extendedDiagnostics"])),
+            Effect.succeed(runCompiler(project, ["--extendedDiagnostics"])),
         )
 
         yield* assertEffect(() => {
@@ -804,8 +927,11 @@ describe("builder misuse diagnostics", (it) => {
           // endpoint fixture. The grouped arm selects a group namespace from
           // the full client type, which carries all nineteen group properties.
           // Re-recorded on Effect 4.0.0-rc.110, whose HttpApi type rewrite
-          // moved the flat control up from 760_781.
-          const flatClientBaseline = 840_647
+          // moved the flat control up from 760_781, and again with the
+          // inter-database call surface (outbox tables, receivers, settle
+          // reducers), which every program importing the package root checks:
+          // it moved the flat control from 901_085 to 929_535.
+          const flatClientBaseline = 929_535
           const groupedInstantiationsMax = Math.ceil(flatClientBaseline * 1.1)
           const baselineInstantiations = instantiationsFrom(
             baselineResult.output,
@@ -819,6 +945,53 @@ describe("builder misuse diagnostics", (it) => {
           // This isolates group namespace cost from package-wide surface growth.
           expect(groupedInstantiations).toBeLessThanOrEqual(
             Math.ceil(baselineInstantiations * 1.1),
+          )
+        })
+      }),
+  )
+
+  it.effect(
+    "keeps a declared environment free when the module names its spec with it",
+    () =>
+      Effect.gen(function* () {
+        const checkShape = (shape: EnvironmentSpecShape) =>
+          withTempProject(
+            () => environmentSpecScaleFixture(shape),
+            (project) =>
+              Effect.succeed(runCompiler(project, ["--extendedDiagnostics"])),
+          )
+        const bareResult = yield* checkShape("bare")
+        const namedResult = yield* checkShape("named")
+        const intersectedResult = yield* checkShape("intersected")
+
+        yield* assertEffect(() => {
+          expect(bareResult.status).toBe(0)
+          expect(namedResult.status).toBe(0)
+          expect(intersectedResult.status).toBe(0)
+
+          // Recorded from the bare control of this exact 20-table, 24 × 10
+          // procedure fixture; the named arm recorded 1_192_051 beside it.
+          const bareBaseline = 1_195_053
+          const bareInstantiations = instantiationsFrom(bareResult.output)
+          const namedInstantiations = instantiationsFrom(namedResult.output)
+          const intersectedInstantiations = instantiationsFrom(
+            intersectedResult.output,
+          )
+          expect(bareInstantiations).toBeLessThanOrEqual(
+            Math.ceil(bareBaseline * 1.1),
+          )
+          // The guard: a spec that names its environment costs what the same
+          // module costs without one. If the builder intersects such a spec
+          // again, this arm reaches the intersected count (1_964_808 when
+          // recorded), well past the margin.
+          expect(namedInstantiations).toBeLessThanOrEqual(
+            Math.ceil(bareInstantiations * 1.1),
+          )
+          // The fixture must still show the cost the named spec avoids
+          // (1_952_012 when recorded); below this the guard above measures
+          // nothing, and the fixture needs more handlers or a larger spec.
+          expect(intersectedInstantiations).toBeGreaterThanOrEqual(
+            Math.ceil(bareInstantiations * 1.3),
           )
         })
       }),

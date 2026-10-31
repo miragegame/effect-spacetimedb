@@ -113,8 +113,8 @@ integers beyond `Number.MAX_SAFE_INTEGER` are rejected.
 
 If the union is a core shared domain schema also consumed by HTTP DTOs, keep
 `Stdb.custom(CoreSchema, { type: <string scalar> })` so the values have one
-source of truth. A lint rule enforces that custom inline literals do not replace
-`Stdb.literal(...)` for local SATS-only unions.
+source of truth. For a union that exists only in your module, use
+`Stdb.literal(...)` rather than an inline custom literal.
 
 ## Optional Fields
 

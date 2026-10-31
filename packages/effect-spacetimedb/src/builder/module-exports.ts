@@ -23,6 +23,7 @@ export const moduleExports = <const Module extends AnyStdbModule>(
   MutationCtx: module.MutationCtx,
   From: module.From,
   Http: module.Http,
+  Env: module.Env,
   Tx: module.Tx,
   withTx: module.withTx,
   HttpTx: module.HttpTx,

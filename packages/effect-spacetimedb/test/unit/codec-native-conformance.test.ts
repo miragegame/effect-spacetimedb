@@ -1,6 +1,6 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import * as Hex from "effect/encoding/Hex"
 import * as Schema from "effect/Schema"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import {
@@ -16,6 +16,7 @@ import { nativeBytes, nativeRoundTrip } from "../helpers/native-serializer"
 import { effectProperty } from "../helpers/effect-property"
 import { TestLayer } from "../helpers/test-layer"
 import { corpusArbitraries } from "../helpers/value-type-arbitrary"
+import { testArrayLength } from "../helpers/array-bounds"
 
 const { expect } = EffectVitest
 
@@ -84,7 +85,7 @@ const goldenCases: ReadonlyArray<GoldenCase> = [
   },
   {
     name: "array u16",
-    type: T.array(T.u16()),
+    type: T.array(T.u16(), testArrayLength),
     value: [1, 2, 65535],
     hex: "0300000001000200ffff",
   },
@@ -346,7 +347,7 @@ const goldenCases: ReadonlyArray<GoldenCase> = [
   },
 ]
 
-const bytesToHex = (bytes: Uint8Array): string => Encoding.encodeHex(bytes)
+const bytesToHex = (bytes: Uint8Array): string => Hex.encode(bytes)
 
 const nativeDbHex = (
   type: StdbTesting.ContractType.AnyValueType,

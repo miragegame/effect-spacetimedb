@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import type { SubscriptionTarget } from "../subscription-target.ts"
-import type { WsSession } from "./ws-resource.ts"
+import type { WsSession } from "./ws-session-tag.ts"
 import type { SubscriptionFailure } from "./ws-subscription.ts"
 
 export const connectAndSubscribe = <

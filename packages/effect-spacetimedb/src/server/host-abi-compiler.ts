@@ -1,4 +1,3 @@
-
 import * as Data from "effect/Data"
 
 import {
@@ -6,6 +5,7 @@ import {
   isRowTypedQuery,
   Range,
   Router,
+  remoteModule,
   SenderError,
   schema,
   t,
@@ -17,11 +17,14 @@ export {
   isRowTypedQuery,
   Range,
   Router,
+  remoteModule,
   schema,
   SenderError,
   t,
   table,
 }
+
+export type { ReceiverIdentity, RemoteReducer } from "spacetimedb/server"
 
 export class StdbHostAbiCapabilityError extends Data.TaggedError(
   "StdbHostAbiCapabilityError",
@@ -29,7 +32,7 @@ export class StdbHostAbiCapabilityError extends Data.TaggedError(
   readonly capability: string
 }> {
   override get message(): string {
-    return `Unsupported spacetimedb host ABI: missing or malformed ${this.capability}. effect-spacetimedb currently supports spacetimedb ~2.10.1.`
+    return `Unsupported spacetimedb host ABI: missing or malformed ${this.capability}. effect-spacetimedb currently supports spacetimedb ~2.14.0.`
   }
 }
 
@@ -38,6 +41,7 @@ export type CompilerHostAbiShape = {
   readonly isRowTypedQuery?: unknown
   readonly Range?: unknown
   readonly Router?: unknown
+  readonly remoteModule?: unknown
   readonly schema?: unknown
   readonly SenderError?: unknown
   readonly t?: unknown
@@ -79,6 +83,9 @@ export const assertCompilerHostAbiCapabilities = (
   assertFunctionCapability(shape, "isRowTypedQuery")
   assertFunctionCapability(shape, "Range")
   assertFunctionCapability(shape, "Router")
+  // Inter-database calls: generated receiver bindings build their handles
+  // with it, and outbox tables are checked against those handles.
+  assertFunctionCapability(shape, "remoteModule")
   assertFunctionCapability(shape, "schema")
   assertFunctionCapability(shape, "SenderError")
   assertObjectCapability(shape, "t")
@@ -109,6 +116,7 @@ assertCompilerHostAbiCapabilities({
   isRowTypedQuery,
   Range,
   Router,
+  remoteModule,
   schema,
   SenderError,
   t,

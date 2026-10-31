@@ -7,7 +7,7 @@ import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 
 const { describe, expect, live } = EffectVitest
 

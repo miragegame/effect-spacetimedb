@@ -260,6 +260,10 @@ export default defineConfig({
                   link: "/core-concepts/functions/http-handlers",
                 },
                 {
+                  label: "Inter-Database Calls",
+                  link: "/core-concepts/functions/inter-database-calls",
+                },
+                {
                   label: "Error Handling",
                   link: "/core-concepts/functions/error-handling",
                 },
@@ -296,6 +300,10 @@ export default defineConfig({
                 {
                   label: "Migrations",
                   link: "/core-concepts/databases/migrations",
+                },
+                {
+                  label: "Environment Variables",
+                  link: "/core-concepts/databases/environment-variables",
                 },
               ],
             },

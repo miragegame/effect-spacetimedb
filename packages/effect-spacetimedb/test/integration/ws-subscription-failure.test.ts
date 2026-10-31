@@ -9,8 +9,9 @@ import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { Identity } from "spacetimedb"
+import { fixtureConnectTimeoutMillis } from "../helpers/transport-bounds"
 
 const { expect } = EffectVitest
 
@@ -214,6 +215,7 @@ const makeScopedBuilder = () => {
       databaseName: "example",
       token: "builder-token",
       compression: "none" as const,
+      connectTimeoutMillis: fixtureConnectTimeoutMillis,
     },
     disconnectCount: () => disconnectCount,
     emitDisconnect: (error?: Error) => {

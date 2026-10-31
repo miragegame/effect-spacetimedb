@@ -271,6 +271,7 @@ const moduleSpecWithLifecycle = <
   return defineModule({
     name: base.name,
     settings: base.settings,
+    environment: base.environment ?? {},
     tables: base.tables,
     views: base.views,
     reducers: base.reducers,

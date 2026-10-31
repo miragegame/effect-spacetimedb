@@ -274,7 +274,13 @@ const constraintsFromFields = (
       : [],
   )
 
-const makeTable = (options: RuntimeTableDefineOptions): AnyTableSpec => {
+/**
+ * Builds a table spec from its column inputs. `outboxTable` shares it, adding
+ * its own columns first; `table(...)` is the public entry point. (The type
+ * helpers here stay unexported on purpose: a consumer's declaration emit
+ * inlines them, and it could not name them from a package subpath.)
+ */
+export const makeTable = (options: RuntimeTableDefineOptions): AnyTableSpec => {
   const columns = normalizeColumns(options.columns)
   const columnReferences = ColumnReference.referencesFor(columns)
   const fieldIndexes = indexesFromFields(columns)

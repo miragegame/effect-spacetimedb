@@ -12,9 +12,9 @@ import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
+import * as HttpClient from "effect/http/HttpClient"
+import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import {
   DevServerBinaryError,
   type DevServerError,
@@ -48,6 +48,7 @@ import {
 import { writeCapturedJson } from "../../helpers/captured-event-codec"
 import { testEffectCallbackError } from "../../helpers/effect-errors"
 import { makeLiveWebSocket } from "./live-websocket"
+import { fixtureConnectTimeoutMillis } from "../../helpers/transport-bounds"
 
 class RowsNotReady extends Data.TaggedError("RowsNotReady")<{
   readonly cause: unknown
@@ -364,6 +365,7 @@ const makeLiveHarness = Effect.fn(function* () {
       DbConnection: generatedClient.DbConnection,
       uri: runtime.baseUrl,
       databaseName: runtime.databaseName,
+      connectTimeoutMillis: fixtureConnectTimeoutMillis,
       token,
       compression: "none",
       createWebSocket: makeLiveWebSocket,

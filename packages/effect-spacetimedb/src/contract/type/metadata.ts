@@ -61,6 +61,7 @@ export const attachStdbType = <
       codec,
       ...(options.fields != null ? { fields: options.fields } : {}),
       ...(options.item != null ? { item: options.item } : {}),
+      ...(options.length != null ? { length: options.length } : {}),
       ...(options.members != null ? { members: options.members } : {}),
       ...(options.variants != null ? { variants: options.variants } : {}),
       ...(options.lazy != null ? { lazy: options.lazy } : {}),

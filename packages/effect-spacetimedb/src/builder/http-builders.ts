@@ -19,12 +19,18 @@ import {
 import type { AnyModuleSpec } from "../contract/module.ts"
 import type { ProcedureSpec } from "../contract/procedure.ts"
 import type { ReducerSpec } from "../contract/reducer.ts"
+import type { Declarations as EnvironmentDeclarations } from "../contract/environment.ts"
 import type { ModuleSettings } from "../contract/settings.ts"
 import type { AnyTableSpec } from "../contract/table.ts"
-import { type AnyValueType } from "../contract/type.ts"
+import {
+  type AnyValueType,
+  type StructLikeValueType,
+} from "../contract/type.ts"
 import {
   type AnyViewSpec,
   anonymous as defineAnonymousView,
+  EmptyViewParams,
+  type EmptyViewParamsType,
   sender as defineSenderView,
 } from "../contract/view.ts"
 import type {
@@ -47,7 +53,9 @@ import {
   normalizeRoutePath,
 } from "./runtime-helpers.ts"
 import {
+  outboxResultEndpoint,
   procedureEndpoint,
+  receiverEndpoint,
   reducerEndpoint,
   scheduledProcedureEndpoint,
   scheduledReducerEndpoint,
@@ -241,9 +249,12 @@ export type StdbModule<
     Lifecycle,
     HttpGroupPairs
   >,
+  // Last so existing positional instantiations (including an explicit Spec)
+  // keep meaning what they meant; a module without an environment is `{}`.
+  Environment extends EnvironmentDeclarations = {},
 > = RuntimeModuleState &
-  ModuleAccessors<Spec> & {
-    readonly spec: Spec
+  ModuleAccessors<SpecWithEnvironment<Spec, Environment>> & {
+    readonly spec: SpecWithEnvironment<Spec, Environment>
     readonly addTables: <const Added extends ReadonlyArray<AnyTableSpec>>(
       ...tables: Added
     ) => StdbModule<
@@ -256,7 +267,15 @@ export type StdbModule<
       HttpGroupPairs,
       ScheduledTableNameUnion | ScheduledTableNameOf<Added[number]>,
       SchedulePairs,
-      GroupEndpointPairs
+      GroupEndpointPairs,
+      ModuleSpecFor<
+        Id,
+        Tables & TablesFromTuple<Added>,
+        Groups,
+        Lifecycle,
+        HttpGroupPairs
+      >,
+      Environment
     >
     readonly add: <const Added extends NonEmptyReadonlyArray<AnyGroup>>(
       ...groups: Added
@@ -270,7 +289,15 @@ export type StdbModule<
       HttpGroupPairs | HttpGroupPairsOf<Added[number]>,
       ScheduledTableNameUnion,
       SchedulePairs | SchedulePairsOf<Added[number]>,
-      GroupEndpointPairs | GroupEndpointPairsOf<Added[number]>
+      GroupEndpointPairs | GroupEndpointPairsOf<Added[number]>,
+      ModuleSpecFor<
+        Id,
+        Tables,
+        Groups | Added[number],
+        Lifecycle,
+        HttpGroupPairs | HttpGroupPairsOf<Added[number]>
+      >,
+      Environment
     >
     readonly [GroupTypeId]: Groups
     readonly [GroupNamesTypeId]: GroupNameUnion
@@ -279,43 +306,103 @@ export type StdbModule<
     readonly [SchedulePairsTypeId]: SchedulePairs
     readonly [GroupEndpointPairsTypeId]: GroupEndpointPairs
     readonly [HttpGroupPairsTypeId]: HttpGroupPairs
-    readonly [ModuleSpecTypeId]: Spec
+    readonly [ModuleSpecTypeId]: SpecWithEnvironment<Spec, Environment>
   }
+
+/**
+ * The assembled spec with the module's declared environment. Every spec the
+ * builder assembles carries its declarations at runtime; this narrows the
+ * spec's `environment` from "absent or any declarations" to the exact record.
+ * A module that declares nothing keeps its spec type unchanged, so the
+ * environment adds no type-instantiation cost to modules that do not use it.
+ *
+ * An explicit `Spec` that already declares exactly this environment is kept
+ * as it is, not intersected again. That is what lets a large module stay cheap
+ * to check: a spec named by a non-generic top-level alias
+ * (`type MySpec = Stdb.ModuleSpecFor<...> & { readonly environment: typeof
+ * myEnvironment }`) is one the checker knows holds no type parameters, so it
+ * never walks into it while instantiating the handler, accessor and
+ * transaction types that mention the module. The unnamed
+ * `Spec & { environment }` has no such name, and every generic call over the
+ * module re-instantiates through the whole spec: on a large module that
+ * was ten times the instantiations and check time of the named spec.
+ */
+export type SpecWithEnvironment<
+  Spec extends AnyModuleSpec,
+  Environment extends EnvironmentDeclarations,
+> = [keyof Environment] extends [never]
+  ? Spec
+  : SpecDeclaresEnvironment<Spec, Environment> extends true
+    ? Spec
+    : Spec & { readonly environment: Environment }
+
+type SpecDeclaresEnvironment<Spec, Environment> = [Spec] extends [
+  { readonly environment: infer Declared },
+]
+  ? [Declared, Environment] extends [Environment, Declared]
+    ? true
+    : false
+  : false
 
 export const StdbFn = {
   reducer: reducerEndpoint,
   procedure: procedureEndpoint,
   scheduledReducer: scheduledReducerEndpoint,
   scheduledProcedure: scheduledProcedureEndpoint,
+  receiver: receiverEndpoint,
+  outboxResult: outboxResultEndpoint,
+  /**
+   * A view answering its caller (`ViewCtx`). With `params`, a client calls it
+   * as `SELECT * FROM "name"(arg, ...)`: each distinct argument tuple, per
+   * caller, is its own materialized answer, and the returned rows lose any
+   * primary key.
+   */
   view: <
     const Name extends string,
     const Returns extends AnyValueType,
     const Public extends boolean = true,
+    const Params extends StructLikeValueType = EmptyViewParamsType,
   >(
     name: Name,
-    spec: { readonly returns: Returns; readonly public?: Public },
-  ): SenderViewDecl<Name, Returns, Public> => ({
+    spec: {
+      readonly returns: Returns
+      readonly public?: Public
+      readonly params?: Params
+    },
+  ): SenderViewDecl<Name, Returns, Public, Params> => ({
     declKind: "view",
     name,
     spec: defineSenderView({
       public: spec.public ?? true,
+      params: spec.params ?? EmptyViewParams,
       returns: spec.returns,
-    }) as SenderViewDecl<Name, Returns, Public>["spec"],
+    }) as SenderViewDecl<Name, Returns, Public, Params>["spec"],
   }),
+  /**
+   * A view answering every caller alike (`AnonymousViewCtx`), computed once
+   * and shared. With `params`, it is computed once per distinct argument
+   * tuple and shared among the callers passing it.
+   */
   anonymousView: <
     const Name extends string,
     const Returns extends AnyValueType,
     const Public extends boolean = true,
+    const Params extends StructLikeValueType = EmptyViewParamsType,
   >(
     name: Name,
-    spec: { readonly returns: Returns; readonly public?: Public },
-  ): AnonymousViewDecl<Name, Returns, Public> => ({
+    spec: {
+      readonly returns: Returns
+      readonly public?: Public
+      readonly params?: Params
+    },
+  ): AnonymousViewDecl<Name, Returns, Public, Params> => ({
     declKind: "view",
     name,
     spec: defineAnonymousView({
       public: spec.public ?? true,
+      params: spec.params ?? EmptyViewParams,
       returns: spec.returns,
-    }) as AnonymousViewDecl<Name, Returns, Public>["spec"],
+    }) as AnonymousViewDecl<Name, Returns, Public, Params>["spec"],
   }),
   init: (): LifecycleDecl<"init"> => ({
     declKind: "lifecycle",
@@ -466,15 +553,25 @@ const normalizeLifecycleConfig = (
         ]),
       )
 
+type EnvironmentOfConfig<Environment> =
+  Environment extends EnvironmentDeclarations ? Environment : {}
+
 export const StdbModule = {
   make: <
     const Id extends string,
     const Lifecycle extends LifecycleConfig | undefined = undefined,
+    const Environment extends EnvironmentDeclarations | undefined = undefined,
   >(
     id: Id,
     config?: {
       readonly settings?: ModuleSettings
       readonly lifecycle?: Lifecycle
+      /**
+       * Database environment keys the module reads, built with
+       * `Environment.string`, `Environment.secret`, `Environment.literal` and
+       * `Environment.optional`. Only a root module can declare an environment.
+       */
+      readonly environment?: Environment
     },
   ): StdbModule<
     Id,
@@ -486,7 +583,9 @@ export const StdbModule = {
     never,
     never,
     never,
-    never
+    never,
+    ModuleSpecFor<Id, {}, never, LifecycleOf<Lifecycle>, never>,
+    EnvironmentOfConfig<Environment>
   > =>
     makeModule<
       Id,
@@ -498,11 +597,13 @@ export const StdbModule = {
       never,
       never,
       never,
-      never
+      never,
+      EnvironmentOfConfig<Environment>
     >({
       id,
       tables: {},
       settings: config?.settings ?? {},
+      environment: config?.environment ?? {},
       lifecycle: normalizeLifecycleConfig(config?.lifecycle),
       groups: [],
     }),

@@ -6,6 +6,10 @@ import * as StdbClient from "effect-spacetimedb/client"
 import * as StdbServer from "effect-spacetimedb/server"
 import { FullModule, UserId as FullUserId } from "../fixtures/full-module"
 import type { Assert, Expand, IsEqual } from "./helpers"
+import {
+  fixtureCallDurationMax,
+  fixtureConnectTimeoutMillis,
+} from "../helpers/transport-bounds"
 
 const PublicApiString = Schema.String.pipe(
   Schema.check(Schema.isMaxLength(255)),
@@ -112,10 +116,22 @@ const generatedLayer = Full.client.ws.layerGenerated({
   DbConnection,
   uri: "ws://localhost:3000",
   databaseName: "example",
+  connectTimeoutMillis: fixtureConnectTimeoutMillis,
 })
 const generatedSession = Full.client.ws.tag<PublicGeneratedErrorContext>()
 void generatedLayer
 void generatedSession
+// @ts-expect-error a WebSocket connection must state its connect timeout.
+void Full.client.ws.layerGenerated({
+  DbConnection,
+  uri: "ws://localhost:3000",
+  databaseName: "example",
+})
+// @ts-expect-error an HTTP client must state its per-call bound.
+void Full.client.http.make({
+  uri: "http://localhost:3000",
+  databaseName: "full",
+})
 
 const PublicApiRequire = Stdb.StdbFn.reducer("public_api_require", {
   params: Stdb.struct({
@@ -330,11 +346,13 @@ const utilityHttpCall = utilityProject.client.http
   .make({
     uri: "http://localhost:3000",
     databaseName: "public_api_utilities",
+    callDurationMax: fixtureCallDurationMax,
   })
   .httpHandlers.utility_http({ userId: "user_1" })
 const utilityClient = utilityProject.client.http.make({
   uri: "http://localhost:3000",
   databaseName: "public_api_utilities",
+  callDurationMax: fixtureCallDurationMax,
 })
 const groupedUtilityReducerCall = utilityClient.Utility.reducers.utility_reduce(
   {
@@ -348,6 +366,7 @@ const groupedUtilityHttpCall =
 const scopedUtilityClient = utilityProject.client.http.group("Utility", {
   uri: "http://localhost:3000",
   databaseName: "public_api_utilities",
+  callDurationMax: fixtureCallDurationMax,
 })
 const scopedUtilityReducerCall = scopedUtilityClient.reducers.utility_reduce({
   userId: "user_1",
@@ -384,7 +403,11 @@ void groupedUtilityHttpCall
 void scopedUtilityReducerCall
 
 const declaredHttpHandlerCall = Full.client.http
-  .make({ uri: "http://localhost:3000", databaseName: "full" })
+  .make({
+    uri: "http://localhost:3000",
+    databaseName: "full",
+    callDurationMax: fixtureCallDurationMax,
+  })
   .httpHandlers.rotateToken({
     userId: Schema.decodeUnknownSync(FullUserId)("user_1"),
   })

@@ -1,3 +1,4 @@
+import type { Declarations as EnvironmentDeclarations } from "./environment.ts"
 import type { LifecycleSpecs } from "./lifecycle.ts"
 import type { HttpHandlerSpec } from "./http-handler.ts"
 import type { ProcedureSpec } from "./procedure.ts"
@@ -5,9 +6,10 @@ import type { ReducerSpec } from "./reducer.ts"
 import type { ModuleSettings } from "./settings.ts"
 import type { AnyTableSpec } from "./table.ts"
 import type { AnyViewSpec } from "./view.ts"
-import { canonicalNameForPolicy } from "./canonical-name.ts"
+import { canonicalNameForPolicy, snakeCaseName } from "./canonical-name.ts"
 import { StdbValidationError, type StdbDiagnostic } from "./diagnostic.ts"
 import { validate } from "./module-validation-public.ts"
+import { isReceiverSpec } from "./remote-interface.ts"
 
 export type ModuleWireNames = {
   readonly tables: Record<string, string>
@@ -28,10 +30,16 @@ export type ModuleSpec<
   HttpGroups extends Record<string, string> = Record<string, never>,
   ReducerGroups extends Record<string, string> = Record<string, never>,
   ProcedureGroups extends Record<string, string> = Record<string, never>,
+  Environment extends EnvironmentDeclarations = {},
 > = {
   readonly kind: "module"
   readonly name: string
   readonly settings: ModuleSettings
+  /**
+   * Declared database environment keys. Absent means the module declares
+   * none; `define` always fills it, so only hand-written specs omit it.
+   */
+  readonly environment?: Environment | undefined
   readonly tables: Tables
   readonly views: Views
   readonly reducers: Reducers
@@ -54,7 +62,8 @@ export type AnyModuleSpec = ModuleSpec<
   Record<string, HttpHandlerSpec>,
   Record<string, string>,
   Record<string, string>,
-  Record<string, string>
+  Record<string, string>,
+  EnvironmentDeclarations
 >
 
 type TablesOf<Tables> = Tables extends Record<string, AnyTableSpec>
@@ -81,6 +90,10 @@ type HttpHandlersOf<HttpHandlers> = HttpHandlers extends Record<
   : Record<string, never>
 
 type LifecycleOf<Lifecycle> = Lifecycle extends LifecycleSpecs ? Lifecycle : {}
+
+type EnvironmentOf<Environment> = Environment extends EnvironmentDeclarations
+  ? Environment
+  : {}
 
 type HttpGroupsOf<HttpGroups> = HttpGroups extends Record<string, string>
   ? HttpGroups
@@ -117,17 +130,27 @@ export const computeWireNames = (options: {
   readonly httpHandlers: Record<string, HttpHandlerSpec>
 }): ModuleWireNames => {
   const policy = options.settings.caseConversionPolicy
+  // A receiver is called by the name in its caller's generated binding, so its
+  // wire name is the snake_case of its key under every policy.
+  const receiverKeys = Object.entries(options.reducers)
+    .filter(([, spec]) => isReceiverSpec(spec))
+    .map(([key]) => key)
   return {
     tables: wireNameRecord(
       policy,
       Object.values(options.tables).map((table) => table.name),
     ),
     views: wireNameRecord(policy, Object.keys(options.views)),
-    functions: wireNameRecord(policy, [
-      ...Object.keys(options.reducers),
-      ...Object.keys(options.procedures),
-      ...Object.keys(options.httpHandlers),
-    ]),
+    functions: {
+      ...wireNameRecord(policy, [
+        ...Object.keys(options.reducers),
+        ...Object.keys(options.procedures),
+        ...Object.keys(options.httpHandlers),
+      ]),
+      ...Object.fromEntries(
+        receiverKeys.map((key) => [key, snakeCaseName(key)] as const),
+      ),
+    },
   }
 }
 
@@ -145,9 +168,11 @@ export const define = <
   const HttpGroups extends Record<string, string> | undefined = undefined,
   const ReducerGroups extends Record<string, string> | undefined = undefined,
   const ProcedureGroups extends Record<string, string> | undefined = undefined,
+  const Environment extends EnvironmentDeclarations | undefined = undefined,
 >(options: {
   readonly name: string
   readonly settings?: ModuleSettings
+  readonly environment?: Environment | undefined
   readonly tables?: Tables
   readonly views?: Views
   readonly reducers?: Reducers
@@ -167,12 +192,14 @@ export const define = <
   HttpHandlersOf<HttpHandlers>,
   HttpGroupsOf<HttpGroups>,
   ReducerGroupsOf<ReducerGroups>,
-  ProcedureGroupsOf<ProcedureGroups>
+  ProcedureGroupsOf<ProcedureGroups>,
+  EnvironmentOf<Environment>
 > => {
   const module = {
     kind: "module" as const,
     name: options.name,
     settings: options.settings ?? {},
+    environment: (options.environment ?? {}) as EnvironmentOf<Environment>,
     tables: (options.tables ?? {}) as TablesOf<Tables>,
     views: (options.views ?? {}) as ViewsOf<Views>,
     reducers: (options.reducers ?? {}) as ReducersOf<Reducers>,

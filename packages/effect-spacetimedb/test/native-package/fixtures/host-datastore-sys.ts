@@ -1,4 +1,3 @@
-
 /**
  * A minimal in-memory stand-in for the SpaceTimeDB host datastore, faithful to
  * the parts of the `spacetime:sys@2.0` ABI that index scans depend on. It lets
@@ -401,3 +400,9 @@ export const procedure_start_mut_tx = (): bigint => 0n
 export const procedure_commit_mut_tx = (): void => undefined
 
 export const procedure_abort_mut_tx = (): void => undefined
+
+// `spacetime:sys@2.2`: the datastore fixtures declare no environment, so a
+// read would be a module bug this stub surfaces rather than answers.
+export const env_get = (key: string): string | null => {
+  throw new Error(`host datastore stub has no environment value for ${key}`)
+}

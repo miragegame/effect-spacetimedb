@@ -18,7 +18,7 @@ class LiveWebSocketCompressedMessageError extends Data.TaggedError(
   readonly tag: number | undefined
 }> {}
 
-type LiveWebSocketArgs = {
+export type LiveWebSocketArgs = {
   readonly url: URL
   readonly wsProtocol: ReadonlyArray<string>
   readonly nameOrAddress: string
@@ -26,6 +26,9 @@ type LiveWebSocketArgs = {
   readonly compression: "gzip" | "brotli" | "none"
   readonly lightMode: boolean
   readonly confirmedReads?: boolean
+  readonly connectionId?: string
+  /** Sent only with automatic reconnect: one session across its sockets. */
+  readonly sessionId?: string
 }
 
 const toBinaryMessage = async (data: unknown): Promise<Uint8Array> => {
@@ -53,6 +56,8 @@ export const makeLiveWebSocket = async ({
   compression,
   lightMode,
   confirmedReads,
+  connectionId,
+  sessionId,
 }: LiveWebSocketArgs) => {
   const { WebSocket } = await import("undici")
   const headers = new Headers()
@@ -87,6 +92,14 @@ export const makeLiveWebSocket = async ({
   }
   if (confirmedReads !== undefined) {
     databaseUrl.searchParams.set("confirmed", confirmedReads.toString())
+  }
+  // The SDK's own socket factory forwards both; the session id is what lets
+  // the server retire the previous socket before an automatic reconnect.
+  if (connectionId !== undefined) {
+    databaseUrl.searchParams.set("connection_id", connectionId)
+  }
+  if (sessionId !== undefined) {
+    databaseUrl.searchParams.set("session_id", sessionId)
   }
 
   let openHandler: (() => void) | undefined

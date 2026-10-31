@@ -69,7 +69,7 @@ stay a `bigint`.
 
 | Helper | Authored TypeScript value | SATS lowering | Notes |
 | --- | --- | --- | --- |
-| `Stdb.array(T)` | `ReadonlyArray<TypeOf<T>>` | array/list | Recurses through the inner value type. |
+| `Stdb.array(T, { minimum, maximum })` | `ReadonlyArray<TypeOf<T>>` | array/list | Recurses through the inner value type. The inclusive length bounds are required and enforced on decode and encode; they never reach the wire, so arrays differing only in bounds lower identically. |
 | `Stdb.option(T)` | `TypeOf<T>` or `undefined` | `option<T>` | Present field whose value can be absent. |
 | `Stdb.optional(T)` | optional struct field | `option<T>` in structs | Produces an optional TypeScript property. |
 | `T.optional()` | optional table column | `option<T>` column | Column may be omitted on inserts. |

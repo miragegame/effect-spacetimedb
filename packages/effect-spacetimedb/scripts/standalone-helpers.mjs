@@ -10,7 +10,7 @@ import {
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
-export const requiredSpacetimeCliVersion = "2.10.1"
+export const requiredSpacetimeCliVersion = "2.14.0"
 
 const configuredPackageRoot =
   process.env.EFFECT_SPACETIMEDB_PACKAGE_ROOT?.trim()
@@ -37,6 +37,31 @@ export const exampleModuleProject = {
   bundlePath: exampleBundlePath,
   databaseNamePrefix: "effect-spacetimedb-example",
 }
+
+// The inter-database-call example: a receiver module and a sender module, each
+// published to its own database on one standalone. The sender commits the
+// receiver binding generated from the receiver's bundle.
+const idcPairRoot = join(packageRoot, "examples", "idc-pair")
+
+export const idcPairReceiverProject = {
+  moduleRoot: join(idcPairRoot, "receiver"),
+  bundlePath: join(idcPairRoot, "receiver", "dist", "bundle.js"),
+  databaseNamePrefix: "effect-spacetimedb-idc-receiver",
+}
+
+export const idcPairSenderProject = {
+  moduleRoot: join(idcPairRoot, "sender"),
+  bundlePath: join(idcPairRoot, "sender", "dist", "bundle.js"),
+  databaseNamePrefix: "effect-spacetimedb-idc-sender",
+}
+
+export const idcPairReceiverBindingDir = join(
+  idcPairRoot,
+  "sender",
+  "src",
+  "remote",
+  "pair_inbox",
+)
 
 export const migrationFixtureRoot = join(
   packageRoot,

@@ -14,7 +14,10 @@ import type {
   IsUniqueIndexColumns,
   TableRow,
 } from "../table-index-typing.ts"
+import type { ServerEnvironmentReader } from "./environment.ts"
 import type { ProcedureHttpRequestOptions } from "./services.ts"
+
+export type { ServerEnvironmentReader } from "./environment.ts"
 
 export type { TableRow } from "../table-index-typing.ts"
 
@@ -132,11 +135,29 @@ export type ServerJwtClaims = {
   readonly fullPayload: { readonly [key: string]: ServerJsonValue }
 }
 
-export type ServerSenderAuth = Readonly<{
-  readonly isInternal: boolean
-  readonly hasJWT: boolean
-  readonly jwt: ServerJwtClaims | null
-}>
+/**
+ * How the host authenticated a transaction's sender (SpacetimeDB 2.14 and
+ * later). It is internal exactly when the sender is the database itself, as for
+ * a scheduled reducer or a scheduled procedure's transaction, and an internal
+ * sender never carries a JWT. Any other sender carries the JWT its connection
+ * presented, or none.
+ */
+export type ServerSenderAuth =
+  | {
+      readonly isInternal: true
+      readonly hasJWT: false
+      readonly jwt: null
+    }
+  | {
+      readonly isInternal: false
+      readonly hasJWT: true
+      readonly jwt: ServerJwtClaims
+    }
+  | {
+      readonly isInternal: false
+      readonly hasJWT: false
+      readonly jwt: null
+    }
 
 type IntArray =
   | Int8Array
@@ -166,6 +187,7 @@ export const ProcedureClockNow = Symbol.for(
 )
 
 type BaseCallableCtx = {
+  readonly env: ServerEnvironmentReader
   readonly sender: ServerSender
   readonly databaseIdentity: ServerDatabaseIdentity
   /** @deprecated Use `databaseIdentity` instead. */
@@ -201,6 +223,7 @@ export type ProcedureCtxLike<Module extends AnyModuleSpec> = BaseCallableCtx & {
 }
 
 export type HttpHandlerCtxLike<Module extends AnyModuleSpec> = {
+  readonly env: ServerEnvironmentReader
   readonly timestamp: ServerTimestamp
   readonly http: NativeProcedureHttp
   readonly databaseIdentity: ServerDatabaseIdentity
@@ -211,12 +234,14 @@ export type HttpHandlerCtxLike<Module extends AnyModuleSpec> = {
 }
 
 export type ViewCtxLike<Module extends AnyModuleSpec> = {
+  readonly env: ServerEnvironmentReader
   readonly sender: ServerSender
   readonly db: DbShape<Module>
   readonly from: ServerQueryRoot<Module>
 }
 
 export type AnonymousViewCtxLike<Module extends AnyModuleSpec> = {
+  readonly env: ServerEnvironmentReader
   readonly db: DbShape<Module>
   readonly from: ServerQueryRoot<Module>
 }

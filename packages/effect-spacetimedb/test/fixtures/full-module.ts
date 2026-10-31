@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
+import { testViewRowsLength } from "../helpers/array-bounds"
 
 export const UserId = Schema.String.pipe(Schema.brand("UserId"))
 export type UserId = typeof UserId.Type
@@ -60,7 +61,7 @@ const fullTables = [user, presenceEvent, reminder] as const
 const FullCallables = Stdb.StdbGroup.make("FullCallables")
   .add(
     Stdb.StdbFn.anonymousView("allUsers", {
-      returns: Stdb.array(user.row),
+      returns: Stdb.array(user.row, testViewRowsLength),
     }),
   )
   .add(

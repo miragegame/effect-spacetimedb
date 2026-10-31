@@ -16,12 +16,12 @@ import type { StdbHostFailure } from "./services.ts"
 type WithTx<Module extends AnyModuleSpec> = <A, E, R>(
   effect: ServerContext.EffectWithoutForbiddenRequirements<
     Effect.Effect<A, E, R>,
-    TxAllowedRequirements
+    ServerContext.WithEnv<TxAllowedRequirements>
   >,
 ) => Effect.Effect<
   A,
   E | StdbHostFailure | StdbDecodeError,
-  | Exclude<R, TxAllowedRequirements>
+  | Exclude<R, ServerContext.WithEnv<TxAllowedRequirements>>
   | ServerContext.ModuleScopedRequirement<Module, ServerContext.TxRunner>
 >
 
@@ -33,12 +33,12 @@ export const makeTransactionHelpers = <Module extends AnyModuleSpec>(): {
   const withTx = <A, E, R>(
     effect: ServerContext.EffectWithoutForbiddenRequirements<
       Effect.Effect<A, E, R>,
-      TxAllowedRequirements
+      ServerContext.WithEnv<TxAllowedRequirements>
     >,
   ): Effect.Effect<
     A,
     E | StdbHostFailure | StdbDecodeError,
-    | Exclude<R, TxAllowedRequirements>
+    | Exclude<R, ServerContext.WithEnv<TxAllowedRequirements>>
     | ServerContext.ModuleScopedRequirement<Module, ServerContext.TxRunner>
   > =>
     // Legacy ServerInstance.withTx validation is intentionally module-blind;
@@ -49,7 +49,7 @@ export const makeTransactionHelpers = <Module extends AnyModuleSpec>(): {
     ) as Effect.Effect<
       A,
       E | StdbHostFailure | StdbDecodeError,
-      | Exclude<R, TxAllowedRequirements>
+      | Exclude<R, ServerContext.WithEnv<TxAllowedRequirements>>
       | ServerContext.ModuleScopedRequirement<Module, ServerContext.TxRunner>
     >
 
@@ -86,7 +86,7 @@ export const makeTransactionHelpers = <Module extends AnyModuleSpec>(): {
     const run = withTx(
       constrained as ServerContext.EffectWithoutForbiddenRequirements<
         Effect.Effect<A, E, R>,
-        TxAllowedRequirements
+        ServerContext.WithEnv<TxAllowedRequirements>
       >,
     )
     // Server binding boundary: withTx preserves the caller channel after removing tx-scoped services.

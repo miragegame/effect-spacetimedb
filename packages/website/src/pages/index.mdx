@@ -98,9 +98,9 @@ const CreateUser = Stdb.struct({
   name: Stdb.string(UserName),
 })`;
 
-export const CLIENT_SRC = `import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+export const CLIENT_SRC = `import * as HttpApiClient from "effect/http-api/HttpApiClient"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
 
 const Example = Stdb.project(Module)
 const api = Stdb.toHttpApi(Module)

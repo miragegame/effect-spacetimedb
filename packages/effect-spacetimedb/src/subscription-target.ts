@@ -5,8 +5,11 @@ import type {
   PublicPersistentTables,
   PublicViewKeys,
   PublicViews,
+  ViewCallArgsOf,
   ViewRowOf,
+  ViewTakesArgs,
 } from "./module-projection.ts"
+import { viewTakesArgs } from "./contract/view.ts"
 import type { StdbPredicate, StdbRowExpr } from "./query/types.ts"
 import { typedEntries, typedFromEntries } from "./utils.ts"
 
@@ -55,6 +58,12 @@ export type EventTableSubscriptionTarget<
   readonly __row?: TableRow<Module["tables"][Key]>
 }
 
+/**
+ * A subscription to one view. A view that declares params is subscribed to
+ * through a call, `SELECT * FROM "name"(args)`; every call a connection holds
+ * answers into the view's one client cache, which therefore holds the union
+ * of their rows.
+ */
 export type ViewSubscriptionTarget<
   Module extends AnyModuleSpec,
   Key extends PublicViewKeys<Module> = PublicViewKeys<Module>,
@@ -62,8 +71,25 @@ export type ViewSubscriptionTarget<
   readonly kind: "view"
   readonly key: Key
   readonly name: string
+  /** The params the arguments encode through; an empty struct without them. */
+  readonly params: Module["views"][Key]["params"]
+  /** The call's arguments; `{}` for a view without params. */
+  readonly args: ViewCallArgsOf<Module["views"][Key]>
   readonly __row?: ViewRowOf<Module["views"][Key]>
 }
+
+/**
+ * The projected target of a view: the target itself for a view without
+ * params, a call building one for a view with them.
+ */
+export type ViewTargetOf<
+  Module extends AnyModuleSpec,
+  Key extends PublicViewKeys<Module>,
+> = ViewTakesArgs<Module["views"][Key]> extends true
+  ? (
+      args: ViewCallArgsOf<Module["views"][Key]>,
+    ) => ViewSubscriptionTarget<Module, Key>
+  : ViewSubscriptionTarget<Module, Key>
 
 export type QuerySubscriptionTarget<
   Module extends AnyModuleSpec,
@@ -152,10 +178,7 @@ export type ProjectedSubscriptionTargets<Module extends AnyModuleSpec> = {
     >
   }
   readonly views: {
-    readonly [Key in PublicViewKeys<Module>]: ViewSubscriptionTarget<
-      Module,
-      Key
-    >
+    readonly [Key in PublicViewKeys<Module>]: ViewTargetOf<Module, Key>
   }
   readonly allPublicTables: () => AllPublicTablesSubscriptionTarget<Module>
 }
@@ -212,11 +235,25 @@ const makeViewTarget = <
 >(
   key: Key,
   name: string,
-): ViewSubscriptionTarget<Module, Key> => ({
-  kind: "view",
-  key,
-  name,
-})
+  params: Module["views"][Key]["params"],
+): ViewTargetOf<Module, Key> => {
+  const call = (
+    args: ViewCallArgsOf<Module["views"][Key]>,
+  ): ViewSubscriptionTarget<Module, Key> => ({
+    kind: "view",
+    key,
+    name,
+    params,
+    args,
+  })
+  // Projection boundary: whether the view takes arguments is decided by its
+  // params value at runtime, which `ViewTargetOf` decides from its type.
+  return (
+    viewTakesArgs(params)
+      ? call
+      : call({} as ViewCallArgsOf<Module["views"][Key]>)
+  ) as ViewTargetOf<Module, Key>
+}
 
 export const makeTargetsFromModule = <Module extends AnyModuleSpec>(options: {
   readonly module: Module
@@ -238,11 +275,12 @@ export const makeTargetsFromModule = <Module extends AnyModuleSpec>(options: {
     ]),
   )
   const views = typedFromEntries(
-    typedEntries(options.publicViews).map(([key]) => [
+    typedEntries(options.publicViews).map(([key, viewSpec]) => [
       key,
       makeViewTarget<Module, typeof key>(
         key,
         options.module.wireNames.views[key] ?? key,
+        viewSpec.params,
       ),
     ]),
   )

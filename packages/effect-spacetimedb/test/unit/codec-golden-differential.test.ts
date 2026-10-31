@@ -1262,7 +1262,7 @@ describe("codec golden differential", (it) => {
       // every `{ run }` transformation holder into
       // `{ _tag: "TransformEffect", transform }`. What this golden is for is
       // the failure identity around it (the tags, messages and issue shapes),
-      // and none of that moved on rc.117.
+      // and none of that moved on rc.117 or on the stable 4.1.1.
       expect(snapshots).toMatchInlineSnapshot(`
         {
           "callableProtocol": {

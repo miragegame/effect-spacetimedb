@@ -4,6 +4,7 @@ import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 import { build } from "effect-spacetimedb/server-compiler"
+import { testViewRowsLength } from "../helpers/array-bounds"
 
 const UserId = Stdb.string(Schema.String.pipe(Schema.brand("GroupedUserId")))
 type UserId = typeof UserId.Type
@@ -53,12 +54,12 @@ const UserFunctions = Stdb.StdbGroup.make("User")
   )
   .add(
     Stdb.StdbFn.view("self_users", {
-      returns: Stdb.array(groupedUser.row),
+      returns: Stdb.array(groupedUser.row, testViewRowsLength),
     }),
   )
   .add(
     Stdb.StdbFn.anonymousView("allUsers", {
-      returns: Stdb.array(groupedUser.row),
+      returns: Stdb.array(groupedUser.row, testViewRowsLength),
     }),
   )
   .add(Stdb.StdbFn.init())

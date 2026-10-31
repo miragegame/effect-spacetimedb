@@ -1,33 +1,32 @@
-//
 // Two copies of effect-spacetimedb installed side by side read each other's
 // field-options annotations, because the annotation key is a global symbol.
 // This smoke is the only check that exercises that against a real npm install
-// of the published package, and since Effect `4.0.0-rc.113` it has to say which
-// Effect each copy runs on, because no single Effect can load both:
+// of the published package, and it has to say which Effect each copy runs on,
+// because no single Effect can load both:
 //
-//   * The 0.7.0 candidate needs `effect@4.0.0-rc.117` — its declared floor.
-//     rc.113 renamed `SchemaGetter.transformOrFail` to `transformEffect` and
-//     rc.116 reshaped `SchemaGetter.Getter`, and the candidate speaks the new
-//     spelling.
-//   * Published 0.6.0 cannot load on `effect >= 4.0.0-rc.113` at all: its
-//     `dist/schema-transform.js` calls `SchemaGetter.transformOrFail` while the
-//     module is being evaluated, so importing it throws a `TypeError` before any
-//     of its API is reachable. A shipped tarball cannot be changed, so this is
-//     permanent. `4.0.0-rc.112` is the newest Effect it can load.
+//   * The candidate needs `effect@4.1.1` — its declared floor. The stable
+//     line removed the `effect/unstable/*` subpaths every release through 0.7.0
+//     imports, and the candidate speaks the stable spelling.
+//   * Published 0.7.0 cannot load on the stable line at all: it resolves an
+//     `effect/unstable/*` subpath that no longer exists. A shipped tarball
+//     cannot be changed, so this is permanent. `4.0.0-rc.117`, the release
+//     candidate it was built on, is the newest Effect it can load.
 //
 // So the smoke runs two scenarios against one packed candidate:
 //
 //   1. `declared-floor` — one consumer, one hoisted `effect` at the candidate's
 //      pin, both packages installed. This is the tree a user upgrading today
-//      actually gets, and what it proves is that a stale 0.6.0 copy cannot
+//      actually gets, and what it proves is that a stale 0.7.0 copy cannot
 //      silently misread anything, because it cannot be imported.
-//   2. `legacy-window` — a nested consumer that gives published 0.6.0 its own
-//      `effect@4.0.0-rc.112` while the candidate keeps resolving the outer
-//      rc.117. Both copies load, so the field-options version boundary is
-//      observable, which is the only window in which it ever is. The global
-//      `Symbol.for(...)` keys are process-wide, so the two copies recognise each
-//      other's value types across the two Effect realms exactly as they would
-//      inside one.
+//   2. `legacy-window` — a nested consumer that gives published 0.7.0 its own
+//      `effect@4.0.0-rc.117` while the candidate keeps resolving the outer
+//      4.1.1. Both copies load, which is the only window in which they can
+//      meet. Both write field-options payload version 2 under the same key, so
+//      each must read the other's options exactly; a payload change in either
+//      direction would show here first. The global `Symbol.for(...)` keys are
+//      process-wide, so the two copies recognise each other's value types
+//      across the two Effect realms exactly as they would inside one. (The
+//      0.6.x payload boundary is pinned by the field-options version unit test.)
 import {
   mkdirSync,
   mkdtempSync,
@@ -37,15 +36,15 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { packPublishArchive } from "./pack.mjs"
+import { resolvePublishArchive } from "./pack.mjs"
 import { packageRoot, runCommand } from "./standalone-helpers.mjs"
 
-const publishedVersion = "0.6.0"
+const publishedVersion = "0.7.0"
 
-// The newest Effect published 0.6.0 can be imported on. Not derived from any
+// The newest Effect published 0.7.0 can be imported on. Not derived from any
 // manifest on purpose: it is a fact about a released tarball, and it can only
 // change if npm loses a version.
-const publishedEffectVersion = "4.0.0-rc.112"
+const publishedEffectVersion = "4.0.0-rc.117"
 
 const nodeMajorVersion = Number.parseInt(
   process.versions.node.split(".")[0],
@@ -111,10 +110,10 @@ const npmInstall = (cwd) =>
   )
 
 try {
-  const tarball = await packPublishArchive(packDir)
+  const tarball = await resolvePublishArchive(packDir)
 
-  // The two copies peer on different SpaceTimeDB majors (published 0.6.0 wants
-  // ~2.6.1, the candidate ~2.10.1), so no single install satisfies both peer
+  // The two copies peer on different SpaceTimeDB minors (published 0.7.0 wants
+  // ~2.10.1, the candidate ~2.14.0), so no single install satisfies both peer
   // ranges — that disagreement is the point of the scenario, not an accident to
   // route around. `--legacy-peer-deps` makes npm install exactly the tree
   // spelled out below instead of resolving peers, and the contract layer this
@@ -140,7 +139,7 @@ try {
     )}\n`,
   )
 
-  // Nested, so Node's upward resolution gives published 0.6.0 the Effect it can
+  // Nested, so Node's upward resolution gives published 0.7.0 the Effect it can
   // load while the candidate — which lives in the parent's node_modules —
   // keeps resolving the parent's. `spacetimedb` and `estdb-candidate` are
   // deliberately absent here and resolve upward to the single shared copy.
@@ -196,7 +195,7 @@ if (candidateOnly.constraints.length === 0 || candidateOnly.indexes.length === 0
   throw new Error(\`Candidate \${candidateVersion} did not read its own field options on effect \${installedEffect}\`)
 }
 
-// Published 0.6.0 in the same tree cannot be imported at all. This is what an
+// Published 0.7.0 in the same tree cannot be imported at all. This is what an
 // upgrading user actually hits, and it is why the annotation boundary below is
 // unreachable on this Effect: a copy that cannot load cannot misread a field.
 let importError
@@ -210,9 +209,12 @@ if (importError === undefined) {
     \`Published \${installedPublished} imported successfully on effect \${installedEffect}; the mixed-install story changed and this smoke must be revisited\`,
   )
 }
-if (!String(importError).includes("transformOrFail")) {
+if (
+  importError.code !== "ERR_MODULE_NOT_FOUND" ||
+  !String(importError).includes("/effect/dist/unstable/")
+) {
   throw new Error(
-    \`Expected published \${installedPublished} to fail importing on the removed SchemaGetter.transformOrFail, got: \${String(importError)}\`,
+    \`Expected published \${installedPublished} to fail importing a removed effect/unstable subpath, got: \${String(importError)}\`,
   )
 }
 
@@ -222,9 +224,9 @@ process.stdout.write(
 `,
   )
 
-  // --- Scenario 2: the rc.110–rc.112 window, where the boundary is visible ---
+  // --- Scenario 2: the rc.117 window, where both copies load ----------------
   writeFileSync(
-    path.join(legacyWindowDir, "check-annotation-boundary.mjs"),
+    path.join(legacyWindowDir, "check-legacy-window.mjs"),
     `import { readFileSync } from "node:fs"
 import * as Candidate from "estdb-candidate"
 import * as Published from "estdb-published"
@@ -249,99 +251,49 @@ if (publishedEffect !== ${JSON.stringify(publishedEffectVersion)}) {
   throw new Error(\`Expected published \${installedPublished} on effect ${publishedEffectVersion}, found \${publishedEffect}\`)
 }
 
-// On Effect 4 release candidates a Schema is callable, which 0.6.0's value-type
-// guard predates: 0.6.0 throws "not supported for this SpaceTimeDB column type"
-// from the options that consult its type metadata. Asserted, not assumed — if a
-// future Effect made 0.6.0 whole again, more of its surface would become live
-// in a mixed install and this smoke should be revisited.
-for (const [label, build] of [
-  ["primaryKey", () => Published.string().primaryKey()],
-  ["name", () => Published.string().name("wire_name")],
-]) {
-  let metadataError
-  try {
-    build()
-  } catch (error) {
-    metadataError = error
-  }
-  if (metadataError === undefined) {
-    throw new Error(
-      \`Published \${installedPublished} accepted .\${label}() on effect \${publishedEffect}; the mixed-install story changed\`,
-    )
-  }
-}
-
-// Both copies mint Symbol.for("effect-spacetimedb/StdbValueType"), a key in the
-// process-wide symbol registry rather than in either Effect realm, so each one
-// really does accept the other's value types as columns; without that, the
-// scenario could not happen in the first place. The options below are the ones
-// published 0.6.0 can still write under its Effect, and they are enough to
-// produce its legacy annotation payload.
+// The same options, authored once by each copy. Both copies mint
+// Symbol.for("effect-spacetimedb/StdbValueType"), a key in the process-wide
+// symbol registry rather than in either Effect realm, so each accepts the
+// other's value types as columns.
 const publishedColumn = Published.string().unique().index("btree")
-const candidateColumn = Candidate.string()
-  .primaryKey()
-  .unique()
-  .index("btree")
-  .name("wire_name")
+const candidateColumn = Candidate.string().unique().index("btree")
 
-// Direction 1: the candidate reads a field the published 0.6.0 copy annotated.
-let boundaryError
-try {
-  Candidate.table("mixedVersionTable", { columns: { id: publishedColumn } })
-} catch (error) {
-  boundaryError = error
-}
-if (!(boundaryError instanceof Candidate.StdbFieldOptionsVersionError)) {
-  throw new Error(
-    \`Expected StdbFieldOptionsVersionError reading a \${installedPublished} field, got \${String(boundaryError)}\`,
-  )
-}
-if (boundaryError._tag !== "StdbFieldOptionsVersionError") {
-  throw new Error(\`Unexpected error tag \${String(boundaryError._tag)}\`)
-}
-for (const fragment of [
-  "annotation payload version 1",
-  "0.6.x",
-  "annotation payload version 2",
-  "deduplicate effect-spacetimedb to one version",
-]) {
-  if (!boundaryError.message.includes(fragment)) {
-    throw new Error(\`Boundary error message is missing "\${fragment}": \${boundaryError.message}\`)
+// A table spec's constraints and indexes are plain data derived from the field
+// options, so equal JSON means the reader saw the same options.
+const shapeOf = (spec) =>
+  JSON.stringify({ constraints: spec.constraints, indexes: spec.indexes })
+
+// Each reader's view of its own copy's field is the reference: who authored a
+// field must not change what a reader sees.
+const expectAuthorInvisible = (label, reader, ownColumn, foreignColumn) => {
+  const own = reader.table("mixedVersionTable", { columns: { id: ownColumn } })
+  const foreign = reader.table("mixedVersionTable", { columns: { id: foreignColumn } })
+  if (own.constraints.length === 0 || own.indexes.length === 0) {
+    throw new Error(\`\${label}: the reader did not read its own field options; the fixture is wrong\`)
+  }
+  if (shapeOf(foreign) !== shapeOf(own)) {
+    throw new Error(\`\${label}: read \${shapeOf(foreign)} from the other copy's field, but \${shapeOf(own)} from its own\`)
   }
 }
 
-// Direction 2: published 0.6.0 reads a candidate field. We cannot change what a
-// released package does, and 0.6.0 only looks under the unversioned key, so it
-// sees an unannotated column: no primary key constraint, no unique constraint,
-// no index, and the column keeps its property name on the wire. It never
-// misreads an option as a *different* option, which is what the new key buys.
-const publishedView = Published.table("mixedVersionTable", {
-  columns: { id: candidateColumn },
-})
-if (publishedView.constraints.length !== 0) {
-  throw new Error(
-    \`Expected \${installedPublished} to see no constraints on a \${candidateVersion} column, got \${JSON.stringify(publishedView.constraints)}\`,
-  )
-}
-if (publishedView.indexes.length !== 0) {
-  throw new Error(
-    \`Expected \${installedPublished} to see no indexes on a \${candidateVersion} column, got \${JSON.stringify(publishedView.indexes)}\`,
-  )
-}
+// Direction 1: the candidate reads a field the published copy annotated.
+expectAuthorInvisible(
+  \`candidate \${candidateVersion} reading a \${installedPublished} field\`,
+  Candidate,
+  candidateColumn,
+  publishedColumn,
+)
 
-// The same table authored entirely by the published copy does see its options,
-// so the empty result above is the version boundary and not a broken fixture.
-const publishedNative = Published.table("publishedOnlyTable", {
-  columns: { id: publishedColumn },
-})
-if (publishedNative.constraints.length === 0 || publishedNative.indexes.length === 0) {
-  throw new Error(
-    \`Published \${installedPublished} did not read its own field options; the fixture is wrong\`,
-  )
-}
+// Direction 2: the published copy reads a field the candidate annotated.
+expectAuthorInvisible(
+  \`published \${installedPublished} reading a \${candidateVersion} field\`,
+  Published,
+  publishedColumn,
+  candidateColumn,
+)
 
 process.stdout.write(
-  \`legacy-window: on effect \${publishedEffect} both copies load, and candidate \${candidateVersion} fails explicitly on a \${installedPublished} field while \${installedPublished} reads a \${candidateVersion} field as carrying no options.\\n\`,
+  \`legacy-window: on effect \${publishedEffect} and \${candidateEffect} both copies load, and candidate \${candidateVersion} and published \${installedPublished} read each other's field options exactly.\\n\`,
 )
 `,
   )
@@ -352,7 +304,7 @@ process.stdout.write(
     }),
   )
   process.stdout.write(
-    runCommand(process.execPath, ["check-annotation-boundary.mjs"], {
+    runCommand(process.execPath, ["check-legacy-window.mjs"], {
       cwd: legacyWindowDir,
     }),
   )

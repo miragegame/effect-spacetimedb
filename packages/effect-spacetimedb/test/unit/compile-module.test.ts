@@ -1,12 +1,17 @@
 import { make as makeServer } from "../../src/server/bind.ts"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import * as EffectVitest from "@effect/vitest"
 const { expect } = EffectVitest
 import { compileModule } from "../helpers/compile-module"
 import * as Stdb from "effect-spacetimedb"
-import { registerCompiledModule } from "../helpers/spacetimedb-server"
+import {
+  invokeModuleExport,
+  registerCompiledModule,
+} from "../helpers/spacetimedb-server"
 import { TestSyncRunner } from "../helpers/sync-runner"
 import { TestLayer } from "../helpers/test-layer"
+import { testViewRowsLength } from "../helpers/array-bounds"
 
 const describe = EffectVitest.layer(TestLayer)
 
@@ -73,21 +78,18 @@ const exportParams = (value: unknown): Record<string, CapturedBuilder> => {
   return params
 }
 
-const viewDefinitions = (
-  schema: unknown,
-): ReadonlyArray<{
+type ViewDefinition = {
   readonly sourceName: string
   readonly exportName: string
   readonly public: boolean
-}> =>
+  readonly params: Record<string, CapturedBuilder>
+}
+
+const viewDefinitions = (schema: unknown): ReadonlyArray<ViewDefinition> =>
   (
     schema as {
       readonly moduleDef: {
-        readonly views: ReadonlyArray<{
-          readonly sourceName: string
-          readonly exportName: string
-          readonly public: boolean
-        }>
+        readonly views: ReadonlyArray<ViewDefinition>
       }
     }
   ).moduleDef.views
@@ -462,7 +464,10 @@ describe("compiled module exports", (it) => {
             )
             .add(
               Stdb.StdbFn.anonymousView("beta", {
-                returns: Stdb.array(Stdb.struct({ id: Stdb.string() })),
+                returns: Stdb.array(
+                  Stdb.struct({ id: Stdb.string() }),
+                  testViewRowsLength,
+                ),
               }),
             ),
         ).spec
@@ -508,7 +513,10 @@ describe("compiled module exports", (it) => {
       const ViewModule = Stdb.StdbModule.make("compiled_views", {}).add(
         Stdb.StdbGroup.make("Views").add(
           Stdb.StdbFn.anonymousView("activePlayers", {
-            returns: Stdb.array(Stdb.struct({ id: Stdb.string() })),
+            returns: Stdb.array(
+              Stdb.struct({ id: Stdb.string() }),
+              testViewRowsLength,
+            ),
           }),
         ),
       ).spec
@@ -536,6 +544,7 @@ describe("compiled module exports", (it) => {
           sourceName: "active_players",
           exportName: "active_players",
           public: true,
+          params: {},
         },
       ])
     }),
@@ -550,7 +559,10 @@ describe("compiled module exports", (it) => {
       }).add(
         Stdb.StdbGroup.make("Views").add(
           Stdb.StdbFn.anonymousView("activePlayers", {
-            returns: Stdb.array(Stdb.struct({ id: Stdb.string() })),
+            returns: Stdb.array(
+              Stdb.struct({ id: Stdb.string() }),
+              testViewRowsLength,
+            ),
           }),
         ),
       ).spec
@@ -577,9 +589,71 @@ describe("compiled module exports", (it) => {
           sourceName: "activePlayers",
           exportName: "activePlayers",
           public: true,
+          params: {},
         },
       ])
     }),
+  )
+
+  it.effect(
+    "compiles view params in field order and hands the handler decoded arguments",
+    () =>
+      Effect.gen(function* () {
+        const Author = Stdb.string(
+          Schema.String.pipe(Schema.check(Schema.isMaxLength(8))),
+        )
+        const ViewModule = Stdb.StdbModule.make("compiled_view_params", {}).add(
+          Stdb.StdbGroup.make("Views").add(
+            Stdb.StdbFn.anonymousView("postsByAuthor", {
+              params: Stdb.struct({ authorId: Author, published: Stdb.bool() }),
+              returns: Stdb.array(
+                Stdb.struct({ authorId: Author, published: Stdb.bool() }),
+                testViewRowsLength,
+              ),
+            }),
+          ),
+        ).spec
+        const server = makeServer({
+          module: ViewModule,
+          runtime: TestSyncRunner,
+        })
+        const compiled = compileModule({
+          server,
+          handlers: server.handlers({
+            views: {
+              postsByAuthor: Effect.fn(function* (args) {
+                return [args]
+              }),
+            },
+          }),
+        })
+
+        registerCompiledModule(compiled.schema, compiled.exportGroup())
+        const [definition] = viewDefinitions(compiled.schema)
+        expect(Object.keys(definition?.params ?? {})).toEqual([
+          "authorId",
+          "published",
+        ])
+        expect(definition?.params.authorId?.kind).toBe("string")
+        expect(definition?.params.published?.kind).toBe("bool")
+
+        const view = compiled.exports.posts_by_author
+        expect(
+          invokeModuleExport(
+            view,
+            { db: {}, from: {} },
+            { authorId: "ada", published: true },
+          ),
+        ).toEqual([{ authorId: "ada", published: true }])
+        // An argument the params refuse is the host's to report, not a row.
+        expect(() =>
+          invokeModuleExport(
+            view,
+            { db: {}, from: {} },
+            { authorId: "too-long-id", published: true },
+          ),
+        ).toThrow()
+      }),
   )
 
   it.effect(
@@ -641,6 +715,7 @@ describe("compiled module exports", (it) => {
                       id: Stdb.u64(),
                       displayName: Stdb.string(),
                     }),
+                    testViewRowsLength,
                   ),
                 }),
               ),
@@ -825,6 +900,7 @@ describe("compiled module exports", (it) => {
               sourceName: "golden_users",
               exportName: "golden_users",
               public: true,
+              params: {},
             },
           ],
           explicitNames: {

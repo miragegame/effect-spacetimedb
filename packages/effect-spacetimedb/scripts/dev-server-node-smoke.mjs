@@ -44,7 +44,7 @@ const findModernNode = () => {
   return undefined
 }
 
-const requiredSpacetimeVersion = "2.10.1"
+const requiredSpacetimeVersion = "2.14.0"
 
 const spacetimeVersionOutput = (binary) => {
   const result = spawnSync(binary, ["--version"], {

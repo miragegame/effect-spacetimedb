@@ -1,13 +1,21 @@
 import { make as makeServer } from "../../src/server/bind.ts"
+import { StdbSenderFailure } from "../../src/server/services.ts"
 import * as Effect from "effect/Effect"
 import * as EffectVitest from "@effect/vitest"
 const { expect } = EffectVitest
 import { FullModule } from "../fixtures/full-module"
+import * as Stdb from "effect-spacetimedb"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import {
   type CapturedLog,
   logWithCapturedLogger,
 } from "../helpers/server-runtime"
+import { compileModule } from "../helpers/compile-module"
+import {
+  testEffectCallbackError,
+  unwrapTestEffectCallbackError,
+} from "../helpers/effect-errors"
+import * as SpacetimeServerStub from "../helpers/spacetimedb-server"
 import { TestSyncRunner } from "../helpers/sync-runner"
 import { TestLayer } from "../helpers/test-layer"
 
@@ -89,6 +97,53 @@ describe("server lifecycle", (it) => {
           kind: "lifecycle",
           sender: String(ctx.sender),
         })
+      }),
+  )
+
+  it.effect(
+    "hands the host a lifecycle hook's sender failure as the host's SenderError",
+    () =>
+      Effect.gen(function* () {
+        // A refusing `clientConnected` must reach the host as its own
+        // `SenderError`: SpacetimeDB refuses the connection with the message
+        // only for that class, and reads anything else as a module fault.
+        const RefusingModule = Stdb.StdbModule.make("lifecycle_refusal", {
+          lifecycle: { clientConnected: Stdb.StdbFn.clientConnected() },
+        }).spec
+        const server = makeServer({
+          module: RefusingModule,
+          runtime: TestSyncRunner,
+        })
+        const compiled = compileModule({
+          server,
+          handlers: server.handlers({
+            lifecycle: {
+              clientConnected: () =>
+                Effect.fail(
+                  new StdbSenderFailure({ value: "connection refused" }),
+                ),
+            },
+          }),
+        })
+        const ctx =
+          StdbTesting.makeTestModuleHarness(RefusingModule).makeMutationCtx()
+        const refusal = yield* Effect.try({
+          try: () =>
+            SpacetimeServerStub.invokeModuleExport(
+              compiled.exports.clientConnected,
+              ctx,
+              undefined,
+            ),
+          catch: testEffectCallbackError(
+            "effect-spacetimedb/integration/server-lifecycle",
+          ),
+        }).pipe(
+          Effect.asVoid,
+          Effect.flip,
+          Effect.map(unwrapTestEffectCallbackError),
+        )
+        expect(refusal).toBeInstanceOf(SpacetimeServerStub.SenderError)
+        expect(refusal).toMatchObject({ message: "connection refused" })
       }),
   )
 })

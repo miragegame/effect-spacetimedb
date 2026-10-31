@@ -22,6 +22,9 @@ import {
 import type { IndexAlgorithm } from "../table-index.ts"
 import type {
   OptionWire,
+  OptionalKeys,
+  RequiredKeys,
+  SumVariant,
   ResultType,
   StructType,
   SumType,
@@ -284,7 +287,7 @@ export type F32ValueType = NumberValueType<"f32">
 export type F64ValueType = NumberValueType<"f64">
 
 export type U64ValueType<
-  A extends bigint = bigint,
+  A = bigint,
   Encoded extends bigint = bigint,
 > = ValueType<A, Encoded, "u64">
 
@@ -305,6 +308,28 @@ export type Encoded<Value extends AnyValueType> = Value["Encoded"]
 export type TypeOf<Value extends AnyValueType> = Type<Value>
 
 export type EncodedOf<Value extends AnyValueType> = Encoded<Value>
+
+/** Phantom representation carried by container/native types whose SDK host shape differs from JSON encoding. */
+export const HostValueTypeId: unique symbol = Symbol.for(
+  "effect-spacetimedb/HostValue",
+)
+export type HostValue<Host> = { readonly [HostValueTypeId]?: Host }
+export type HostOf<Value extends AnyValueType> = Value extends HostValue<
+  infer Host
+>
+  ? Host
+  : EncodedOf<Value>
+
+export type HostStruct<Fields extends StructFields> = {
+  readonly [Key in RequiredKeys<Fields>]: HostOf<Fields[Key]>
+} & { readonly [Key in OptionalKeys<Fields>]?: HostOf<Fields[Key]> }
+
+export type HostSum<Variants extends SumVariants> = {
+  readonly [Tag in keyof Variants & string]: SumVariant<
+    Tag,
+    HostOf<Variants[Tag]>
+  >
+}[keyof Variants & string]
 
 type TableFieldOptionsOfValue<Value extends AnyValueType> =
   Value extends TableFieldType<
@@ -336,9 +361,10 @@ export type AnyNormalizedStructFieldOptions = {
 }
 
 export type StructValueType<Fields extends StructFields = StructFields> =
-  ValueType<StructType<Fields>, unknown> & {
-    readonly [StructTypeId]: Fields
-  }
+  ValueType<StructType<Fields>, unknown> &
+    HostValue<HostStruct<Fields>> & {
+      readonly [StructTypeId]: Fields
+    }
 
 export type StructLikeValueType = AnyValueType & {
   readonly [StructTypeId]: StructFields
@@ -358,7 +384,8 @@ export type StructFieldType<
 }
 
 export type ArrayValueType<Inner extends AnyValueType = AnyValueType> =
-  ValueType<ReadonlyArray<TypeOf<Inner>>, ReadonlyArray<EncodedOf<Inner>>>
+  ValueType<ReadonlyArray<TypeOf<Inner>>, ReadonlyArray<EncodedOf<Inner>>> &
+    HostValue<ReadonlyArray<HostOf<Inner>>>
 
 export type LiteralValueType<
   Values extends readonly [PrimitiveLiteral, ...PrimitiveLiteral[]] = readonly [
@@ -368,7 +395,8 @@ export type LiteralValueType<
 > = ValueType<Values[number], LiteralEncoded<Values>>
 
 export type OptionValueType<Inner extends AnyValueType = AnyValueType> =
-  ValueType<TypeOf<Inner> | undefined, OptionWire<Inner>>
+  ValueType<TypeOf<Inner> | undefined, OptionWire<Inner>> &
+    HostValue<HostOf<Inner> | undefined>
 
 export type LazyValueType<A, Encoded> = ValueType<A, Encoded>
 
@@ -377,7 +405,8 @@ export type UnitValueType = ValueType<void, void>
 export type ResultValueType<
   Ok extends AnyValueType = AnyValueType,
   Err extends AnyValueType = AnyValueType,
-> = ValueType<ResultType<Ok, Err>, unknown>
+> = ValueType<ResultType<Ok, Err>, unknown> &
+  HostValue<{ readonly ok: HostOf<Ok> } | { readonly err: HostOf<Err> }>
 
 export type SumVariants = Readonly<Record<string, AnyValueType>>
 
@@ -394,9 +423,10 @@ export type SumVariantConstructors<Variants extends SumVariants> = {
 }
 
 export type SumValueType<Variants extends SumVariants = SumVariants> =
-  ValueType<SumType<Variants>, SumWire<Variants>> & {
-    readonly make: SumVariantConstructors<Variants>
-  }
+  ValueType<SumType<Variants>, SumWire<Variants>> &
+    HostValue<HostSum<Variants>> & {
+      readonly make: SumVariantConstructors<Variants>
+    }
 
 export type TypeKind =
   | "array"
@@ -447,6 +477,16 @@ export type ValueCodec<A, Encoded> = {
   readonly decodeUnknownSync: (value: unknown) => A
 }
 
+/**
+ * Inclusive element-count bounds of a `Stdb.array`. They constrain decoding and
+ * encoding only: SpaceTimeDB's `array<T>` wire type has no length, so arrays
+ * of the same item with different bounds lower identically.
+ */
+export type ArrayLengthBounds = {
+  readonly minimum: number
+  readonly maximum: number
+}
+
 export type ValueTypeInfo<A = unknown, Encoded = unknown> = {
   readonly schema: Schema.Codec<A, Encoded, never>
   readonly kind: TypeKind
@@ -454,6 +494,7 @@ export type ValueTypeInfo<A = unknown, Encoded = unknown> = {
   readonly codec: ValueCodec<A, Encoded>
   readonly fields?: StructFields
   readonly item?: AnyValueType
+  readonly length?: ArrayLengthBounds
   readonly members?: ReadonlyArray<AnyValueType>
   readonly variants?: SumVariants
   readonly lazy?: () => AnyValueType
@@ -467,6 +508,7 @@ export type TypeInfoOptions = {
   readonly kind: TypeKind
   readonly fields?: StructFields
   readonly item?: AnyValueType
+  readonly length?: ArrayLengthBounds
   readonly members?: ReadonlyArray<AnyValueType>
   readonly variants?: SumVariants
   readonly lazy?: () => AnyValueType

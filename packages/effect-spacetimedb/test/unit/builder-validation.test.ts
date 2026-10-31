@@ -2,6 +2,7 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as EffectVitest from "@effect/vitest"
+import { fixtureCallDurationMax } from "../helpers/transport-bounds"
 const { expect } = EffectVitest
 import * as Stdb from "effect-spacetimedb"
 import { build } from "effect-spacetimedb/server-compiler"
@@ -508,6 +509,7 @@ describe("builder validation diagnostics", (it) => {
           const client = Stdb.project(plan.module).client.http.make({
             uri: "http://localhost:3000",
             databaseName: "lifecycle_http_groups",
+            callDurationMax: fixtureCallDurationMax,
           })
           expect(Object.keys(client.Calls.reducers)).toEqual(["refreshToken"])
           expect(Object.keys(client.Calls.procedures)).toEqual(["readToken"])

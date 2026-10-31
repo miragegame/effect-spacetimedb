@@ -21,6 +21,8 @@ import {
   projectPublicProcedures,
   projectPublicReducers,
   projectPublicViews,
+  type OutboxResultBinding,
+  resolveOutboxResultBindings,
   resolveScheduleBindings,
   type ScheduleBinding,
 } from "./module-projection.ts"
@@ -48,6 +50,7 @@ export type ModulePlan<Module extends AnyModuleSpec = AnyModuleSpec> = {
       string]: HttpHandlerCallableDescriptor<Module["httpHandlers"][Key]>
   }
   readonly scheduleBindings: ReadonlyArray<ScheduleBinding>
+  readonly outboxResultBindings: ReadonlyArray<OutboxResultBinding>
   readonly publicTables: PublicPersistentTables<Module>
   readonly publicEventTables: PublicEventTables<Module>
   readonly publicViews: PublicViews<Module>
@@ -111,6 +114,7 @@ export const makeModulePlan = <Module extends AnyModuleSpec>(
       httpHandlerCallables,
     ) as ModulePlan<Module>["httpHandlerCallables"],
     scheduleBindings: resolveScheduleBindings(module),
+    outboxResultBindings: resolveOutboxResultBindings(module),
     publicTables,
     publicEventTables,
     publicViews,

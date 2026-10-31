@@ -69,6 +69,18 @@ const ids = Effect.gen(function* () {
 })
 ```
 
+:::caution
+
+These helpers are not unique across transactions. SpaceTimeDB 2.14 seeds each
+call's random stream from that call's timestamp alone and restarts the UUID v7
+counter, so two transactions the host gives the same timestamp draw the same
+UUIDs, and the 32-bit seed makes repeats likely between nearby timestamps too.
+A key inserted from them can fail as a duplicate under concurrent calls. When an
+identifier must be unique across transactions, mix in state the module owns,
+such as a counter row that every mint reads and advances in its transaction.
+
+:::
+
 ## Runtime Wiring
 
 The constrained server runtime wires `Random.*` from `effect/Random` to the

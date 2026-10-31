@@ -6,12 +6,15 @@ export type ModuleProject = {
   readonly version?: string
 }
 
-export const requiredSpacetimeCliVersion: "2.10.1"
+export const requiredSpacetimeCliVersion: "2.14.0"
 export const packageRoot: string
 export const exampleModuleRoot: string
 export const exampleBundlePath: string
 export const exampleGeneratedClientDir: string
 export const exampleModuleProject: ModuleProject
+export const idcPairReceiverProject: ModuleProject
+export const idcPairSenderProject: ModuleProject
+export const idcPairReceiverBindingDir: string
 export const migrationFixtureRoot: string
 export const migrationModuleProjects: {
   readonly v1: ModuleProject & {

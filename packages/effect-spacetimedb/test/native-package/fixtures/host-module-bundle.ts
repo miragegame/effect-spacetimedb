@@ -1,4 +1,3 @@
-
 import * as path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
@@ -56,7 +55,7 @@ export const withHostModule = async <A>(
         {
           name: "spacetime-sys-stub",
           setup(build: Bun.PluginBuilder) {
-            build.onResolve({ filter: /^spacetime:sys@2\.[01]$/ }, () => ({
+            build.onResolve({ filter: /^spacetime:sys@2\.[012]$/ }, () => ({
               path: sysModulePath,
             }))
           },

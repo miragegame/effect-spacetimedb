@@ -4,7 +4,12 @@ import * as Schema from "effect/Schema"
 import { errorTypeId, hasErrorTypeId } from "../../error-identity.ts"
 import { pascalCaseName } from "../canonical-name.ts"
 import { structFieldWireType } from "./constructors.ts"
-import type { AnyValueType, StructFields, SumVariants } from "./core.ts"
+import type {
+  AnyValueType,
+  ArrayLengthBounds,
+  StructFields,
+  SumVariants,
+} from "./core.ts"
 import * as TypeDescriptor from "./descriptor.ts"
 import {
   hasOwn,
@@ -13,6 +18,7 @@ import {
   sumVariantEntry,
   taggedEnvelopeOf,
 } from "./envelope.ts"
+import { typeInfo } from "./metadata.ts"
 import {
   isAuthoredUnitValueType,
   isUnitValueType,
@@ -23,6 +29,7 @@ import { foldValue, type ValueFoldHandlers } from "./value-fold.ts"
 type StdbHostEncodeErrorFields = {
   readonly reason:
     | "ExpectedArray"
+    | "ArrayLengthOutOfBounds"
     | "ExpectedStruct"
     | "MissingStructField"
     | "ExpectedResult"
@@ -34,11 +41,19 @@ type StdbHostEncodeErrorFields = {
     | "MissingSumValue"
   readonly field?: string
   readonly variant?: string
+  /** Set for `ArrayLengthOutOfBounds`: the offending length and its bounds. */
+  readonly length?: number
+  readonly bounds?: ArrayLengthBounds
 }
 
 const hostEncodeErrorMessage = (error: StdbHostEncodeErrorFields): string =>
   Match.value(error.reason).pipe(
     Match.when("ExpectedArray", () => "Expected array host value"),
+    Match.when("ArrayLengthOutOfBounds", () =>
+      error.length === undefined || error.bounds === undefined
+        ? "Host array length is outside its declared bounds"
+        : `Host array length ${error.length} is outside its declared bounds ${error.bounds.minimum}..${error.bounds.maximum}`,
+    ),
     Match.when("ExpectedStruct", () => "Expected struct host value"),
     Match.when("MissingStructField", () =>
       error.field === undefined
@@ -84,13 +99,29 @@ const ownVariant = (
 const encodeSchema = (type: AnyValueType, value: unknown): unknown =>
   Schema.encodeSync(type.schema)(value)
 
+// The host encoders fold over the type structure instead of running the array
+// schema, so its length check has to be restated here or bounded arrays would
+// be enforced on decode but not on encode. Checked before the items so an
+// oversized array is rejected without encoding any of it.
 const encodeHostArray = (
+  type: AnyValueType,
   item: AnyValueType,
   value: unknown,
   recurse: (type: AnyValueType, value: unknown) => unknown,
 ): ReadonlyArray<unknown> => {
   if (!Array.isArray(value)) {
     throw new StdbHostEncodeError({ reason: "ExpectedArray" })
+  }
+  const bounds = typeInfo(type)?.length
+  if (
+    bounds !== undefined &&
+    (value.length < bounds.minimum || value.length > bounds.maximum)
+  ) {
+    throw new StdbHostEncodeError({
+      reason: "ArrayLengthOutOfBounds",
+      length: value.length,
+      bounds,
+    })
   }
 
   return value.map((entry) => recurse(item, entry))
@@ -248,8 +279,8 @@ type HostValueEncoderOverrides = Pick<
 const makeHostValueEncoder = (overrides: HostValueEncoderOverrides) =>
   foldValue<unknown>({
     absent: encodeSchema,
-    array: (_type, item, value, recurse) =>
-      encodeHostArray(item, value, recurse),
+    array: (type, item, value, recurse) =>
+      encodeHostArray(type, item, value, recurse),
     custom: (type, _item, value) => encodeSchema(type, value),
     literal: overrides.literal,
     option: (_type, item, value, recurse) =>

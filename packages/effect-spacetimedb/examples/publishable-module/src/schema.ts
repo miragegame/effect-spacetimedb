@@ -29,6 +29,13 @@ export const ThingId = Schema.String.pipe(
 )
 export type ThingId = typeof ThingId.Type
 
+// Every view and procedure result set in this example states its size. The live
+// suite seeds at most a few dozen rows; a real module sizes this to its page.
+export const ResultRowsLength: Stdb.ArrayLengthBounds = {
+  minimum: 0,
+  maximum: 1_000,
+}
+
 export const U64 = Stdb.u64(
   Schema.BigInt.check(Schema.isGreaterThanOrEqualToBigInt(0n)),
 )

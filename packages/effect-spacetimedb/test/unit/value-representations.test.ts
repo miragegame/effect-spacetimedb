@@ -1,4 +1,3 @@
-
 import * as EffectVitest from "@effect/vitest"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
@@ -13,6 +12,7 @@ import * as StdbTesting from "effect-spacetimedb/testing"
 import { FullModule, UserId, UserName } from "../fixtures/full-module"
 import { TreeType } from "../fixtures/recursive-types"
 import { TestLayer } from "../helpers/test-layer"
+import { testArrayLength } from "../helpers/array-bounds"
 
 const describe = EffectVitest.layer(TestLayer)
 
@@ -80,7 +80,7 @@ describe("effect-spacetimedb value representations", (it) => {
       expect(StdbTesting.encodeHostValue(CountFromString, 42)).toBe("42")
       expect(
         StdbTesting.encodeHostValue(
-          StdbTesting.ContractType.array(StringType),
+          StdbTesting.ContractType.array(StringType, testArrayLength),
           ["Ada", "Grace"],
         ),
       ).toEqual(["Ada", "Grace"])
@@ -228,7 +228,7 @@ describe("effect-spacetimedb value representations", (it) => {
           },
           {
             name: "array",
-            type: StdbTesting.ContractType.array(HostName),
+            type: StdbTesting.ContractType.array(HostName, testArrayLength),
             value: [adaName, graceName],
           },
           {
@@ -407,7 +407,7 @@ describe("effect-spacetimedb value representations", (it) => {
   it.effect("rejects malformed JSON number tokens before value decoding", () =>
     Effect.gen(function* () {
       const F64 = StdbTesting.ContractType.f64()
-      const ArrayF64 = StdbTesting.ContractType.array(F64)
+      const ArrayF64 = StdbTesting.ContractType.array(F64, testArrayLength)
       const StructF64 = StdbTesting.ContractType.struct({
         x: F64,
       })

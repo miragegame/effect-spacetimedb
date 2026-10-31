@@ -8,7 +8,10 @@ import {
   InternalStdbBuildPlanSymbol,
   internalStdbBuildPlan,
 } from "../builder/internal-build-plan.ts"
+import { SenderError } from "spacetimedb"
 import type { AnyModuleSpec } from "../contract/module.ts"
+import { outboxResultMetadataOf } from "../contract/outbox-table.ts"
+import { identityKey } from "../server/host-abi-runtime.ts"
 import * as Server from "../server/bind.ts"
 import { runInTestHarnessTransaction } from "./transaction.ts"
 
@@ -20,7 +23,16 @@ type BoundCallableRecord = Readonly<Record<string, BoundCallable>>
 
 type CallableWithInvoke = {
   readonly invoke: (...args: ReadonlyArray<never>) => unknown
+  readonly spec?: unknown
 }
+
+/** The zero identity, which the host runs every settle reducer as. */
+const settleSenderIdentityKey = "0".repeat(64)
+
+const senderOf = (ctx: unknown): unknown =>
+  typeof ctx === "object" && ctx !== null
+    ? Reflect.get(ctx, "sender")
+    : undefined
 
 const wrapMutationCallables = <
   Callables extends Readonly<Record<string, CallableWithInvoke>>,
@@ -32,10 +44,20 @@ const wrapMutationCallables = <
       key,
       {
         ...callable,
-        invoke: (ctx: unknown, args: unknown) =>
-          runInTestHarnessTransaction(ctx, () =>
+        invoke: (ctx: unknown, args: unknown) => {
+          // As the compiled module does: only the host settles an outbox row.
+          if (
+            outboxResultMetadataOf(callable.spec) !== undefined &&
+            identityKey(senderOf(ctx)) !== settleSenderIdentityKey
+          ) {
+            throw new SenderError(
+              `Settle reducer ${key} is only invocable by the host settling its outbox`,
+            )
+          }
+          return runInTestHarnessTransaction(ctx, () =>
             Reflect.apply(callable.invoke, callable, [ctx, args]),
-          ),
+          )
+        },
       },
     ]),
   )

@@ -1,4 +1,5 @@
 import type { AnyModuleSpec } from "./contract/module.ts"
+import { outboxResultMetadataOf } from "./contract/outbox-table.ts"
 import type { AnyViewSpec } from "./contract/view.ts"
 import type {
   ArrayValueType,
@@ -14,6 +15,13 @@ export type ScheduleBinding = {
   readonly targetKey: string
   readonly targetKind: "reducer" | "procedure"
   readonly allowExternalCallers: boolean
+}
+
+/** An outbox table and the settle reducer the host runs for its rows. */
+export type OutboxResultBinding = {
+  readonly tableKey: string
+  readonly tableName: string
+  readonly settleKey: string
 }
 
 export type PublicPersistentTables<Module extends AnyModuleSpec> = {
@@ -43,6 +51,16 @@ export type PublicViews<Module extends AnyModuleSpec> = {
 
 export type PublicViewKeys<Module extends AnyModuleSpec> =
   keyof PublicViews<Module> & string
+
+/** A view's arguments: `{}` for a view that declares no params. */
+export type ViewCallArgsOf<View extends AnyViewSpec> = TypeOf<View["params"]>
+
+/** Whether a client must pass arguments to subscribe to the view. */
+export type ViewTakesArgs<View extends AnyViewSpec> = [
+  keyof ViewCallArgsOf<View>,
+] extends [never]
+  ? false
+  : true
 
 type ViewItemOf<View extends AnyViewSpec> =
   View["returns"] extends ArrayValueType<infer Item>
@@ -154,6 +172,36 @@ export const resolveScheduleBindings = <Module extends AnyModuleSpec>(
       targetKey,
       targetKind: "procedure",
       allowExternalCallers: scheduled.allowExternalCallers,
+    })
+  }
+
+  return bindings
+}
+
+/** Twin of `resolveScheduleBindings` for settle reducers and their outboxes. */
+export const resolveOutboxResultBindings = <Module extends AnyModuleSpec>(
+  module: Module,
+): ReadonlyArray<OutboxResultBinding> => {
+  const bindings: Array<OutboxResultBinding> = []
+
+  for (const [settleKey, reducer] of Object.entries(module.reducers)) {
+    const metadata = outboxResultMetadataOf(reducer)
+    if (metadata === undefined) {
+      continue
+    }
+
+    const entry = Object.entries(module.tables).find(
+      ([, table]) => table === metadata.table,
+    )
+    if (entry === undefined) {
+      throw new Error(
+        `Settle reducer ${settleKey} references an outbox table that is not registered on module ${module.name}`,
+      )
+    }
+    bindings.push({
+      tableKey: entry[0],
+      tableName: entry[1].name,
+      settleKey,
     })
   }
 

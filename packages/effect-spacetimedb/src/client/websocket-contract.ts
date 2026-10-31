@@ -4,11 +4,13 @@ import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import type { AnyTableSpec, TableRow } from "../contract/table.ts"
-import type { AnyViewSpec } from "../contract/view.ts"
+import { type AnyViewSpec, viewTakesArgs } from "../contract/view.ts"
 import type { ModulePlan } from "../module-plan.ts"
 import type {
   PublicViewKeys,
+  ViewCallArgsOf,
   ViewRowOf,
+  ViewTakesArgs,
   WsViewRowOf,
 } from "../module-projection.ts"
 import type {
@@ -36,7 +38,9 @@ import type {
   SessionStreamBufferOptions,
   TableChangeWithContext,
 } from "./session-stream.ts"
+import type { WaitUntilOptions } from "./wait-until.ts"
 import type { WsTableRow } from "./ws-row.ts"
+import { viewCallSql } from "./view-call-sql.ts"
 import type { SubscriptionFailure } from "./ws-subscription.ts"
 import type {
   SubscriptionBuilderLike,
@@ -113,6 +117,87 @@ export type WsClientOptions<
 export type WsStreamOptions = {
   readonly buffer?: SessionStreamBufferOptions | undefined
 }
+
+/** The arguments of every view in a group that takes them, by view key. */
+export type ViewGroupArgs<
+  Module extends AnyModuleSpec,
+  Keys extends ReadonlyArray<PublicViewKeys<Module>>,
+> = {
+  readonly [Key in Keys[number] as ViewTakesArgs<
+    Module["views"][Key]
+  > extends true
+    ? Key
+    : never]: ViewCallArgsOf<Module["views"][Key]>
+}
+
+/**
+ * A view group's options: `args` is required, and only allowed, when a view
+ * in the group declares params.
+ */
+export type ViewGroupOptionsParam<
+  Module extends AnyModuleSpec,
+  Keys extends ReadonlyArray<PublicViewKeys<Module>>,
+> = [keyof ViewGroupArgs<Module, Keys>] extends [never]
+  ? readonly [options?: WsStreamOptions]
+  : readonly [
+      options: WsStreamOptions & {
+        readonly args: ViewGroupArgs<Module, Keys>
+      },
+    ]
+
+/**
+ * Whether any view `Key` names declares params. A union key is checked view
+ * by view, so a key that may name a view with params requires `args`.
+ */
+type SomeViewTakesArgs<
+  Module extends AnyModuleSpec,
+  Key extends PublicViewKeys<Module>,
+> = true extends (
+  Key extends PublicViewKeys<Module>
+    ? ViewTakesArgs<Module["views"][Key]>
+    : never
+)
+  ? true
+  : false
+
+/**
+ * The arguments a call through `Key` needs. A union key may name any of its
+ * views, so its arguments satisfy every one: the intersection of theirs.
+ */
+type ViewCallArgsForKey<
+  Module extends AnyModuleSpec,
+  Key extends PublicViewKeys<Module>,
+> = (
+  Key extends PublicViewKeys<Module>
+    ? (args: ViewCallArgsOf<Module["views"][Key]>) => void
+    : never
+) extends (args: infer Args) => void
+  ? Args
+  : never
+
+/** One view's options: `args` exactly when the view declares params. */
+export type ViewRowsOptionsParam<
+  Module extends AnyModuleSpec,
+  Key extends PublicViewKeys<Module>,
+> = SomeViewTakesArgs<Module, Key> extends true
+  ? readonly [
+      options: WsStreamOptions & {
+        readonly args: ViewCallArgsForKey<Module, Key>
+      },
+    ]
+  : readonly [options?: WsStreamOptions]
+
+/** A view wait's options: `args` exactly when the view declares params. */
+export type WaitUntilViewOptionsParam<
+  Module extends AnyModuleSpec,
+  Key extends PublicViewKeys<Module>,
+> = SomeViewTakesArgs<Module, Key> extends true
+  ? readonly [
+      options: WaitUntilOptions & {
+        readonly args: ViewCallArgsForKey<Module, Key>
+      },
+    ]
+  : readonly [options?: WaitUntilOptions]
 
 export type WsEventTableStreamOptions = {
   readonly buffer?: EventTableStreamBufferOptions | undefined
@@ -281,7 +366,29 @@ export const subscriptionTargetLabel = <Module extends AnyModuleSpec>(
   )
 }
 
-export const targetToQuerySource = <Module extends AnyModuleSpec>(
+/**
+ * The query a target subscribes with. A call of a view with params is SQL,
+ * since the SDK's query builder cannot call a view; encoding its arguments
+ * can fail like any other argument encoding.
+ */
+export const targetQuerySource = <Module extends AnyModuleSpec>(
+  target: SubscriptionTarget<Module>,
+): Effect.Effect<
+  SubscriptionQuerySource<ClientQueryRoot<Module>>,
+  StdbDecodeError
+> => {
+  const matchableTarget: MatchableSubscriptionTarget<Module> = target
+  return matchableTarget.kind === "view" &&
+    viewTakesArgs(matchableTarget.params)
+    ? viewCallSql(
+        matchableTarget.name,
+        matchableTarget.params,
+        matchableTarget.args,
+      )
+    : Effect.succeed(targetToQuerySource(target))
+}
+
+const targetToQuerySource = <Module extends AnyModuleSpec>(
   target: SubscriptionTarget<Module>,
 ): SubscriptionQuerySource<ClientQueryRoot<Module>> => {
   const matchableTarget: MatchableSubscriptionTarget<Module> = target

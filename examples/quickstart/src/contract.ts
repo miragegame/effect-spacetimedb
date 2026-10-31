@@ -24,13 +24,20 @@ export const MessageRow = Stdb.struct({
   text: Stdb.string(MessageText),
 }).named("MessageRow")
 
+// `messageList` returns every message, so the quickstart states how many it
+// will carry; an app that outgrows this paginates instead of raising it.
+export const MessageListLength: Stdb.ArrayLengthBounds = {
+  minimum: 0,
+  maximum: 1_000,
+}
+
 export const MessageFunctions = Stdb.StdbGroup.make("Messages").add(
   Stdb.StdbFn.reducer("messageSend", {
     params: MessageRow,
   }),
   Stdb.StdbFn.procedure("messageList", {
     params: Stdb.struct({}),
-    returns: Stdb.array(MessageRow),
+    returns: Stdb.array(MessageRow, MessageListLength),
   }),
 )
 

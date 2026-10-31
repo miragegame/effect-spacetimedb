@@ -1,7 +1,7 @@
-
 import * as Match from "effect/Match"
 import type {
   AnyValueType,
+  ArrayLengthBounds,
   StructFields,
   SumVariants,
   TypeKind,
@@ -34,6 +34,7 @@ export type StdbArrayDescriptor = {
   readonly _tag: "Array"
   readonly kind: "array"
   readonly item: AnyValueType
+  readonly length: ArrayLengthBounds
 }
 
 export type StdbOptionDescriptor = {
@@ -92,7 +93,7 @@ const primitiveDescriptor = (info: ValueTypeInfo): StdbPrimitiveDescriptor => ({
   kind: info.kind as StdbPrimitiveDescriptor["kind"],
 })
 
-const requiredMetadata = <Key extends "item" | "lazy" | "values">(
+const requiredMetadata = <Key extends "item" | "length" | "lazy" | "values">(
   info: ValueTypeInfo,
   key: Key,
 ): NonNullable<ValueTypeInfo[Key]> => {
@@ -118,6 +119,7 @@ const descriptorFromInfo = (info: ValueTypeInfo): StdbTypeDescriptor => {
         _tag: "Array",
         kind: info.kind,
         item: requiredMetadata(info, "item"),
+        length: requiredMetadata(info, "length"),
       }
     case "option":
       return {

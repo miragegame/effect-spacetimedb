@@ -8,6 +8,7 @@ import { ExampleErrors, UserMissing } from "../fixtures/full-module"
 import { transform } from "../helpers/schema-transform"
 import { TestLayer } from "../helpers/test-layer"
 import { FullModule } from "../fixtures/full-module"
+import { testArrayLength } from "../helpers/array-bounds"
 
 const describe = EffectVitest.layer(TestLayer)
 
@@ -114,6 +115,7 @@ describe("callable protocol", (it) => {
             StdbTesting.ContractType.struct({
               content: TurnEventContent,
             }),
+            testArrayLength,
           ),
           ExampleErrors,
         )

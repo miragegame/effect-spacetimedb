@@ -7,6 +7,7 @@ import * as Stdb from "effect-spacetimedb"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import { TestLayer } from "../helpers/test-layer"
 import { builderTypeName, typeBuilder } from "../helpers/type-builder"
+import { testArrayLength } from "../helpers/array-bounds"
 
 const describe = EffectVitest.layer(TestLayer)
 
@@ -74,10 +75,10 @@ describe("uniform optional lowering", (it) => {
       )
 
       const ArrayHostOptional = Stdb.struct({
-        items: Stdb.array(OptionalStruct),
+        items: Stdb.array(OptionalStruct, testArrayLength),
       })
       const ArrayHostOption = Stdb.struct({
-        items: Stdb.array(OptionStruct),
+        items: Stdb.array(OptionStruct, testArrayLength),
       })
 
       expect(builderTypeName(typeBuilder(ArrayHostOptional))).toBe(

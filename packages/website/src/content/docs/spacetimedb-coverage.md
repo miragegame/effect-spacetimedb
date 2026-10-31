@@ -7,7 +7,7 @@ sidebar:
 ---
 
 This map tracks the SpacetimeDB Core Concepts taxonomy against these docs, as of
-SpacetimeDB 2.10.1. Every upstream topic has exactly one row.
+SpacetimeDB 2.14.0. Every upstream topic has exactly one row.
 
 | Upstream Core Concept topic | Upstream link | Our status | Our page / note |
 | --- | --- | --- | --- |
@@ -19,6 +19,7 @@ SpacetimeDB 2.10.1. Every upstream topic has exactly one row.
 | Databases / Cheat Sheet | [SpacetimeDB -> Cheat Sheet](https://spacetimedb.com/docs/databases/cheat-sheet) | mirrored | Covered by [Getting Started](/getting-started) and [Reference](/reference); no separate Effect delta. |
 | Databases / Migrations / Automatic Migrations | [SpacetimeDB -> Automatic Migrations](https://spacetimedb.com/docs/databases/automatic-migrations) | mirrored | [Migrations](/core-concepts/databases/migrations) |
 | Databases / Migrations / Incremental Migrations | [SpacetimeDB -> Incremental Migrations](https://spacetimedb.com/docs/databases/incremental-migrations) | mirrored | [Migrations](/core-concepts/databases/migrations) |
+| Databases / Environment Variables | [SpacetimeDB -> Environment Variables](https://spacetimedb.com/docs/databases/environment-variables) | mirrored | [Environment Variables](/core-concepts/databases/environment-variables); declarations are typed contract members, reads are per-call `Env` effects, secrets read back `Redacted`. |
 | Databases / Submodules | [SpacetimeDB -> Submodules](https://spacetimedb.com/docs/submodules) | not covered | Upstream 2.8.0 lets a TypeScript module mount another module under a namespace (`schema({ tbl, lib })`, `ctx.db.<ns>`, `ctx.as.<ns>`). The contract DSL does not expose it yet; the runtime tolerates the SDK's always-present namespaces. |
 | Functions | [SpacetimeDB -> Functions](https://spacetimedb.com/docs/functions) | mirrored | Section root represented by the Functions sidebar group. |
 | Functions / Reducers | [SpacetimeDB -> Reducers](https://spacetimedb.com/docs/functions/reducers) | mirrored | [Reducers](/core-concepts/functions/reducers) |
@@ -26,8 +27,9 @@ SpacetimeDB 2.10.1. Every upstream topic has exactly one row.
 | Functions / Reducers / Lifecycle | [SpacetimeDB -> Lifecycle](https://spacetimedb.com/docs/functions/reducers/lifecycle) | mirrored | [Lifecycle](/core-concepts/functions/lifecycle) |
 | Functions / Reducers / Error Handling | [SpacetimeDB -> Error Handling](https://spacetimedb.com/docs/functions/reducers/error-handling) | mirrored | [Error Handling](/core-concepts/functions/error-handling) |
 | Functions / Procedures | [SpacetimeDB -> Procedures](https://spacetimedb.com/docs/functions/procedures) | mirrored | [Procedures](/core-concepts/functions/procedures) |
-| Functions / Views | [SpacetimeDB -> Views](https://spacetimedb.com/docs/functions/views) | mirrored | [Views](/core-concepts/functions/views) |
+| Functions / Views | [SpacetimeDB -> Views](https://spacetimedb.com/docs/functions/views) | mirrored | [Views](/core-concepts/functions/views), including views with parameters (SpacetimeDB 2.13): params are a struct, and a client subscribes to one call per argument tuple. |
 | Functions / HTTP Handlers | [SpacetimeDB -> HTTP Handlers](https://spacetimedb.com/docs/functions/http-handlers) | mirrored | [HTTP Handlers](/core-concepts/functions/http-handlers) |
+| Functions / Inter-Database Calls | [SpacetimeDB -> Receiver dependencies](https://spacetimedb.com/docs/cli-reference/spacetime-json#receiver-dependencies) | mirrored | [Inter-Database Calls](/core-concepts/functions/inter-database-calls); added in SpacetimeDB 2.14, which documents it only in the CLI reference. Outboxes, guarded receivers and settle reducers are contract members, and receiver bindings come from native module-binding codegen. |
 | Tables | [SpacetimeDB -> Tables](https://spacetimedb.com/docs/tables) | mirrored | Section root represented by the Tables sidebar group. |
 | Tables / Column Types | [SpacetimeDB -> Column Types](https://spacetimedb.com/docs/tables/column-types) | mirrored | [Column Types](/core-concepts/tables/column-types) |
 | Tables / File Storage | [SpacetimeDB -> File Storage](https://spacetimedb.com/docs/tables/file-storage) | mirrored | [File Storage](/core-concepts/tables/file-storage) |

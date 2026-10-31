@@ -8,7 +8,7 @@
     "emitDeclarationOnly": true,
     "declarationDir": ".tmp/test-dist-types",
     "outDir": ".tmp/test-dist-types",
-    "tsBuildInfoFile": ".tmp/tsconfig.test.tsbuildinfo",
+    "tsBuildInfoFile": "dist-types/tsconfig.test.tsbuildinfo",
     "incremental": true,
     "noEmit": false,
     "plugins": [
@@ -68,6 +68,8 @@
   },
   "include": [
     "src/**/*.ts",
+    "examples/environment-fixture/**/*.ts",
+    "examples/idc-pair/**/*.ts",
     "examples/migration-fixture/**/*.ts",
     "examples/publishable-module/generated-client/*.d.ts",
     "examples/publishable-module/src/**/*.ts",

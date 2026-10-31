@@ -25,7 +25,7 @@ const user = Stdb.table("user", {
 
 const Users = Stdb.StdbGroup.make("Users")
   .add(Stdb.StdbFn.view("self_user", { returns: Stdb.option(user.row) }))
-  .add(Stdb.StdbFn.anonymousView("all_users", { returns: Stdb.array(user.row) }))
+  .add(Stdb.StdbFn.anonymousView("all_users", { returns: Stdb.array(user.row, { minimum: 0, maximum: 1_000 }) }))
 
 const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
 const { ReadonlyDb, ViewCtx } = Module
@@ -46,3 +46,70 @@ const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
 Views are read-only Effect handlers. Sender views may yield
 `ViewCtx`; anonymous views may yield `AnonymousViewCtx`. Both may yield
 `ReadonlyDb` and `From`.
+
+## Views with arguments
+
+A view may declare `params`, a struct of named arguments, like a reducer. The
+handler receives them decoded, and the host computes one answer per distinct
+argument tuple: an anonymous view's answer is shared by every caller passing
+the same arguments, a sender view's is per caller.
+
+```typescript twoslash
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const post = Stdb.table("post", {
+  public: true,
+  columns: {
+    id: Stdb.string().primaryKey(),
+    authorId: Stdb.string(),
+    title: Stdb.string(),
+  },
+  indexes: (columns) => [Stdb.index("byAuthor", [columns.authorId])],
+})
+
+const Posts = Stdb.StdbGroup.make("Posts").add(
+  Stdb.StdbFn.anonymousView("postsByAuthor", {
+    params: Stdb.struct({ authorId: Stdb.string() }),
+    returns: Stdb.array(post.row, { minimum: 0, maximum: 1_000 }),
+  }),
+)
+
+const Module = Stdb.StdbModule.make("app").addTables(post).add(Posts)
+const { ReadonlyDb } = Module
+
+const PostsLive = Stdb.StdbBuilder.group(Module, "Posts", {
+  postsByAuthor: Effect.fn(function* ({ authorId }) {
+    const db = yield* ReadonlyDb
+    return yield* db.post.byAuthor.filterToArray(authorId)
+  }),
+})
+```
+
+A client subscribes to a call. The projected target is a function of the
+arguments, and the WebSocket session's `viewGroup`, `streamViewRows` and
+`waitUntilView` take them under `args`, required exactly when a view has
+params:
+
+```typescript
+session.viewGroup(["postsByAuthor"] as const, {
+  args: { postsByAuthor: { authorId: "ada" } },
+})
+```
+
+The session sends `SELECT * FROM "posts_by_author"('ada')`: SpacetimeDB runs no
+other query on a view with arguments, and the SDK's query builder cannot call
+one. What SpacetimeDB 2.13 allows:
+
+- A param is a `bool`, an integer, a `string`, an `identity`, a
+  `connectionId` or a `uuid`. Floats, options, structs, sums and literal
+  unions fail validation with `UnsupportedViewParam`; timestamps and byte
+  arrays, which SpacetimeDB accepts, are not supported here yet.
+- The returned rows carry no primary key, so a changed row arrives as a
+  delete and an insert.
+- Every call a connection holds answers into the view's one client cache, so
+  two calls of one view leave the union of their rows there. Return the
+  columns that carry the arguments when you subscribe to more than one call.
+- Arguments are positional, in the order the params struct declares its
+  fields. Reordering a view's params changes what an older client's call
+  means, so treat it as a breaking change to the view.

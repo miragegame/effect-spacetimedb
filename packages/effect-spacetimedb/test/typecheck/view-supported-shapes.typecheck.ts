@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
+import { testViewRowsLength } from "../helpers/array-bounds"
 
 const ViewString = Stdb.string(
   Schema.String.pipe(Schema.check(Schema.isMaxLength(255))),
@@ -14,6 +15,7 @@ const ViewsGroup = Stdb.StdbGroup.make("Views")
           id: ViewString,
           name: ViewString,
         }),
+        testViewRowsLength,
       ),
     }),
   )

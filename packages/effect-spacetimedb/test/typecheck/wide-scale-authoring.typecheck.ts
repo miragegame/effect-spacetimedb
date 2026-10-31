@@ -71,25 +71,25 @@ const group42 = <const Id extends string, const Prefix extends string>(
     reducer(scaleName(prefix, "41")),
   )
 
-const PlatformScaleGroup00 = group42("PlatformScaleGroup00", "scale00")
-const PlatformScaleGroup01 = group42("PlatformScaleGroup01", "scale01")
-const PlatformScaleGroup02 = group42("PlatformScaleGroup02", "scale02")
-const PlatformScaleGroup03 = group42("PlatformScaleGroup03", "scale03")
-const PlatformScaleGroup04 = group42("PlatformScaleGroup04", "scale04")
-const PlatformScaleGroup05 = group42("PlatformScaleGroup05", "scale05")
-const PlatformScaleGroup06 = group42("PlatformScaleGroup06", "scale06")
-const PlatformScaleGroup07 = group42("PlatformScaleGroup07", "scale07")
-const PlatformScaleGroup08 = group42("PlatformScaleGroup08", "scale08")
-const PlatformScaleGroup09 = group42("PlatformScaleGroup09", "scale09")
-const PlatformScaleGroup10 = group42("PlatformScaleGroup10", "scale10")
-const PlatformScaleGroup11 = group42("PlatformScaleGroup11", "scale11")
-const PlatformScaleGroup12 = group42("PlatformScaleGroup12", "scale12")
-const PlatformScaleGroup13 = group42("PlatformScaleGroup13", "scale13")
-const PlatformScaleGroup14 = group42("PlatformScaleGroup14", "scale14")
-const PlatformScaleGroup15 = group42("PlatformScaleGroup15", "scale15")
-const PlatformScaleGroup16 = group42("PlatformScaleGroup16", "scale16")
-const PlatformScaleGroup17 = group42("PlatformScaleGroup17", "scale17")
-const PlatformScaleGroup18 = group42("PlatformScaleGroup18", "scale18")
+const WideScaleGroup00 = group42("WideScaleGroup00", "scale00")
+const WideScaleGroup01 = group42("WideScaleGroup01", "scale01")
+const WideScaleGroup02 = group42("WideScaleGroup02", "scale02")
+const WideScaleGroup03 = group42("WideScaleGroup03", "scale03")
+const WideScaleGroup04 = group42("WideScaleGroup04", "scale04")
+const WideScaleGroup05 = group42("WideScaleGroup05", "scale05")
+const WideScaleGroup06 = group42("WideScaleGroup06", "scale06")
+const WideScaleGroup07 = group42("WideScaleGroup07", "scale07")
+const WideScaleGroup08 = group42("WideScaleGroup08", "scale08")
+const WideScaleGroup09 = group42("WideScaleGroup09", "scale09")
+const WideScaleGroup10 = group42("WideScaleGroup10", "scale10")
+const WideScaleGroup11 = group42("WideScaleGroup11", "scale11")
+const WideScaleGroup12 = group42("WideScaleGroup12", "scale12")
+const WideScaleGroup13 = group42("WideScaleGroup13", "scale13")
+const WideScaleGroup14 = group42("WideScaleGroup14", "scale14")
+const WideScaleGroup15 = group42("WideScaleGroup15", "scale15")
+const WideScaleGroup16 = group42("WideScaleGroup16", "scale16")
+const WideScaleGroup17 = group42("WideScaleGroup17", "scale17")
+const WideScaleGroup18 = group42("WideScaleGroup18", "scale18")
 
 const ScaleScheduledA = Stdb.scheduledTable("scaleScheduledA", {
   columns: {
@@ -103,9 +103,7 @@ const ScaleScheduledB = Stdb.scheduledTable("scaleScheduledB", {
   },
 })
 
-const PlatformScaleScheduled = Stdb.StdbGroup.make(
-  "PlatformScaleScheduled",
-).add(
+const WideScaleScheduled = Stdb.StdbGroup.make("WideScaleScheduled").add(
   Stdb.StdbFn.scheduledReducer("scaleScheduledReducer", {
     table: ScaleScheduledA,
   }),
@@ -120,54 +118,54 @@ const MixedSectionGroup = Stdb.StdbGroup.make("MixedSection").add(
   Stdb.StdbFn.anonymousView("mixedView", { returns: ScaleText }),
 )
 
-const PlatformScaleModule = Stdb.StdbModule.make("platform_scale_probe", {})
+const WideScaleModule = Stdb.StdbModule.make("wide_scale_probe", {})
   .addTables(ScaleScheduledA, ScaleScheduledB)
   .add(
-    PlatformScaleGroup00,
-    PlatformScaleGroup01,
-    PlatformScaleGroup02,
-    PlatformScaleGroup03,
-    PlatformScaleGroup04,
-    PlatformScaleGroup05,
-    PlatformScaleGroup06,
-    PlatformScaleGroup07,
-    PlatformScaleGroup08,
-    PlatformScaleGroup09,
-    PlatformScaleGroup10,
-    PlatformScaleGroup11,
-    PlatformScaleGroup12,
-    PlatformScaleGroup13,
-    PlatformScaleGroup14,
-    PlatformScaleGroup15,
-    PlatformScaleGroup16,
-    PlatformScaleGroup17,
-    PlatformScaleGroup18,
-    PlatformScaleScheduled,
+    WideScaleGroup00,
+    WideScaleGroup01,
+    WideScaleGroup02,
+    WideScaleGroup03,
+    WideScaleGroup04,
+    WideScaleGroup05,
+    WideScaleGroup06,
+    WideScaleGroup07,
+    WideScaleGroup08,
+    WideScaleGroup09,
+    WideScaleGroup10,
+    WideScaleGroup11,
+    WideScaleGroup12,
+    WideScaleGroup13,
+    WideScaleGroup14,
+    WideScaleGroup15,
+    WideScaleGroup16,
+    WideScaleGroup17,
+    WideScaleGroup18,
+    WideScaleScheduled,
     MixedSectionGroup,
   )
 
-const ModuleChainArm = Stdb.StdbModule.make("platform_scale_chain_probe", {})
+const ModuleChainArm = Stdb.StdbModule.make("wide_scale_chain_probe", {})
   .addTables(ScaleScheduledA, ScaleScheduledB)
-  .add(PlatformScaleGroup00)
-  .add(PlatformScaleGroup01)
-  .add(PlatformScaleGroup02)
-  .add(PlatformScaleGroup03)
-  .add(PlatformScaleGroup04)
-  .add(PlatformScaleGroup05)
-  .add(PlatformScaleGroup06)
-  .add(PlatformScaleGroup07)
-  .add(PlatformScaleGroup08)
-  .add(PlatformScaleGroup09)
-  .add(PlatformScaleGroup10)
-  .add(PlatformScaleGroup11)
-  .add(PlatformScaleGroup12)
-  .add(PlatformScaleGroup13)
-  .add(PlatformScaleGroup14)
-  .add(PlatformScaleGroup15)
-  .add(PlatformScaleGroup16)
-  .add(PlatformScaleGroup17)
-  .add(PlatformScaleGroup18)
-  .add(PlatformScaleScheduled)
+  .add(WideScaleGroup00)
+  .add(WideScaleGroup01)
+  .add(WideScaleGroup02)
+  .add(WideScaleGroup03)
+  .add(WideScaleGroup04)
+  .add(WideScaleGroup05)
+  .add(WideScaleGroup06)
+  .add(WideScaleGroup07)
+  .add(WideScaleGroup08)
+  .add(WideScaleGroup09)
+  .add(WideScaleGroup10)
+  .add(WideScaleGroup11)
+  .add(WideScaleGroup12)
+  .add(WideScaleGroup13)
+  .add(WideScaleGroup14)
+  .add(WideScaleGroup15)
+  .add(WideScaleGroup16)
+  .add(WideScaleGroup17)
+  .add(WideScaleGroup18)
+  .add(WideScaleScheduled)
   .add(MixedSectionGroup)
 
 const ChainedSingleAddGroup = Stdb.StdbGroup.make("ChainedSingleAdd")
@@ -276,9 +274,9 @@ const checkedHandler = Effect.fn(function* (args: { readonly value: string }) {
   void args.value
 })
 
-const PlatformScaleGroup09Handlers: Stdb.GroupCheckedHandlers<
-  typeof PlatformScaleModule,
-  "PlatformScaleGroup09"
+const WideScaleGroup09Handlers: Stdb.GroupCheckedHandlers<
+  typeof WideScaleModule,
+  "WideScaleGroup09"
 > = {
   scale09_00: checkedHandler,
   scale09_01: checkedHandler,
@@ -332,31 +330,31 @@ const ChainedHandlers: Stdb.GroupCheckedHandlers<
   chained_49: checkedHandler,
 }
 
-type PlatformScaleGroups =
-  | typeof PlatformScaleGroup00
-  | typeof PlatformScaleGroup01
-  | typeof PlatformScaleGroup02
-  | typeof PlatformScaleGroup03
-  | typeof PlatformScaleGroup04
-  | typeof PlatformScaleGroup05
-  | typeof PlatformScaleGroup06
-  | typeof PlatformScaleGroup07
-  | typeof PlatformScaleGroup08
-  | typeof PlatformScaleGroup09
-  | typeof PlatformScaleGroup10
-  | typeof PlatformScaleGroup11
-  | typeof PlatformScaleGroup12
-  | typeof PlatformScaleGroup13
-  | typeof PlatformScaleGroup14
-  | typeof PlatformScaleGroup15
-  | typeof PlatformScaleGroup16
-  | typeof PlatformScaleGroup17
-  | typeof PlatformScaleGroup18
-  | typeof PlatformScaleScheduled
+type WideScaleGroups =
+  | typeof WideScaleGroup00
+  | typeof WideScaleGroup01
+  | typeof WideScaleGroup02
+  | typeof WideScaleGroup03
+  | typeof WideScaleGroup04
+  | typeof WideScaleGroup05
+  | typeof WideScaleGroup06
+  | typeof WideScaleGroup07
+  | typeof WideScaleGroup08
+  | typeof WideScaleGroup09
+  | typeof WideScaleGroup10
+  | typeof WideScaleGroup11
+  | typeof WideScaleGroup12
+  | typeof WideScaleGroup13
+  | typeof WideScaleGroup14
+  | typeof WideScaleGroup15
+  | typeof WideScaleGroup16
+  | typeof WideScaleGroup17
+  | typeof WideScaleGroup18
+  | typeof WideScaleScheduled
 
 type _SchedulePairsOfGroups = Assert<
   IsEqual<
-    SchedulePairsOf<PlatformScaleGroups>,
+    SchedulePairsOf<WideScaleGroups>,
     | {
         readonly target: "scaleScheduledReducer"
         readonly table: "scaleScheduledA"
@@ -368,14 +366,11 @@ type _SchedulePairsOfGroups = Assert<
   >
 >
 
-type PlatformScaleGroupNames = Stdb.GroupNames<typeof PlatformScaleModule>
-type _PlatformScaleBoundaryNames = Assert<
+type WideScaleGroupNames = Stdb.GroupNames<typeof WideScaleModule>
+type _WideScaleBoundaryNames = Assert<
   IsEqual<
-    Extract<
-      PlatformScaleGroupNames,
-      "PlatformScaleGroup00" | "PlatformScaleGroup18"
-    >,
-    "PlatformScaleGroup00" | "PlatformScaleGroup18"
+    Extract<WideScaleGroupNames, "WideScaleGroup00" | "WideScaleGroup18">,
+    "WideScaleGroup00" | "WideScaleGroup18"
   >
 >
 
@@ -383,26 +378,23 @@ type _ModuleChainBoundaryNames = Assert<
   IsEqual<
     Extract<
       Stdb.GroupNames<typeof ModuleChainArm>,
-      "PlatformScaleGroup00" | "MixedSection"
+      "WideScaleGroup00" | "MixedSection"
     >,
-    "PlatformScaleGroup00" | "MixedSection"
+    "WideScaleGroup00" | "MixedSection"
   >
 >
 
-type _PlatformScaleTableIndex = Assert<
+type _WideScaleTableIndex = Assert<
   IsEqual<
-    (typeof PlatformScaleModule)["spec"]["tables"]["scaleScheduledA"],
+    (typeof WideScaleModule)["spec"]["tables"]["scaleScheduledA"],
     typeof ScaleScheduledA
   >
 >
 
-type _PlatformScaleGroup09HandlersAssignable = Assert<
+type _WideScaleGroup09HandlersAssignable = Assert<
   IsAssignable<
-    typeof PlatformScaleGroup09Handlers,
-    Stdb.GroupCheckedHandlers<
-      typeof PlatformScaleModule,
-      "PlatformScaleGroup09"
-    >
+    typeof WideScaleGroup09Handlers,
+    Stdb.GroupCheckedHandlers<typeof WideScaleModule, "WideScaleGroup09">
   >
 >
 
@@ -430,24 +422,21 @@ type _DualLifecycleKeys = Assert<
 
 type _MixedProcedureArgs = Assert<
   IsEqual<
-    Expand<Stdb.ProcedureArgsFor<typeof PlatformScaleModule, "mixedProcedure">>,
+    Expand<Stdb.ProcedureArgsFor<typeof WideScaleModule, "mixedProcedure">>,
     { readonly value: string }
   >
 >
 
 type _MixedProcedureSuccess = Assert<
   IsEqual<
-    Stdb.ProcedureSuccessFor<typeof PlatformScaleModule, "mixedProcedure">,
+    Stdb.ProcedureSuccessFor<typeof WideScaleModule, "mixedProcedure">,
     string
   >
 >
 
 type _MixedViewSuccess = Assert<
   IsEqual<
-    Extract<
-      Stdb.ViewSuccessFor<typeof PlatformScaleModule, "mixedView">,
-      string
-    >,
+    Extract<Stdb.ViewSuccessFor<typeof WideScaleModule, "mixedView">, string>,
     string
   >
 >
@@ -488,5 +477,5 @@ type _LegacyHttpShapeAssignable = Assert<
   >
 >
 
-void PlatformScaleGroup09Handlers
+void WideScaleGroup09Handlers
 void ChainedHandlers

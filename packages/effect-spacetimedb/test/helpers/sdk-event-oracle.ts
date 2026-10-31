@@ -104,10 +104,13 @@ export const eventContext = (event: SdkEvent): SdkEventContext => ({
   event,
 })
 
-// Mirrors spacetimedb@2.10.1 sdk/db_connection_impl.ts:518-534 (the event
-// context every emit carries), :962-988 and :1045-1076 (the subscription,
-// transaction and reducer event shapes), sdk/event.ts:11-18,
-// sdk/reducer_event.ts:5-20, and sdk/client_api/types.ts:143-151.
+// Mirrors spacetimedb@2.14.0 sdk/db_connection_impl.ts `#makeEventContext`
+// (:1046-1062, the event context every emit carries) and the subscription,
+// transaction and reducer event shapes built from it, sdk/event.ts:11-18,
+// sdk/reducer_event.ts:5-20, and the event variants in sdk/client_api/types.ts.
+// Re-verified at the 2.13.0 -> 2.14.0 bump: the whole of src/sdk is
+// byte-identical to 2.13.0, which was itself byte-identical to 2.12.0 in these
+// four files; 2.12.0's only change from 2.10.1 was the batch-subscribe messages.
 // Re-verify these source-cited hand mirrors when the pinned SpaceTimeDB SDK changes.
 export const reducerEventContext = (options: {
   readonly outcome: SdkReducerOutcome

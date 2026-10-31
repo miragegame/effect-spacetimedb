@@ -1,55 +1,58 @@
-
-import { createServer } from "node:net"
 import os from "node:os"
-import type * as Cause from "effect/Cause"
 import * as Config from "effect/Config"
 import * as DateTime from "effect/DateTime"
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
-import type * as PlatformError from "effect/PlatformError"
+import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
-import * as Schema from "effect/Schema"
-import * as Stream from "effect/Stream"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
-import { runCommand, splitBinaryCommand } from "./command.ts"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as ChildProcess from "effect/process/ChildProcess"
+import { runCommand } from "./command.ts"
 import {
   type ClearMode,
   DevServerBinaryError,
+  DevServerDatabaseNameInUseError,
   type DevServerEffect,
-  type DevServerError,
-  DevServerFileSystemError,
+  type DevServerEnvironmentValues,
   DevServerHttpError,
-  DevServerJsonDecodeError,
   type DevServerOptions,
-  DevServerPortError,
-  DevServerResetVerificationError,
   DevServerResponseError,
   type ModuleLifecycle,
   type ModuleLifecycleOptions,
+  type PublishDatabaseOptions,
+  type PublishedDatabase,
   type PublishedModuleRuntime,
   type SpacetimeBinaries,
   type SpacetimeBinarySource,
 } from "./model.ts"
 
+import {
+  currentProcessEnvironment,
+  deleteDatabase,
+  indicatesMissingDatabase,
+  loginCliToDevServer,
+  mergeEnvironment,
+  preparePublishEnvironment,
+  type PublishedValuesCoverage,
+  publishEnvironmentOnly,
+  publishModule,
+} from "./publish.ts"
+
+import {
+  annotateServerFailure,
+  createIdentity,
+  fileSystemError,
+  makeDevServerTempDirectory,
+  reservePort,
+  standaloneEnvironmentWithProxyExemption,
+  startStandaloneServer,
+} from "./standalone.ts"
+
 export * from "./model.ts"
-
-const IdentityResponse = Schema.Struct({
-  identity: Schema.String,
-  token: Schema.String,
-})
-
-type IdentityResponse = typeof IdentityResponse.Type
-
-const fileSystemError =
-  (operation: string, path: string) =>
-  (cause: PlatformError.PlatformError): DevServerFileSystemError =>
-    new DevServerFileSystemError({ operation, path, cause })
+export { publishEnvironmentOnly } from "./publish.ts"
 
 const resolveCommandPath = Effect.fn(function* (command: string) {
   if (command.includes("/") || command.length === 0) {
@@ -173,269 +176,6 @@ const assertVersionRequirement = Effect.fn(function* (
   )
 })
 
-const reservePort = Effect.callback<number, DevServerPortError>((resume) => {
-  const server = createServer()
-  server.unref()
-
-  server.once("error", (cause) => {
-    resume(Effect.fail(new DevServerPortError({ cause })))
-  })
-
-  server.listen(0, "127.0.0.1", () => {
-    const address = server.address()
-    if (address == null || typeof address === "string") {
-      resume(
-        Effect.fail(
-          new DevServerPortError({
-            cause: "server did not allocate a TCP address",
-          }),
-        ),
-      )
-      return
-    }
-
-    server.close((cause) => {
-      if (cause != null) {
-        resume(Effect.fail(new DevServerPortError({ cause })))
-        return
-      }
-
-      resume(Effect.succeed(address.port))
-    })
-  })
-
-  return Effect.try({
-    try: () => {
-      server.close()
-    },
-    catch: (cause) =>
-      new DevServerPortError({
-        cause,
-      }),
-  }).pipe(Effect.orDie)
-})
-
-const packageRoot = Effect.fn(function* () {
-  const path = yield* Path.Path
-  const configuredRoot = yield* Config.option(
-    Config.String("EFFECT_SPACETIMEDB_PACKAGE_ROOT"),
-  ).pipe(Effect.orElseSucceed(() => Option.none()))
-  const root = Option.getOrUndefined(configuredRoot)?.trim()
-  if (root !== undefined && root.length > 0) {
-    return root
-  }
-
-  return yield* path.fromFileUrl(new URL("../../", import.meta.url)).pipe(
-    Effect.mapError(
-      (cause) =>
-        new DevServerFileSystemError({
-          operation: "resolve package root",
-          path: import.meta.url,
-          cause,
-        }),
-    ),
-  )
-})
-
-const makePackageCacheDirectory = Effect.fn(function* (name: string) {
-  const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const root = yield* packageRoot()
-  const cacheRoot = path.join(root, ".tmp", "effect-spacetimedb", name)
-
-  yield* fs
-    .makeDirectory(cacheRoot, { recursive: true })
-    .pipe(Effect.mapError(fileSystemError("mkdir", cacheRoot)))
-
-  return cacheRoot
-})
-
-const makeDevServerTempDirectory = Effect.fn(function* () {
-  const fs = yield* FileSystem.FileSystem
-  const cacheRoot = yield* makePackageCacheDirectory("dev-server")
-
-  return yield* fs
-    .makeTempDirectoryScoped({
-      directory: cacheRoot,
-      prefix: "runtime-",
-    })
-    .pipe(Effect.mapError(fileSystemError("mkdtemp", cacheRoot)))
-})
-
-const createIdentityOnce = Effect.fn(function* (baseUrl: string) {
-  const url = `${baseUrl}/v1/identity`
-  const response = yield* HttpClient.post(url).pipe(
-    Effect.mapError((cause) => new DevServerHttpError({ url, cause })),
-  )
-  const text = yield* response.text.pipe(
-    Effect.mapError((cause) => new DevServerHttpError({ url, cause })),
-  )
-
-  if (response.status < 200 || response.status >= 300) {
-    return yield* new DevServerResponseError({
-      url,
-      status: response.status,
-      body: text,
-    })
-  }
-
-  return yield* Schema.decodeUnknownEffect(
-    Schema.fromJsonString(IdentityResponse),
-  )(text).pipe(
-    Effect.mapError(
-      (cause) =>
-        new DevServerJsonDecodeError({
-          text,
-          cause,
-        }),
-    ),
-  )
-})
-
-const createIdentity = Effect.fn(function* (baseUrl: string) {
-  const poll: (
-    remaining: number,
-  ) => Effect.Effect<IdentityResponse, DevServerError, HttpClient.HttpClient> =
-    Effect.fn(function* (remaining: number) {
-      const result = yield* createIdentityOnce(baseUrl).pipe(Effect.result)
-      if (Result.isSuccess(result)) {
-        return result.success
-      }
-
-      if (remaining <= 1) {
-        return yield* result.failure
-      }
-
-      yield* Effect.sleep(Duration.millis(250))
-      return yield* poll(remaining - 1)
-    })
-
-  return yield* poll(240)
-})
-
-const readServerLogTail = Effect.fn(function* (logPath: string) {
-  const fs = yield* FileSystem.FileSystem
-  const text = yield* fs
-    .readFileString(logPath)
-    .pipe(Effect.catchTag("PlatformError", () => Effect.succeed("")))
-  const lines = text.split(/\r?\n/u)
-  return lines.slice(Math.max(0, lines.length - 80)).join("\n")
-})
-
-const annotateServerFailure = <A, R>(
-  effect: Effect.Effect<A, DevServerError, R>,
-  logPath: string,
-) =>
-  effect.pipe(
-    Effect.tapCause((_cause: Cause.Cause<DevServerError>) =>
-      readServerLogTail(logPath).pipe(
-        Effect.flatMap((tail) =>
-          tail.trim().length === 0
-            ? Effect.logError(`SpaceTimeDB standalone server log: ${logPath}`)
-            : Effect.logError(
-                `SpaceTimeDB standalone server log: ${logPath}\n${tail}`,
-              ),
-        ),
-        Effect.orElseSucceed(() => undefined),
-      ),
-    ),
-  )
-
-const startStandaloneServer = Effect.fn(function* (params: {
-  readonly binaries: SpacetimeBinaries
-  readonly cwd: string
-  readonly dataDir: string
-  readonly jwtPrivateKeyPath: string
-  readonly jwtPublicKeyPath: string
-  readonly logPath: string
-  readonly port: number
-}) {
-  const fs = yield* FileSystem.FileSystem
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const [standaloneCommand, standalonePrefixArgs] = yield* splitBinaryCommand(
-    params.binaries.standalone,
-    "spacetimedb-standalone",
-  )
-
-  yield* fs
-    .writeFileString(params.logPath, "")
-    .pipe(Effect.mapError(fileSystemError("write", params.logPath)))
-
-  const handle = yield* spawner
-    .spawn(
-      ChildProcess.make(
-        standaloneCommand,
-        [
-          ...standalonePrefixArgs,
-          "start",
-          "--listen-addr",
-          `127.0.0.1:${params.port.toString()}`,
-          "--data-dir",
-          params.dataDir,
-          "--jwt-pub-key-path",
-          params.jwtPublicKeyPath,
-          "--jwt-priv-key-path",
-          params.jwtPrivateKeyPath,
-          "--non-interactive",
-        ],
-        {
-          cwd: params.cwd,
-          extendEnv: true,
-          forceKillAfter: Duration.seconds(2),
-          stdin: "ignore",
-          stdout: "pipe",
-          stderr: "pipe",
-        },
-      ),
-    )
-    .pipe(
-      Effect.mapError(
-        (cause) =>
-          new DevServerBinaryError({
-            command: "spacetimedb-standalone start",
-            cause,
-          }),
-      ),
-    )
-
-  yield* Effect.forkScoped(
-    Stream.run(handle.all, fs.sink(params.logPath, { flag: "a" })).pipe(
-      Effect.orElseSucceed(() => undefined),
-    ),
-  )
-
-  return handle
-})
-
-const cliConfigArg = (cliRootDir: string): string =>
-  `--config-path=${cliRootDir.replace(/[\\/]+$/u, "")}/cli.toml`
-
-const publishModule = Effect.fn(function* (params: {
-  readonly baseUrl: string
-  readonly binaries: SpacetimeBinaries
-  readonly bundlePath: string
-  readonly cliRootDir: string
-  readonly cwd: string
-  readonly databaseName: string
-  readonly clearMode: ClearMode
-}) {
-  yield* runCommand(
-    params.binaries.cli,
-    [
-      cliConfigArg(params.cliRootDir),
-      "publish",
-      params.databaseName,
-      "--server",
-      params.baseUrl,
-      "--js-path",
-      params.bundlePath,
-      "--yes",
-      `--delete-data=${params.clearMode}`,
-    ],
-    { cwd: params.cwd },
-  )
-})
-
 const lifecycleRequest = Effect.fn(function* (params: {
   readonly url: string
   readonly token?: string | undefined
@@ -458,31 +198,6 @@ const lifecycleRequest = Effect.fn(function* (params: {
   return { body, status: response.status }
 })
 
-const escapeRegularExpression = (value: string): string =>
-  value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
-
-const indicatesMissingDatabase = (
-  body: string,
-  databaseName: string,
-): boolean => {
-  const normalized = body.replace(/\u001b\[[0-9;]*m/gu, "").toLowerCase()
-  const escapedName = escapeRegularExpression(databaseName.toLowerCase())
-  const optionalQuote = "[`'\"]?"
-  const qualifiedDatabaseMissing = new RegExp(
-    `\\bdatabase\\s+${optionalQuote}${escapedName}${optionalQuote}\\s+(?:was\\s+)?(?:not found|does not exist)\\b`,
-    "u",
-  )
-  return (
-    normalized.includes("database not found") ||
-    normalized.includes("no such database") ||
-    normalized.includes("unknown database") ||
-    normalized.includes(
-      `failed to find database \`${databaseName.toLowerCase()}\``,
-    ) ||
-    qualifiedDatabaseMissing.test(normalized)
-  )
-}
-
 const isMissingDatabaseResponse = (
   status: number,
   body: string,
@@ -490,6 +205,31 @@ const isMissingDatabaseResponse = (
 ): boolean =>
   ([400, 404, 500] as const).includes(status as 400 | 404 | 500) &&
   indicatesMissingDatabase(body, databaseName)
+
+// `GET /v1/database/<name>/identity` answers the identity as bare hex.
+const databaseIdentityPattern = /^[0-9a-fA-F]{64}$/u
+
+const readDatabaseIdentity = Effect.fn(function* (params: {
+  readonly baseUrl: string
+  readonly databaseName: string
+  readonly token: string
+}) {
+  const url = `${params.baseUrl}/v1/database/${encodeURIComponent(params.databaseName)}/identity`
+  const response = yield* lifecycleRequest({ url, token: params.token })
+  const identity = response.body.trim()
+  if (
+    response.status < 200 ||
+    response.status >= 300 ||
+    !databaseIdentityPattern.test(identity)
+  ) {
+    return yield* new DevServerResponseError({
+      url,
+      status: response.status,
+      body: response.body,
+    })
+  }
+  return identity
+})
 
 export const makeModuleLifecycle = (
   options: ModuleLifecycleOptions,
@@ -561,10 +301,26 @@ export const makeModuleLifecycle = (
       }
       return { reachable: true, published: true, databaseIdentity }
     })
-  const reset: ModuleLifecycle["reset"] = Effect.fn(function* (
-    resetOptions: Parameters<ModuleLifecycle["reset"]>[0],
-  ) {
+  const reset: ModuleLifecycle["reset"] = Effect.fn(function* (resetOptions) {
     const binaries = yield* resolveBinaries(options.binaries, cwd)
+    const bundlePath = resetOptions?.bundlePath ?? options.bundlePath
+    // With a bundle, the reset is one clearing publish: the host's own reset,
+    // which builds the bundle and runs its `init` with the replacement values
+    // before it deletes anything, so any refusal (an `init` failure included)
+    // keeps the database and its stored values. The replacement values must
+    // be complete, since the reset stores exactly them; checking them here
+    // against the bundle's declarations is an early, typed refusal.
+    const publishEnvironment =
+      bundlePath === undefined
+        ? undefined
+        : yield* preparePublishEnvironment({
+            binaries,
+            bundle: { bundlePath, coverage: "complete" },
+            cwd,
+            supplied: resetOptions?.environment ?? options.environment ?? {},
+            processEnvironment:
+              options.processEnvironment ?? currentProcessEnvironment(),
+          })
     if (options.token !== undefined) {
       yield* loginCliToDevServer({
         binaries,
@@ -573,72 +329,29 @@ export const makeModuleLifecycle = (
         token: options.token,
       })
     }
-    yield* runCommand(
-      binaries.cli,
-      [
-        cliConfigArg(cliRootDir),
-        "delete",
-        "--yes",
-        "--server",
-        baseUrl,
-        options.databaseName,
-      ],
-      { cwd },
-    ).pipe(
-      Effect.catchTags({
-        DevServerCommandError: (error) =>
-          indicatesMissingDatabase(
-            `${error.stdout}\n${error.stderr}`,
-            options.databaseName,
-          )
-            ? Effect.void
-            : error,
-      }),
-    )
-    const bundlePath = resetOptions?.bundlePath ?? options.bundlePath
-    if (bundlePath !== undefined) {
-      const deletionStatus = yield* status()
-      if (deletionStatus.published) {
-        return yield* new DevServerResetVerificationError({
-          baseUrl,
-          databaseName: options.databaseName,
-        })
-      }
-      yield* publishModule({
+    if (bundlePath === undefined || publishEnvironment === undefined) {
+      // Nothing to republish: the reset is a plain delete.
+      return yield* deleteDatabase({
         baseUrl,
         binaries,
-        bundlePath,
         cliRootDir,
         cwd,
         databaseName: options.databaseName,
-        clearMode: "never",
       })
     }
+    yield* publishModule({
+      baseUrl,
+      binaries,
+      bundlePath,
+      cliRootDir,
+      cwd,
+      databaseName: options.databaseName,
+      clearMode: "always",
+      publishEnvironment,
+    })
   })
   return { reset, status }
 }
-
-const loginCliToDevServer = Effect.fn(function* (params: {
-  readonly binaries: SpacetimeBinaries
-  readonly cliRootDir: string
-  readonly cwd: string
-  readonly token: string
-}) {
-  yield* runCommand(
-    params.binaries.cli,
-    [cliConfigArg(params.cliRootDir), "login", "--token", params.token],
-    { cwd: params.cwd },
-    {
-      displayArgs: [
-        cliConfigArg(params.cliRootDir),
-        "login",
-        "--token",
-        "<redacted>",
-      ],
-      sensitiveValues: [params.token],
-    },
-  )
-})
 
 export const makeDevServer: (options: DevServerOptions) => DevServerEffect =
   Effect.fn(function* (options: DevServerOptions) {
@@ -660,6 +373,8 @@ export const makeDevServer: (options: DevServerOptions) => DevServerEffect =
     const cliRootDir = path.join(tempDir, "cli")
     const jwtPublicKeyPath = path.join(jwtDir, "jwt_public_key.pem")
     const jwtPrivateKeyPath = path.join(jwtDir, "jwt_private_key.pem")
+    const processEnvironment =
+      options.processEnvironment ?? currentProcessEnvironment()
 
     yield* fs
       .makeDirectory(jwtDir, { recursive: true })
@@ -679,6 +394,10 @@ export const makeDevServer: (options: DevServerOptions) => DevServerEffect =
       jwtPublicKeyPath,
       logPath,
       port,
+      standaloneEnvironment: standaloneEnvironmentWithProxyExemption(
+        options.standaloneEnvironment,
+        processEnvironment,
+      ),
     })
 
     return yield* annotateServerFailure(
@@ -690,45 +409,195 @@ export const makeDevServer: (options: DevServerOptions) => DevServerEffect =
           cwd,
           token: identity.token,
         })
-        yield* publishModule({
-          baseUrl,
-          binaries,
-          bundlePath: options.bundlePath,
-          cliRootDir,
-          cwd,
-          databaseName,
-          clearMode: options.clear?.publishFirst ?? "always",
+        // `supplied` keys come from the call and must be declared by the
+        // bundle; `carried` keys are tracked values being resupplied, and any
+        // the bundle no longer declares are dropped rather than refused.
+        const publish = Effect.fn(function* (params: {
+          readonly databaseName: string
+          readonly bundlePath: string
+          readonly clearMode: ClearMode
+          readonly coverage: PublishedValuesCoverage
+          readonly supplied: DevServerEnvironmentValues
+          readonly carried?: DevServerEnvironmentValues | undefined
+        }) {
+          const prepared = yield* preparePublishEnvironment({
+            binaries,
+            bundle: {
+              bundlePath: params.bundlePath,
+              coverage: params.coverage,
+            },
+            cwd,
+            supplied: params.supplied,
+            carried: params.carried,
+            processEnvironment,
+          })
+          const cleared = yield* publishModule({
+            baseUrl,
+            binaries,
+            bundlePath: params.bundlePath,
+            cliRootDir,
+            cwd,
+            databaseName: params.databaseName,
+            clearMode: params.clearMode,
+            publishEnvironment: prepared,
+          })
+          return { cleared, published: prepared.published }
         })
 
-        const lifecycle = makeModuleLifecycle({
-          baseUrl,
-          databaseName,
-          token: identity.token,
-          binaries,
+        // The names of the databases this runtime holds on its standalone.
+        const heldNames = yield* Ref.make<ReadonlySet<string>>(new Set())
+        const release = (name: string) =>
+          Ref.update(heldNames, (held) => {
+            const next = new Set(held)
+            next.delete(name)
+            return next
+          })
+        const hold = Effect.fn(function* (name: string) {
+          const held = yield* Ref.get(heldNames)
+          if (held.has(name)) {
+            return yield* new DevServerDatabaseNameInUseError({
+              databaseName: name,
+            })
+          }
+          yield* Ref.set(heldNames, new Set([...held, name]))
+        })
+
+        const publishNewDatabase = Effect.fn(function* (
+          params: PublishDatabaseOptions,
+        ) {
+          const name = params.databaseName
+          yield* hold(name)
+          // A new database: the values are all it will store.
+          const first = yield* publish({
+            databaseName: name,
+            bundlePath: params.bundlePath,
+            clearMode: params.clear?.publishFirst ?? "always",
+            coverage: "complete",
+            supplied: params.environment ?? {},
+          }).pipe(Effect.onError(() => release(name)))
+          const databaseIdentity = yield* readDatabaseIdentity({
+            baseUrl,
+            databaseName: name,
+            token: identity.token,
+          })
+          // The values this database stores so far. A publish that may clear
+          // data resupplies them, since `--delete-data` deletes stored values
+          // along with everything else.
+          const currentEnvironment =
+            yield* Ref.make<DevServerEnvironmentValues>(first.published)
+          // Only `status` is used; `reset` goes through `publish` above.
+          const lifecycle = makeModuleLifecycle({
+            baseUrl,
+            databaseName: name,
+            token: identity.token,
+            binaries,
+          })
+          const republishClearMode = params.clear?.republish ?? "never"
+
+          return {
+            databaseName: name,
+            databaseIdentity,
+            republish: Effect.fn(function* (
+              bundlePath: string,
+              republishOptions?: {
+                readonly environment?: DevServerEnvironmentValues | undefined
+              },
+            ) {
+              const supplied = republishOptions?.environment ?? {}
+              const current = yield* Ref.get(currentEnvironment)
+              // `never` keeps every stored value, so only this call's values
+              // are supplied; a publish that may clear resupplies the tracked
+              // ones.
+              const { cleared, published } = yield* publish({
+                databaseName: name,
+                bundlePath,
+                clearMode: republishClearMode,
+                coverage:
+                  republishClearMode === "always" ? "complete" : "supplied",
+                supplied,
+                carried: republishClearMode === "never" ? undefined : current,
+              })
+              // A cleared database stores exactly what was published;
+              // otherwise the published values land on top of what it kept.
+              yield* Ref.set(
+                currentEnvironment,
+                cleared ? published : mergeEnvironment(current, published),
+              )
+            }),
+            updateEnvironment: Effect.fn(function* (
+              values: DevServerEnvironmentValues,
+              updateOptions?: {
+                readonly unset?: ReadonlyArray<string> | undefined
+              },
+            ) {
+              const unset = updateOptions?.unset ?? []
+              yield* publishEnvironmentOnly({
+                baseUrl,
+                binaries,
+                cliRootDir,
+                cwd,
+                databaseName: name,
+                environment: values,
+                processEnvironment,
+                unset,
+              })
+              yield* Ref.update(currentEnvironment, (current) =>
+                mergeEnvironment(current, values, unset),
+              )
+            }),
+            status: lifecycle.status,
+            reset: Effect.fn(function* (resetOptions?: {
+              readonly bundlePath?: string | undefined
+              readonly environment?: DevServerEnvironmentValues | undefined
+            }) {
+              // One clearing publish, the host's own reset (see
+              // `ModuleLifecycle.reset`): it stores exactly the published
+              // values, and only once it succeeded, so a refused reset keeps
+              // the old ones.
+              const replacement = resetOptions?.environment
+              const current = yield* Ref.get(currentEnvironment)
+              const { published } = yield* publish({
+                databaseName: name,
+                bundlePath: resetOptions?.bundlePath ?? params.bundlePath,
+                clearMode: "always",
+                coverage: "complete",
+                supplied: replacement ?? {},
+                carried: replacement === undefined ? current : undefined,
+              })
+              yield* Ref.set(currentEnvironment, published)
+            }),
+            remove: Effect.fn(function* () {
+              yield* deleteDatabase({
+                baseUrl,
+                binaries,
+                cliRootDir,
+                cwd,
+                databaseName: name,
+              })
+              yield* release(name)
+            }),
+          } satisfies PublishedDatabase
+        })
+
+        const first = yield* publishNewDatabase({
           bundlePath: options.bundlePath,
-          cliRootDir,
-          cwd,
+          databaseName,
+          environment: options.environment,
+          clear: options.clear,
         })
 
         return {
+          ...first,
           baseUrl,
-          databaseName,
           jwtPrivateKeyPath,
           jwtPublicKeyPath,
           logPath,
-          republish: (bundlePath: string) =>
-            publishModule({
-              baseUrl,
-              binaries,
-              bundlePath,
-              cliRootDir,
-              cwd,
-              databaseName,
-              clearMode: options.clear?.republish ?? "never",
-            }),
-          status: lifecycle.status,
-          reset: lifecycle.reset,
           token: identity.token,
+          publishDatabase: (databaseOptions: PublishDatabaseOptions) =>
+            annotateServerFailure(
+              publishNewDatabase(databaseOptions),
+              logPath,
+            ).pipe(Effect.provideService(FileSystem.FileSystem, fs)),
         } satisfies PublishedModuleRuntime
       }),
       logPath,

@@ -4,6 +4,7 @@ import {
   StdbDiagnostic,
   StdbValidationError,
 } from "../contract/module-validation.ts"
+import { outboxResultMetadataOf } from "../contract/outbox-table.ts"
 import type { AnyEndpointDecl } from "./declarations.ts"
 
 type ErasedMiddlewareEffect = Effect.Effect<unknown, never, never>
@@ -61,6 +62,13 @@ export const middlewareForDecl = (
   middleware: unknown,
 ): ErasedMiddlewareEffect | undefined => {
   if (decl.declKind === "view" || decl.declKind === "lifecycle") {
+    return undefined
+  }
+  // A settle reducer runs only as the host settling its outbox (the zero
+  // identity, no token), which its compiled wrapper already enforces. A
+  // group's reducer middleware is written for its other callers (a player
+  // guard, say) and would refuse the host, losing the outcome.
+  if (outboxResultMetadataOf(decl.spec) !== undefined) {
     return undefined
   }
   if (isEffectValue(middleware)) {

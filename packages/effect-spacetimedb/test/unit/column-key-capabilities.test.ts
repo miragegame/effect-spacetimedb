@@ -1,5 +1,6 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Stdb from "effect-spacetimedb"
+import { testArrayLength } from "../helpers/array-bounds"
 
 const { describe, expect, it } = EffectVitest
 
@@ -11,7 +12,7 @@ describe("column key capabilities", () => {
       }).primaryKey(),
     ).toThrow("A primary key is not supported")
 
-    expect(() => Stdb.array(Stdb.u32()).primaryKey()).toThrow(
+    expect(() => Stdb.array(Stdb.u32(), testArrayLength).primaryKey()).toThrow(
       "A primary key is not supported",
     )
   })

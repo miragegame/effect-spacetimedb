@@ -1,5 +1,5 @@
 import * as Stdb from "effect-spacetimedb"
-import { String255 } from "../schema"
+import { ResultRowsLength, String255 } from "../schema"
 
 export const MembershipView = Stdb.struct({
   tenantId: String255,
@@ -42,6 +42,6 @@ export const MembershipFunctions = Stdb.StdbGroup.make("Memberships")
         emailLo: String255,
         emailHi: String255,
       }),
-      returns: Stdb.array(MembershipView),
+      returns: Stdb.array(MembershipView, ResultRowsLength),
     }),
   )

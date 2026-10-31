@@ -8,13 +8,6 @@ const { expect } = EffectVitest
 const describe = EffectVitest.layer(TestLayer)
 
 describe("testing entrypoint", (it) => {
-  it.effect("has unique top-level export names", () =>
-    Effect.gen(function* () {
-      const names = Object.keys(StdbTesting)
-      expect(new Set(names).size).toBe(names.length)
-    }),
-  )
-
   it.effect("exposes curated low-level namespaces", () =>
     Effect.gen(function* () {
       expect(

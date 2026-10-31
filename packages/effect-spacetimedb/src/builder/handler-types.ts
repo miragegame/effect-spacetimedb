@@ -17,6 +17,7 @@ import { type AnyModuleSpec, type ModuleSpec } from "../contract/module.ts"
 import type { ModuleBrand } from "../identity-brand.ts"
 import { type ProcedureSpec } from "../contract/procedure.ts"
 import { type ReducerSpec } from "../contract/reducer.ts"
+import type { AnyRemoteInterfaceBinding } from "../contract/remote-interface.ts"
 import type { TableRow } from "../contract/table.ts"
 import { type AnyViewSpec } from "../contract/view.ts"
 
@@ -33,6 +34,7 @@ import type { ModulePlan } from "../module-plan.ts"
 import * as Server from "../server/bind.ts"
 
 import * as ServerContext from "../server/context.ts"
+import type { EnvironmentOfSpec } from "../server/environment.ts"
 import type {
   HandlerInputDefinitions,
   HttpHandlerErrors,
@@ -72,9 +74,11 @@ import type {
   LifecycleKeysOf,
   LifecycleRecordFromNames,
   ModuleSpecTypeId,
+  OutboxTableNameOf,
   ScheduledTableNamesTypeId,
   SchedulePair,
   SchedulePairsTypeId,
+  SettledOutboxTableNamesOf,
   SpecOfModule,
   TableNamesTypeId,
 } from "./type-utils.ts"
@@ -158,9 +162,11 @@ export type ArgsFor<Decl> = Decl extends {
           ? HttpHandlerRequestOf<Decl>
           : Decl extends RawHttpRouteDecl
             ? Request
-            : Decl extends SenderViewDecl | AnonymousViewDecl | AnyViewSpec
-              ? Record<string, never>
-              : Record<string, never>
+            : Decl extends SenderViewDecl | AnonymousViewDecl
+              ? TypeOf<Decl["spec"]["params"]>
+              : Decl extends AnyViewSpec
+                ? TypeOf<Decl["params"]>
+                : Record<string, never>
 
 export type SuccessFor<Decl> = Decl extends { readonly declKind: "reducer" }
   ? unknown
@@ -727,7 +733,9 @@ type AccessorName<Service> = Service extends ServerContext.ReadonlyDb
                       ? "HttpTx"
                       : Service extends ServerContext.Db
                         ? "Db"
-                        : "accessor"
+                        : Service extends ServerContext.Env
+                          ? "Env"
+                          : "accessor"
 
 type ForbiddenServerServiceMessage<
   Module extends AnyStdbModule,
@@ -859,7 +867,9 @@ type HandlerForKeyWithChannels<
         Requirements
       >
     : Key extends keyof Spec["views"] & string
-      ? () => Effect.Effect<
+      ? (
+          args: TypeOf<Spec["views"][Key]["params"]>,
+        ) => Effect.Effect<
           ViewSuccessOf<Spec["views"][Key]>,
           Error,
           Requirements
@@ -1206,7 +1216,8 @@ export type SpecWithLifecycle<
   Spec["httpHandlers"],
   Spec["httpGroups"],
   Spec["reducerGroups"],
-  Spec["procedureGroups"]
+  Spec["procedureGroups"],
+  EnvironmentOfSpec<Spec>
 > & { readonly name: Spec["name"] }
 
 export type BuildSpec<
@@ -1272,6 +1283,38 @@ export type CoverScheduleBindings<Module extends AnyStdbModule> = [
         string as `Scheduled target references an unregistered table: ${Name}`]: never
     }
 
+// Derived from the assembled spec at build time rather than accumulated on
+// every add, like schedules are: a module declares few outboxes, and the build
+// is the only place the pairing is checked.
+type OutboxTableNames<Module extends AnyStdbModule> = OutboxTableNameOf<
+  SpecOfModule<Module>["tables"][keyof SpecOfModule<Module>["tables"]]
+>
+
+type SettledOutboxTableNames<Module extends AnyStdbModule> =
+  SettledOutboxTableNamesOf<SpecOfModule<Module>["reducers"]>
+
+export type UnsettledOutboxTables<Module extends AnyStdbModule> = Exclude<
+  OutboxTableNames<Module>,
+  SettledOutboxTableNames<Module>
+>
+
+export type UnregisteredSettledOutboxTables<Module extends AnyStdbModule> =
+  Exclude<SettledOutboxTableNames<Module>, TableNames<Module>>
+
+export type CoverOutboxResultBindings<Module extends AnyStdbModule> = [
+  UnregisteredSettledOutboxTables<Module>,
+] extends [never]
+  ? [UnsettledOutboxTables<Module>] extends [never]
+    ? unknown
+    : {
+        readonly [Name in UnsettledOutboxTables<Module> &
+          string as `Outbox table has no settle reducer: ${Name}`]: never
+      }
+  : {
+      readonly [Name in UnregisteredSettledOutboxTables<Module> &
+        string as `Settle reducer references an unregistered table: ${Name}`]: never
+    }
+
 type TupleIndexKeys<Values extends ReadonlyArray<unknown>> = Exclude<
   keyof Values,
   keyof (readonly unknown[])
@@ -1315,7 +1358,9 @@ type CoverBuildImpls<
   Module extends AnyStdbModule,
   Impls extends ReadonlyArray<unknown>,
 > = [ImplModuleMismatchDiagnosticKeys<Module, Impls>] extends [never]
-  ? CoverAllGroups<Module, Impls> & CoverScheduleBindings<Module>
+  ? CoverAllGroups<Module, Impls> &
+      CoverScheduleBindings<Module> &
+      CoverOutboxResultBindings<Module>
   : unknown
 
 export type BuildRuntime<RuntimeR> =
@@ -1332,6 +1377,14 @@ export type BuildOptions<RuntimeR> = {
   readonly onDefect?: ((cause: Cause.Cause<unknown>) => void) | undefined
   readonly runtime?: BuildRuntime<RuntimeR>
   readonly runtimeMode?: ConstrainedServerRuntimeMode
+  /**
+   * The generated binding of each remote interface this module's outboxes
+   * call, paired by `RemoteInterface.bind` in the module entry. Only the
+   * compiler reads them: the contract stays importable outside a SpacetimeDB
+   * host, which a binding's module is not. A binding no outbox uses is
+   * accepted.
+   */
+  readonly receiverBindings?: ReadonlyArray<AnyRemoteInterfaceBinding>
 }
 
 export type RejectWidenedImplArray<Impls extends ReadonlyArray<unknown>> =

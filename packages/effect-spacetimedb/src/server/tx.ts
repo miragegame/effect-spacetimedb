@@ -6,9 +6,10 @@ import { decodeDefectFromCause, type StdbDecodeError } from "../decode-error.ts"
 import { errorTypeId, hasErrorTypeId } from "../error-identity.ts"
 import type {
   AnyServerContextRequirements,
-  Db,
   EffectWithoutForbiddenRequirements,
+  HttpTxAllowedRequirements,
   TxAllowedRequirements,
+  WithEnv,
 } from "./context.ts"
 import type { HandlerRequirements } from "./handler-types.ts"
 import { type StdbHostFailure, toHostFailure } from "./services.ts"
@@ -26,10 +27,13 @@ type ScopedTxRunner<RuntimeR, Allowed extends AnyServerContextRequirements> = {
 
 export type TxRunner<RuntimeR = never> = ScopedTxRunner<
   RuntimeR,
-  TxAllowedRequirements
+  WithEnv<TxAllowedRequirements>
 >
 
-export type DbOnlyTxRunner<RuntimeR = never> = ScopedTxRunner<RuntimeR, Db>
+export type DbOnlyTxRunner<RuntimeR = never> = ScopedTxRunner<
+  RuntimeR,
+  WithEnv<HttpTxAllowedRequirements>
+>
 
 type ScopedTxRunnerOptions<
   RuntimeR,
@@ -134,9 +138,17 @@ const makeScopedTxRunner = <
   }) satisfies ScopedTxRunner<RuntimeR, Allowed>
 
 export const makeTxRunner = <RuntimeR, TxCtx>(
-  options: ScopedTxRunnerOptions<RuntimeR, TxCtx, TxAllowedRequirements>,
+  options: ScopedTxRunnerOptions<
+    RuntimeR,
+    TxCtx,
+    WithEnv<TxAllowedRequirements>
+  >,
 ): TxRunner<RuntimeR> => makeScopedTxRunner(options)
 
 export const makeDbOnlyTxRunner = <RuntimeR, TxCtx>(
-  options: ScopedTxRunnerOptions<RuntimeR, TxCtx, Db>,
+  options: ScopedTxRunnerOptions<
+    RuntimeR,
+    TxCtx,
+    WithEnv<HttpTxAllowedRequirements>
+  >,
 ): DbOnlyTxRunner<RuntimeR> => makeScopedTxRunner(options)

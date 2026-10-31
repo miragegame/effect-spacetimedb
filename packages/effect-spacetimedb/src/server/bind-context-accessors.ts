@@ -69,6 +69,10 @@ export const makeServerContextAccessors = <Module extends AnyModuleSpec>() => ({
     (from) => from as ServerContext.FromService<Module>,
   ),
   http: Effect.map(ServerContext.Http, (http) => http),
+  env: Effect.map(
+    ServerContext.Env,
+    (env) => env as ServerContext.EnvService<Module>,
+  ),
   txRunner: ServerContext.txRunnerForModule<Module>(),
   httpTxRunner: ServerContext.httpTxRunnerForModule<Module>(),
 })

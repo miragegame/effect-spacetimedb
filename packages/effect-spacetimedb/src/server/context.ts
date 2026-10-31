@@ -6,6 +6,11 @@ import type { ModuleBrand } from "../identity-brand.ts"
 import type { ServerQueryRoot } from "../query/types.ts"
 import { prefixId } from "../utils.ts"
 import type {
+  AnyEnvService,
+  EnvironmentOfSpec,
+  EnvService as EnvServiceOf,
+} from "./environment.ts"
+import type {
   EffectDbView,
   EffectHttpClient,
   ReadonlyEffectDbView,
@@ -107,6 +112,8 @@ export type FromService<Module extends AnyModuleSpec> = ServerQueryRoot<Module>
 
 export type HttpService<_Module extends AnyModuleSpec> = EffectHttpClient
 
+export type EnvService<Module extends AnyModuleSpec> = EnvServiceOf<Module>
+
 export type AnyServerContextRequirements =
   | ReducerCtx
   | ProcedureCtx
@@ -119,6 +126,7 @@ export type AnyServerContextRequirements =
   | ReadonlyDb
   | From
   | Http
+  | Env
   | TxRunner
   | HttpTxRunner
 
@@ -141,6 +149,31 @@ export type AnonymousViewAllowedRequirements =
 
 export type TxAllowedRequirements = TxCtx | MutationCtx | Db
 
+export type HttpTxAllowedRequirements = Db
+
+/**
+ * The module environment is available to every callable kind and to both
+ * transaction runners. The per-kind sets above name what each kind's own
+ * context provides and stay without it, so code that provides exactly those
+ * services (test harnesses calling handlers directly) keeps its types. The
+ * module-blind server handler inputs accept `Env` through this wrapper; the
+ * module-scoped sets below add it through `EnvRequirementFor`.
+ */
+export type WithEnv<Allowed> = Allowed | Env
+
+/**
+ * `Env` for a module that declares an environment, `never` for one that does
+ * not. The module-scoped allowed sets below add it this way, so a module
+ * without declarations keeps exactly the handler types it had before
+ * environments existed, and code that provides those services by hand needs
+ * no change until its module declares a key.
+ */
+export type EnvRequirementFor<Module extends AnyModuleSpec> = [
+  keyof EnvironmentOfSpec<Module>,
+] extends [never]
+  ? never
+  : Env
+
 export type ModuleScopedRequirement<
   Module extends AnyModuleSpec,
   Requirement,
@@ -156,25 +189,46 @@ export type ModuleScopedAllowedRequirements<
   : never
 
 export type ReducerAllowedRequirementsFor<Module extends AnyModuleSpec> =
-  ModuleScopedAllowedRequirements<Module, ReducerAllowedRequirements>
+  ModuleScopedAllowedRequirements<
+    Module,
+    ReducerAllowedRequirements | EnvRequirementFor<Module>
+  >
 
 export type ProcedureAllowedRequirementsFor<Module extends AnyModuleSpec> =
-  ModuleScopedAllowedRequirements<Module, ProcedureAllowedRequirements>
+  ModuleScopedAllowedRequirements<
+    Module,
+    ProcedureAllowedRequirements | EnvRequirementFor<Module>
+  >
 
 export type HttpHandlerAllowedRequirementsFor<Module extends AnyModuleSpec> =
-  ModuleScopedAllowedRequirements<Module, HttpHandlerAllowedRequirements>
+  ModuleScopedAllowedRequirements<
+    Module,
+    HttpHandlerAllowedRequirements | EnvRequirementFor<Module>
+  >
 
 export type SenderViewAllowedRequirementsFor<Module extends AnyModuleSpec> =
-  ModuleScopedAllowedRequirements<Module, SenderViewAllowedRequirements>
+  ModuleScopedAllowedRequirements<
+    Module,
+    SenderViewAllowedRequirements | EnvRequirementFor<Module>
+  >
 
 export type AnonymousViewAllowedRequirementsFor<Module extends AnyModuleSpec> =
-  ModuleScopedAllowedRequirements<Module, AnonymousViewAllowedRequirements>
+  ModuleScopedAllowedRequirements<
+    Module,
+    AnonymousViewAllowedRequirements | EnvRequirementFor<Module>
+  >
 
 export type TxAllowedRequirementsFor<Module extends AnyModuleSpec> =
-  ModuleScopedAllowedRequirements<Module, TxAllowedRequirements>
+  ModuleScopedAllowedRequirements<
+    Module,
+    TxAllowedRequirements | EnvRequirementFor<Module>
+  >
 
 export type HttpTxAllowedRequirementsFor<Module extends AnyModuleSpec> =
-  ModuleScopedAllowedRequirements<Module, Db>
+  ModuleScopedAllowedRequirements<
+    Module,
+    HttpTxAllowedRequirements | EnvRequirementFor<Module>
+  >
 
 type EffectServicesOf<EffectType> = EffectType extends Effect.Effect<
   infer _A,
@@ -323,6 +377,15 @@ export class From extends Context.Service<From, AnyFromService>()(
 
 export class Http extends Context.Service<Http, EffectHttpClient>()(
   prefixId("Server/Http"),
+) {}
+
+/**
+ * The calling module's declared database environment, provided per call to
+ * reducers, lifecycle hooks, procedures, views, HTTP handlers and transaction
+ * bodies. Yield it through the module's `Env` accessor.
+ */
+export class Env extends Context.Service<Env, AnyEnvService>()(
+  prefixId("Server/Env"),
 ) {}
 
 export class TxRunner extends Context.Service<

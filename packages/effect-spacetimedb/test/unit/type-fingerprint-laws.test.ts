@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema"
 import * as FastCheck from "fast-check"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import { codecCorpus } from "../helpers/codec-corpus"
+import { testArrayLength } from "../helpers/array-bounds"
 
 const { describe, expect, it } = EffectVitest
 
@@ -26,7 +27,7 @@ const makeTreeType = (): StdbTesting.ContractType.AnyValueType => {
   const TreeAgain: ReturnType<typeof T.lazy<Tree, unknown>> = T.lazy(() =>
     T.struct({
       name: T.string(),
-      children: T.array(TreeAgain),
+      children: T.array(TreeAgain, testArrayLength),
     }),
   )
 
@@ -45,7 +46,7 @@ const typeFactories: ReadonlyArray<TypeFactoryEntry> = [
   {
     kind: "array",
     original: codecCorpus.array.type,
-    rebuild: () => T.array(T.u16()),
+    rebuild: () => T.array(T.u16(), testArrayLength),
   },
   {
     kind: "bigint",
@@ -242,7 +243,9 @@ describe("type fingerprint laws", () => {
       }
     }
 
-    expect(fingerprintOf(T.array(T.u8()))).toBe(fingerprintOf(T.bytes()))
+    expect(fingerprintOf(T.array(T.u8(), testArrayLength))).toBe(
+      fingerprintOf(T.bytes()),
+    )
   })
 
   it("formats stable digest and decimal suffix outputs", () => {

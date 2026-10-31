@@ -16,6 +16,11 @@ import type {
 import type { AnyScheduledTableSpec } from "../contract/table.ts"
 
 import {
+  type AnyOutboxTableSpec,
+  outboxResultParams,
+} from "../contract/outbox-table.ts"
+
+import {
   struct,
   unit,
   type AnyValueType,
@@ -34,7 +39,10 @@ import type { HandlerInputDefinitions } from "../server/handler-types.ts"
 import { sortedRecord } from "./runtime-helpers.ts"
 
 import type {
+  OutboxResultDecl,
+  OutboxResultSpec,
   ProcedureDecl,
+  ReceiverDecl,
   ReducerDecl,
   ScheduledParams,
   ScheduledProcedureDecl,
@@ -235,6 +243,66 @@ export const scheduledProcedureEndpoint = <
         table: spec.table,
         allowExternalCallers: spec.allowExternalCallers === true,
       },
+    },
+  }
+}
+
+/**
+ * A reducer peer databases call through their outboxes (`StdbFn.receiver`).
+ * Its wire name is pinned to `snakeCaseName(name)` under every case policy, and
+ * the group that implements it must declare a guard as its reducer middleware.
+ * A refusal is a failure with a declared error: the caller's settle reducer
+ * reads it as `OutboxResult.Refused`.
+ */
+export const receiverEndpoint = <
+  const Name extends string,
+  const Params extends StructLikeValueType = typeof EmptyEndpointParams,
+  const Errors extends ErrorsInput | undefined = undefined,
+>(
+  name: Name,
+  spec: {
+    readonly params?: Params
+    readonly errors?: Errors
+  },
+): ReceiverDecl<Name, Params, DefinitionOfInputOrUndefined<Errors>> => {
+  const reducer = defineReducer({
+    params: spec.params,
+    errors: spec.errors,
+    public: true,
+  } as never) as ReducerSpec<Params, DefinitionOfInputOrUndefined<Errors>, true>
+
+  return {
+    declKind: "reducer",
+    name,
+    spec: {
+      ...reducer,
+      receiver: true,
+    },
+  }
+}
+
+/**
+ * The settle reducer of `table` (`StdbFn.outboxResult`): the host runs it with
+ * each row's outcome and deletes the row in the same transaction.
+ */
+export const outboxResultEndpoint = <
+  const Name extends string,
+  const Table extends AnyOutboxTableSpec,
+>(
+  name: Name,
+  spec: { readonly table: Table },
+): OutboxResultDecl<Name, Table> => {
+  const reducer = defineReducer({
+    params: outboxResultParams(spec.table),
+    public: false,
+  }) as unknown as OutboxResultSpec<Table>
+
+  return {
+    declKind: "reducer",
+    name,
+    spec: {
+      ...reducer,
+      outboxResult: { table: spec.table },
     },
   }
 }

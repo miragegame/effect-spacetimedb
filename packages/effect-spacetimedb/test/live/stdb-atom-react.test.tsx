@@ -11,7 +11,7 @@ import { renderHook } from "@testing-library/react"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as React from "react"
 
 const { describe, expect, live } = EffectVitest

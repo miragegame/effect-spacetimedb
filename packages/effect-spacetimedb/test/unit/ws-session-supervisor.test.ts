@@ -8,7 +8,7 @@ import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as TestClock from "effect/testing/TestClock"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { WsUnsupportedBuilderFeatureError } from "effect-spacetimedb/client"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import { Identity } from "spacetimedb"
@@ -50,6 +50,7 @@ const makeSupervisorHarness = Effect.fn(function* (
   const unsubscribeCounts: Array<number> = []
   const disconnectCallbacks: Array<FullOnDisconnect | undefined> = []
   const reducerCallAttempts: Array<number> = []
+  const silentlyClosedAttempts = new Set<number>()
 
   const builder = (): FullBuilder => {
     let onConnect: FullOnConnect | undefined
@@ -114,20 +115,24 @@ const makeSupervisorHarness = Effect.fn(function* (
             }
           },
         }
-        const connection: FullConnection = {
-          ...makeFullModuleWsConnection({
-            subscriptionBuilder: () => subscriptionBuilder,
-          }),
-          callReducerWithParams: () => {
-            reducerCallAttempts.push(attempt)
-            return Promise.resolve()
+        const connection = Object.defineProperty<FullConnection>(
+          {
+            ...makeFullModuleWsConnection({
+              subscriptionBuilder: () => subscriptionBuilder,
+            }),
+            callReducerWithParams: () => {
+              reducerCallAttempts.push(attempt)
+              return Promise.resolve()
+            },
+            callProcedureWithParams: () => Promise.resolve(undefined),
+            disconnect: () => {
+              disconnectCounts[attempt - 1] =
+                (disconnectCounts[attempt - 1] ?? 0) + 1
+            },
           },
-          callProcedureWithParams: () => Promise.resolve(undefined),
-          disconnect: () => {
-            disconnectCounts[attempt - 1] =
-              (disconnectCounts[attempt - 1] ?? 0) + 1
-          },
-        }
+          "isSocketClosed",
+          { get: () => silentlyClosedAttempts.has(attempt) },
+        )
         disconnectCallbacks[attempt - 1] = onDisconnect
 
         if (connectFailureAttempts.has(attempt)) {
@@ -160,6 +165,11 @@ const makeSupervisorHarness = Effect.fn(function* (
     // the close it performs when a frame fails to decompress.
     disconnectWithoutError: (attempt: number) =>
       disconnectCallbacks[attempt - 1]?.({ attempt }, undefined),
+    // A socket a browser tore down without delivering its close event: the
+    // SDK reports it closed, and no disconnect callback ever runs.
+    closeSocketSilently: (attempt: number) => {
+      silentlyClosedAttempts.add(attempt)
+    },
     nextBuild: Queue.take(builds),
     nextSubscription: Queue.take(subscriptions),
   }
@@ -176,6 +186,49 @@ const awaitPhase = <Failure>(
     Stream.runHead,
     Effect.map(Option.getOrThrow),
   )
+
+/**
+ * Gives `globalThis` a page-like event target for the enclosing scope, then
+ * restores the previous listeners API (absent outside a page).
+ */
+const installPageEventTarget = Effect.acquireRelease(
+  Effect.suspend(() => {
+    const target = new EventTarget()
+    const previous = {
+      addEventListener: Object.getOwnPropertyDescriptor(
+        globalThis,
+        "addEventListener",
+      ),
+      removeEventListener: Object.getOwnPropertyDescriptor(
+        globalThis,
+        "removeEventListener",
+      ),
+    }
+    Object.defineProperty(globalThis, "addEventListener", {
+      configurable: true,
+      writable: true,
+      value: target.addEventListener.bind(target),
+    })
+    Object.defineProperty(globalThis, "removeEventListener", {
+      configurable: true,
+      writable: true,
+      value: target.removeEventListener.bind(target),
+    })
+    return Effect.succeed({ target, previous })
+  }),
+  ({ previous }) =>
+    Effect.suspend(() => {
+      for (const name of ["addEventListener", "removeEventListener"] as const) {
+        const descriptor = previous[name]
+        if (descriptor === undefined) {
+          Reflect.deleteProperty(globalThis, name)
+        } else {
+          Object.defineProperty(globalThis, name, descriptor)
+        }
+      }
+      return Effect.void
+    }),
+).pipe(Effect.map(({ target }) => target))
 
 describe("ws session supervisor", (it) => {
   it.effect("publishes a retrying cold-start failure and later recovers", () =>
@@ -425,6 +478,60 @@ describe("ws session supervisor", (it) => {
         expect(harness.disconnectCount(2)).toBe(1)
         expect(harness.unsubscribeCount(2)).toBe(1)
         expect(setupCleanupCount).toBe(2)
+      }),
+  )
+
+  it.effect(
+    "reconnects when the page resumes on a socket closed without a close event",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeSupervisorHarness()
+
+        yield* Effect.gen(function* () {
+          // Node and the test pool have no page event target, so the test
+          // installs one for its own scope and puts back whatever was there.
+          const page = yield* installPageEventTarget
+          const supervisor =
+            yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+              plan,
+              config: {
+                builder: harness.builder,
+                uri,
+                databaseName,
+                connectTimeoutMillis: 1_000,
+              },
+              subscriptionTargets: [plan.targets.tables.user],
+              policy: {
+                reconnectDelayMillisFirst: 100,
+                reconnectDelayMillisMax: 1_000,
+                reconnectJitter: false,
+              },
+            })
+
+          const firstSubscription = yield* harness.nextSubscription
+          firstSubscription.apply()
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "live" && phase.attempt === 1,
+          )
+
+          harness.closeSocketSilently(1)
+          page.dispatchEvent(new Event("online"))
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "reconnecting" && phase.attempt === 1,
+          )
+          expect(harness.disconnectCount(1)).toBe(1)
+
+          yield* TestClock.adjust(Duration.millis(100))
+          const secondSubscription = yield* harness.nextSubscription
+          expect(secondSubscription.attempt).toBe(2)
+          secondSubscription.apply()
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "live" && phase.attempt === 2,
+          )
+        }).pipe(Effect.scoped)
       }),
   )
 

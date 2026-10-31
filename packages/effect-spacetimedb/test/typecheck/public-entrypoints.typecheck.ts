@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import type * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
-import type * as Atom from "effect/unstable/reactivity/Atom"
+import type * as AsyncResult from "effect/reactivity/AsyncResult"
+import type * as Atom from "effect/reactivity/Atom"
 import * as Stdb from "effect-spacetimedb"
 import * as StdbClient from "effect-spacetimedb/client"
 import * as StdbAtom from "effect-spacetimedb/client/atom"
@@ -10,6 +10,7 @@ import * as StdbCompiler from "effect-spacetimedb/server-compiler"
 import { build, type CompiledModule } from "effect-spacetimedb/server-compiler"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import type { ErrorOf } from "./helpers"
+import { testViewRowsLength } from "../helpers/array-bounds"
 
 const PublicEntrypointString = Stdb.string(
   Schema.String.pipe(Schema.check(Schema.isMaxLength(255))),
@@ -29,6 +30,7 @@ const PublicViews = Stdb.StdbGroup.make("Views").add(
       Stdb.struct({
         id: PublicEntrypointString,
       }),
+      testViewRowsLength,
     ),
   }),
 )

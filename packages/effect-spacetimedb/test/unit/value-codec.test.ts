@@ -12,6 +12,7 @@ import { codecCorpusEntries } from "../helpers/codec-corpus"
 import { nativeBytes, nativeRoundTrip } from "../helpers/native-serializer"
 import { TestLayer } from "../helpers/test-layer"
 import { typeBuilder } from "../helpers/type-builder"
+import { testArrayLength } from "../helpers/array-bounds"
 
 const describe = EffectVitest.layer(TestLayer)
 
@@ -234,7 +235,10 @@ describe("transport codec boundary", (it) => {
           Waiting: StdbTesting.ContractType.unit(),
         })
         const Nested = StdbTesting.ContractType.struct({
-          sessions: StdbTesting.ContractType.array(OptionString),
+          sessions: StdbTesting.ContractType.array(
+            OptionString,
+            testArrayLength,
+          ),
           status: Status,
         })
 

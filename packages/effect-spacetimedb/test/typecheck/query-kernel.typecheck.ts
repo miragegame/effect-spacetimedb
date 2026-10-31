@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import { FullModule, UserId } from "../fixtures/full-module"
+import { testArrayLength } from "../helpers/array-bounds"
 import { makeFullModuleWsConnection } from "../helpers/ws-fixtures"
 
 const Full = Stdb.project(FullModule)
@@ -12,7 +13,7 @@ const filterShape = Stdb.table("filterShape", {
   public: true,
   columns: {
     id: Stdb.string(UserId),
-    labels: FilterString.pipe(Stdb.string, Stdb.array),
+    labels: Stdb.array(Stdb.string(FilterString), testArrayLength),
     nickname: FilterString.pipe(Stdb.string, Stdb.option),
   },
 })

@@ -9,6 +9,7 @@ import {
 } from "spacetimedb"
 import * as StdbTesting from "effect-spacetimedb/testing"
 import { TreeType } from "../fixtures/recursive-types"
+import { testArrayLength } from "./array-bounds"
 
 export type CodecCorpusSample = {
   readonly type: StdbTesting.ContractType.AnyValueType
@@ -27,7 +28,7 @@ const SimpleSum = T.sum({
 
 export const codecCorpus = {
   array: {
-    type: T.array(T.u16()),
+    type: T.array(T.u16(), testArrayLength),
     value: [1, 2, 65535],
   },
   bigint: {

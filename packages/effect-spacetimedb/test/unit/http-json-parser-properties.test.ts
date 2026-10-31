@@ -9,6 +9,8 @@ import {
   IntegerTokenKey,
   isIntegerToken,
   isJsonRecord,
+  jsonNestingDepthMax,
+  jsonNestingExceeds,
   markIntegerNumbers,
   parseJsonPreservingIntegers,
 } from "../../src/client/http-json/http-json-parser.ts"
@@ -176,6 +178,64 @@ describe("HTTP JSON integer parser properties", () => {
         expect(Schema.isSchemaError(failure)).toBe(true)
       }
     }),
+  )
+
+  it.effect("accepts nesting exactly at the depth limit", () =>
+    Effect.gen(function* () {
+      const body = `${"[".repeat(jsonNestingDepthMax)}1${"]".repeat(jsonNestingDepthMax)}`
+      const exit = yield* Effect.exit(parseJsonPreservingIntegers(body))
+
+      expect(Exit.isSuccess(exit)).toBe(true)
+    }),
+  )
+
+  it.effect(
+    "fails nesting beyond the depth limit with a typed schema error",
+    () => {
+      // The array case is far deeper than the limit, so it also proves the
+      // recursive walks never run on the value (they would overflow the stack);
+      // the object case is exactly one level past the limit.
+      const depth = 100_000
+      const bodies = [
+        `${"[".repeat(depth)}${"]".repeat(depth)}`,
+        `${'{"a":'.repeat(jsonNestingDepthMax)}{}${"}".repeat(jsonNestingDepthMax)}`,
+      ]
+
+      return Effect.forEach(
+        bodies,
+        (body) =>
+          Effect.gen(function* () {
+            const exit = yield* Effect.exit(parseJsonPreservingIntegers(body))
+
+            expect(Exit.isFailure(exit)).toBe(true)
+            if (Exit.isFailure(exit)) {
+              const failure = exit.cause.pipe(
+                Cause.findErrorOption,
+                Option.getOrUndefined,
+              )
+              expect(Schema.isSchemaError(failure)).toBe(true)
+            }
+          }),
+        { concurrency: 1 },
+      )
+    },
+  )
+
+  it.effect(
+    "ignores brackets inside string literals when measuring depth",
+    () =>
+      Effect.gen(function* () {
+        const brackets = "[{".repeat(jsonNestingDepthMax)
+        const body = JSON.stringify({
+          text: brackets,
+          escaped: `\\"${brackets}`,
+        })
+
+        expect(jsonNestingExceeds(body, jsonNestingDepthMax)).toBe(false)
+        expect(yield* parseJsonPreservingIntegers(body)).toEqual(
+          nativeJsonParse(body),
+        )
+      }),
   )
 
   it.effect("roundtrips the reserved integer-token shape as user data", () =>

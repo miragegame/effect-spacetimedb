@@ -1,6 +1,6 @@
 import type * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient"
+import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as Stdb from "effect-spacetimedb"
 import type { Assert, IsEqual } from "./helpers"
 

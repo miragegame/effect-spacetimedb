@@ -24,6 +24,7 @@ import { TreeType } from "../fixtures/recursive-types"
 import { transform } from "../helpers/schema-transform"
 import { TestLayer } from "../helpers/test-layer"
 import { builderTypeName, typeBuilder } from "../helpers/type-builder"
+import { testArrayLength } from "../helpers/array-bounds"
 
 const describe = EffectVitest.layer(TestLayer)
 const GeneratedStructName = /^EffectSpacetimeDbStruct[0-9]{40}$/
@@ -41,7 +42,7 @@ const makeRecursiveNameNode = (): ReturnType<
     typeof StdbTesting.ContractType.lazy<RecursiveNameNode, unknown>
   > = StdbTesting.ContractType.lazy(() =>
     StdbTesting.ContractType.struct({
-      children: StdbTesting.ContractType.array(Node),
+      children: StdbTesting.ContractType.array(Node, testArrayLength),
     }),
   )
 
@@ -216,7 +217,10 @@ describe("type kernel", (it) => {
     Effect.gen(function* () {
       const Params = StdbTesting.ContractType.struct({
         id: StdbTesting.ContractType.string(),
-        tags: StdbTesting.ContractType.array(StdbTesting.ContractType.string()),
+        tags: StdbTesting.ContractType.array(
+          StdbTesting.ContractType.string(),
+          testArrayLength,
+        ),
         maybeCount: StdbTesting.ContractType.option(
           StdbTesting.ContractType.u32(),
         ),
@@ -237,7 +241,10 @@ describe("type kernel", (it) => {
       )
       expect(
         StdbTesting.ContractTypeDescriptor.describe(
-          StdbTesting.ContractType.array(StdbTesting.ContractType.string()),
+          StdbTesting.ContractType.array(
+            StdbTesting.ContractType.string(),
+            testArrayLength,
+          ),
         ),
       ).toEqual(
         expect.objectContaining({
@@ -282,7 +289,7 @@ describe("type kernel", (it) => {
         })
         const Nested = StdbTesting.ContractType.struct({
           maybeUser: StdbTesting.ContractType.option(SameUserParams),
-          users: StdbTesting.ContractType.array(UserParams),
+          users: StdbTesting.ContractType.array(UserParams, testArrayLength),
         })
 
         const userName = builderTypeName(typeBuilder(UserParams))
@@ -1409,7 +1416,7 @@ describe("type kernel", (it) => {
         expect(someArgHttpJson).toBe('[{"some":"persona-1"}]')
         expect(
           yield* StdbTesting.ClientHttpJson.decodeHttpOutput(
-            StdbTesting.ContractType.array(OptionArgType),
+            StdbTesting.ContractType.array(OptionArgType, testArrayLength),
             someArgHttpJson,
           ),
         ).toEqual(["persona-1"])
@@ -1425,7 +1432,7 @@ describe("type kernel", (it) => {
         expect(noneArgHttpJson).toBe('[{"none":{}}]')
         expect(
           yield* StdbTesting.ClientHttpJson.decodeHttpOutput(
-            StdbTesting.ContractType.array(OptionArgType),
+            StdbTesting.ContractType.array(OptionArgType, testArrayLength),
             noneArgHttpJson,
           ),
         ).toEqual([undefined])
@@ -1723,11 +1730,13 @@ describe("type kernel", (it) => {
                 artifactId: StdbTesting.ContractType.string(),
                 labels: StdbTesting.ContractType.array(
                   StdbTesting.ContractType.string(),
+                  testArrayLength,
                 ),
                 selectedBuild: StdbTesting.ContractType.option(
                   StdbTesting.ContractType.string(),
                 ),
               }),
+              testArrayLength,
             ),
           }),
           StdbTesting.ContractType.struct({
@@ -1834,7 +1843,10 @@ describe("type kernel", (it) => {
         )
         expect(typeBuilder(TreeType)).toBe(typeBuilder(TreeType))
 
-        const ForestType = StdbTesting.ContractType.array(TreeType)
+        const ForestType = StdbTesting.ContractType.array(
+          TreeType,
+          testArrayLength,
+        )
 
         expect(typeBuilder(ForestType)).toBe(typeBuilder(ForestType))
       }),

@@ -66,9 +66,7 @@ const exerciseNativeRanges = (
   Cache: typeof RootClientCache | typeof SdkClientCache,
 ): ReadonlyArray<number> => {
   const cache = new Cache()
-  // The published SDK's generated TableToSchema type is not assignable to its
-  // own exact-optional UntypedTableDef constraint; this is a runtime patch probe.
-  const relation = cache.getOrCreateTable(nativeRangeTableDef as never)
+  const relation = cache.getOrCreateTable(nativeRangeTableDef)
   relation.insert(undefined as never, {
     type: "insert",
     rowId: 1n,

@@ -6,9 +6,8 @@ const { describe, expect, it } = EffectVitest
 /*
  * `module.spec` used to re-assemble the whole spec on every property read, so
  * routing code that reads `module.spec.procedureGroups` once per request paid
- * an O(module size) walk per request — ~32ms on a platform-sized module, which
- * dominated in-process request latency and the component test tier's wall
- * clock. These cases pin the memo and the two things it must not change:
+ * an O(module size) walk per request — ~32ms on a large module, which
+ * dominated in-process request latency. These cases pin the memo and the two things it must not change:
  * builder immutability and the visibility of assembly failures.
  */
 describe("module spec memoization", () => {

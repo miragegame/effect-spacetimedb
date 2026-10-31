@@ -4,6 +4,10 @@ import {
   type StdbDiagnostic,
 } from "../contract/diagnostic.ts"
 import type { AnyModuleSpec } from "../contract/module.ts"
+import {
+  outboxMetadataOf,
+  outboxResultMetadataOf,
+} from "../contract/outbox-table.ts"
 import type { AnyTypeBuilder, BuilderFactories } from "../contract/type/core.ts"
 import {
   arrayFingerprint,
@@ -278,6 +282,32 @@ const validateDuplicateEntries = (
   return diagnostics
 }
 
+/**
+ * An outbox's receiver-parameter columns compile to the receiver binding's
+ * builders, whose type names native codegen scoped by the interface name
+ * (`interface.Type`), so they cannot collide with this module's own names.
+ * Every other column materializes from this module's types.
+ */
+const columnsWithOwnTypeNames = (
+  table: AnyModuleSpec["tables"][string],
+): Type.StructFields => {
+  const outbox = outboxMetadataOf(table)
+  const receiver =
+    outbox === undefined
+      ? undefined
+      : outbox.interface.receivers[outbox.reducer]
+  const receiverParams =
+    receiver === undefined ? undefined : Type.structFields(receiver.params)
+  if (receiverParams === undefined) {
+    return table.columns
+  }
+  return Object.fromEntries(
+    Object.entries(table.columns).filter(
+      ([columnName]) => !Object.hasOwn(receiverParams, columnName),
+    ),
+  )
+}
+
 export const validateMaterializedTypeNames = (
   module: AnyModuleSpec,
 ): ReadonlyArray<StdbDiagnostic> => {
@@ -289,10 +319,17 @@ export const validateMaterializedTypeNames = (
       Type.satsTypeFingerprint(table.row),
       ["tables", tableKey],
     )
-    materializeStructFields(recorder, table.columns, ["tables", tableKey])
+    materializeStructFields(recorder, columnsWithOwnTypeNames(table), [
+      "tables",
+      tableKey,
+    ])
   }
 
   for (const [key, reducer] of Object.entries(module.reducers)) {
+    // A settle reducer's params are its outbox's row, recorded above.
+    if (outboxResultMetadataOf(reducer) !== undefined) {
+      continue
+    }
     materializeStructFields(recorder, Type.structFields(reducer.params) ?? {}, [
       "reducers",
       key,

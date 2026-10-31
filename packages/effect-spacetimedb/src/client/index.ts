@@ -32,7 +32,9 @@ export {
 } from "../timestamp.ts"
 export {
   type CallFailure,
+  CallNotSentError,
   catchRawTags,
+  ConnectionIdentityChangedError,
   ConnectionLostError,
   DomainCallError,
   type RawCallFailure,
@@ -55,6 +57,7 @@ export {
   type HttpClientOptions,
   type GroupIdsOf,
   groupFromModulePlan as httpGroupFromModulePlan,
+  HttpCallDurationExceeded,
   layerFromModulePlan,
   make as httpMake,
   type ProjectedHttpClient,
@@ -102,7 +105,11 @@ export {
   type TableGroup,
   type TableGroupSnapshot,
   type ViewGroup,
+  type ViewGroupArgs,
+  type ViewGroupOptionsParam,
   type ViewGroupSnapshot,
+  type ViewRowsOptionsParam,
+  type WaitUntilViewOptionsParam,
   type WsCallableTransport,
   type WsClientOptions,
   type WsConnectionLike,
@@ -123,26 +130,33 @@ export {
   type GeneratedWsConnectionFactory,
   type GeneratedWsErrorContext,
   generatedConnection,
-  layer as wsLayer,
-  layerGenerated as wsLayerGenerated,
   type ManagedWsConnection,
   type MismatchedGeneratedModuleDiagnostic,
   makeScoped as wsScoped,
   makeScopedGenerated as wsScopedGenerated,
-  type SessionOf,
-  sessionTag,
+  type WsAutomaticReconnect,
   type WsBuilderConfig,
   type WsCompression,
   WsConnectError,
   WsConnectTimeoutError,
   type WsGeneratedConfig,
+  type WsToken,
+  WsUnsupportedBuilderFeatureError,
+} from "./ws-resource.ts"
+export {
+  layer as wsLayer,
+  layerGenerated as wsLayerGenerated,
+} from "./ws-session-layer.ts"
+export {
+  type SessionOf,
+  sessionTag,
   type WsSession,
   type WsSessionTag,
   type WsSessionTagIdentifier,
-  WsUnsupportedBuilderFeatureError,
-} from "./ws-resource.ts"
+} from "./ws-session-tag.ts"
 export { connectAndSubscribe } from "./connect-and-subscribe.ts"
 export {
+  wsSupervisorIsRetryableDefault,
   makeSupervisor as wsSupervisor,
   makeSupervisorFromModulePlan as wsSupervisorFromModulePlan,
   makeSupervisorGenerated as wsSupervisorGenerated,

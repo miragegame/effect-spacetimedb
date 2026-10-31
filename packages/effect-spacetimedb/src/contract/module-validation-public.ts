@@ -18,7 +18,12 @@ import {
   validateHttpHandlers,
 } from "./module-validation-http-handlers.ts"
 
+import { validateEnvironment } from "./module-validation-environment.ts"
 import { validateCanonicalModuleNames } from "./module-validation-naming.ts"
+import { validateOutboxes } from "./module-validation-outboxes.ts"
+import { validateReceivers } from "./module-validation-receivers.ts"
+import { outboxMetadataOf, outboxResultMetadataOf } from "./outbox-table.ts"
+import { structFields } from "./type.ts"
 
 import {
   validateCallableTypes,
@@ -78,7 +83,23 @@ const validateDuplicateDeclaredTypeNames = (
   }
 
   for (const [tableKey, table] of Object.entries(module.tables)) {
+    const outbox = outboxMetadataOf(table)
+    // An outbox's receiver-parameter columns compile to the binding's own
+    // builders, whose type names are scoped by the interface name; the
+    // receiver validates the unscoped names where it declares them.
+    const receiver =
+      outbox === undefined
+        ? undefined
+        : outbox.interface.receivers[outbox.reducer]
+    const receiverParams =
+      receiver === undefined ? undefined : structFields(receiver.params)
     for (const [columnName, column] of Object.entries(table.columns)) {
+      if (
+        receiverParams !== undefined &&
+        Object.hasOwn(receiverParams, columnName)
+      ) {
+        continue
+      }
       visit(column, ["tables", tableKey, "columns", columnName])
     }
   }
@@ -86,6 +107,11 @@ const validateDuplicateDeclaredTypeNames = (
     visit(view.returns, ["views", key, "returns"])
   }
   for (const [key, reducer] of Object.entries(module.reducers)) {
+    // A settle reducer's params are its outbox's row, compiled from that
+    // outbox's builders; the table loop above covers what is ours in it.
+    if (outboxResultMetadataOf(reducer) !== undefined) {
+      continue
+    }
     visit(reducer.params, ["reducers", key, "params"])
   }
   for (const [key, procedure] of Object.entries(module.procedures)) {
@@ -162,8 +188,11 @@ export const validate = (
   validateGroupClientKeys(diagnostics, module)
   validateCallableTypes(diagnostics, module, completedValueTypes)
   validateScheduledTargets(diagnostics, module)
+  validateReceivers(diagnostics, module)
+  validateOutboxes(diagnostics, module)
   validateDeclaredErrorTags(diagnostics, module)
   validateDuplicateDeclaredTypeNames(diagnostics, module)
+  validateEnvironment(diagnostics, module)
 
   return diagnostics
 }

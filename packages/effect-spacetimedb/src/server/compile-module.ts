@@ -1,4 +1,3 @@
-
 import type {
   ModuleExport,
   CaseConversionPolicy as ServerCaseConversionPolicy,
@@ -9,6 +8,15 @@ import {
 } from "../builder/internal-build-plan.ts"
 import { procedureResponseType } from "../callable-protocol.ts"
 import { snakeCaseName } from "../contract/canonical-name.ts"
+import { outboxResultFromHost } from "../contract/outbox-result.ts"
+import {
+  type AnyRemoteInterfaceBinding,
+  isReceiverSpec,
+} from "../contract/remote-interface.ts"
+import type {
+  Declaration as EnvironmentDeclaration,
+  LiteralValues,
+} from "../contract/environment.ts"
 import { fieldOptions } from "../contract/field.ts"
 import {
   type HttpHandlerMethod,
@@ -28,6 +36,8 @@ import { addDecodeContext, StdbDecodeError } from "../decode-error.ts"
 import type { LifecycleKeys, ServerInstance } from "./bind.ts"
 import {
   asCompilerSchemaBridge,
+  compilerOutboxResultType,
+  type CompilerReducerOptions,
   defineCompilerHostAnonymousView,
   defineCompilerHostClientConnected,
   defineCompilerHostClientDisconnected,
@@ -56,6 +66,7 @@ import {
   SenderError as CompilerSenderError,
   isRowTypedQuery,
   schema,
+  t,
 } from "./host-abi-compiler.ts"
 import {
   identityKey,
@@ -78,6 +89,9 @@ export type CompiledModule<Module extends AnyModuleSpec = AnyModuleSpec> = {
   readonly exports: Readonly<CompiledExports>
   readonly exportGroup: () => ModuleExport
 }
+
+/** The zero identity: the sender the host runs every settle reducer as. */
+const settleSenderIdentityKey = "0".repeat(64)
 
 const decodeOrThrow = <A>(type: Type.AnyValueType, value: unknown): A =>
   decodeHostValue(type, value)
@@ -127,6 +141,56 @@ const toCaseConversionPolicy = (
   }
 }
 
+// The SATS unit payload every allowed literal value carries.
+const environmentLiteralPayload = {
+  tag: "Product",
+  value: { elements: [] },
+} as const
+
+/**
+ * The SDK reads an environment literal set from a payload-free sum's
+ * `algebraicType` and only checks that a `variants` member exists. `t.enum`
+ * builds the same type but also installs every allowed value as a property of
+ * its builder, which breaks on values such as `create`, `optional` or
+ * `__proto__`. This constraint carries the type and nothing else.
+ */
+const environmentLiteralConstraint = (values: LiteralValues) => ({
+  algebraicType: {
+    tag: "Sum",
+    value: {
+      variants: values.map((name) => ({
+        name,
+        algebraicType: environmentLiteralPayload,
+      })),
+    },
+  },
+  variants: {},
+})
+
+const toCompilerEnvironmentBuilder = (
+  declaration: EnvironmentDeclaration,
+): unknown => {
+  // Secrets are plain strings to the host; redaction applies when module code
+  // reads them.
+  const inner =
+    declaration.kind === "literal"
+      ? environmentLiteralConstraint(declaration.values)
+      : t.string()
+  // `t.option` reads only the inner type's `algebraicType`.
+  return declaration.optional ? t.option(inner as never) : inner
+}
+
+/** Declaration metadata only: no environment value is part of the artifact. */
+const toCompilerEnvironment = (
+  environment: AnyModuleSpec["environment"],
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(environment ?? {}).map(([key, declaration]) => [
+      key,
+      toCompilerEnvironmentBuilder(declaration),
+    ]),
+  )
+
 const addHttpRoute = (
   router: ReturnType<typeof makeCompilerHttpRouter>,
   method: HttpHandlerMethod,
@@ -156,6 +220,10 @@ const addHttpRoute = (
 
 export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
   options: InternalStdbBuildPlan<Module, RuntimeR>,
+  compileOptions: {
+    /** See `BuildOptions.receiverBindings`. */
+    readonly receiverBindings?: ReadonlyArray<AnyRemoteInterfaceBinding>
+  } = {},
 ): CompiledModule<Module> => {
   const server = options[internalStdbBuildPlanSymbol].server
   assertOwnedHandlerBundle(server[ServerOwnerSymbol], options.handlers)
@@ -167,7 +235,10 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
     throw new StdbValidationError({ diagnostics: typeNameDiagnostics })
   }
 
-  const materializedTables = materializeTables({ module })
+  const materializedTables = materializeTables({
+    module,
+    receiverBindings: compileOptions.receiverBindings ?? [],
+  })
 
   const scheduledRowTypeOverrides = new Map<string, unknown>()
   const scheduledRowValueTypes = new Map<string, Type.AnyValueType>()
@@ -203,11 +274,42 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
     })
   }
 
+  // Each settle reducer takes its outbox's native row builder by identity,
+  // which is what upstream's `onResult` check compares, and is registered
+  // against the outbox table handle `schema()` registers.
+  const settleTargetTables = new Map<string, unknown>()
+  const settleParamOverrides = new Map<string, unknown>()
+  const settleRowValueTypes = new Map<string, Type.AnyValueType>()
+  for (const binding of server.plan.outboxResultBindings) {
+    const materializedTable = materializedTables[binding.tableKey] as
+      | { readonly rowType?: unknown }
+      | undefined
+    const rowType = materializedTable?.rowType
+    if (rowType == null) {
+      throw new Error(
+        `Outbox table ${binding.tableKey} did not expose a rowType for ${binding.settleKey}`,
+      )
+    }
+
+    settleTargetTables.set(binding.settleKey, materializedTable)
+    settleParamOverrides.set(binding.settleKey, {
+      row: rowType,
+      result: compilerOutboxResultType(),
+    })
+    const table = module.tables[binding.tableKey]
+    if (table != null) {
+      settleRowValueTypes.set(binding.settleKey, table.row)
+    }
+  }
+
   const compiledSchema = asCompilerSchemaBridge(
     schema(materializedTables as never, {
       CASE_CONVERSION_POLICY: toCaseConversionPolicy(
         module.settings.caseConversionPolicy,
       ),
+      // Compiler boundary: literal constraints are structural SDK types, not
+      // builder instances (see `environmentLiteralConstraint`).
+      env: toCompilerEnvironment(module.environment) as never,
     }),
   )
 
@@ -272,8 +374,7 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
     key: string,
     ctx: {
       readonly sender: unknown
-      readonly identity: unknown
-      readonly connectionId?: unknown
+      readonly databaseIdentity: unknown
     },
   ): void => {
     const binding = scheduledTargetBindings.get(key)
@@ -281,11 +382,8 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
       return
     }
 
-    const databaseIdentity =
-      (ctx as { readonly databaseIdentity?: unknown }).databaseIdentity ??
-      ctx.identity
     const senderKey = identityKey(ctx.sender)
-    const databaseIdentityKey = identityKey(databaseIdentity)
+    const databaseIdentityKey = identityKey(ctx.databaseIdentity)
     if (
       senderKey !== undefined &&
       databaseIdentityKey !== undefined &&
@@ -296,6 +394,23 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
 
     throw new CompilerSenderError(
       `Scheduled target ${key} is only invocable by the scheduler`,
+    )
+  }
+  // The host runs a settle reducer as the zero identity; anyone else calling
+  // it, the owner included, could forge an outcome for a row it did not send.
+  const assertSettleInvocation = (
+    key: string,
+    ctx: { readonly sender: unknown },
+  ): void => {
+    if (!settleTargetTables.has(key)) {
+      return
+    }
+    if (identityKey(ctx.sender) === settleSenderIdentityKey) {
+      return
+    }
+
+    throw new CompilerSenderError(
+      `Settle reducer ${key} is only invocable by the host settling its outbox`,
     )
   }
   const normalizeScheduledRowPayload = (
@@ -339,6 +454,17 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
     op: string,
   ): A =>
     wrapCallableDecode(key, "args", op, () => {
+      const settleRowType = settleRowValueTypes.get(key)
+      if (settleRowType != null) {
+        const settleArgs = isHostRecord(rawArgs) ? rawArgs : {}
+        const row = decodeOrThrow(
+          settleRowType,
+          normalizeScheduledRowPayload(settleRowType, settleArgs.row),
+        )
+        const result = outboxResultFromHost(settleArgs.result)
+        return { row, result } as A
+      }
+
       const rowType = scheduledRowValueTypes.get(key)
       if (rowType == null) {
         return decodeOrThrow<A>(params, rawArgs)
@@ -371,17 +497,28 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
 
       const params =
         scheduledRowTypeOverrides.get(key) ??
+        settleParamOverrides.get(key) ??
         materializeParamsObject(
           `${key}Params`,
           reducer.spec.params,
           {},
           `reducers.${key}.params`,
         )
+      const reducerOptions: CompilerReducerOptions = {
+        ...(isReceiverSpec(reducer.spec) ? { name: snakeCaseName(key) } : {}),
+        ...(scheduledTargetTables.has(key)
+          ? { onSchedule: scheduledTargetTables.get(key) }
+          : {}),
+        ...(settleTargetTables.has(key)
+          ? { onResult: settleTargetTables.get(key) }
+          : {}),
+      }
       const reducerExport = defineCompilerHostReducer(
         compiledSchema,
         params,
         (ctx, rawArgs) => {
           assertSchedulerInvocation(key, ctx)
+          assertSettleInvocation(key, ctx)
           const args = decodeCallableArgs<
             Type.TypeOf<typeof reducer.spec.params>
           >(key, reducer.spec.params, rawArgs, `reducers.${key}.params`)
@@ -391,7 +528,7 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
             throw asCompilerSenderError(cause) ?? cause
           }
         },
-        scheduledTargetTables.get(key),
+        reducerOptions,
       )
 
       setCompiledExport(callableExportName(key), reducerExport)
@@ -484,6 +621,21 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
         `views.${key}.returns`,
       )
       const exportName = viewExportName(key)
+      const params = materializeParamsObject(
+        `${key}Params`,
+        view.spec.params,
+        {},
+        `views.${key}.params`,
+      )
+      // A view is never a schedule target, so its arguments always arrive
+      // as the host's named params object.
+      const decodeArgs = (rawArgs: unknown) =>
+        wrapCallableDecode(key, "args", `views.${key}.params`, () =>
+          decodeOrThrow<Type.TypeOf<typeof view.spec.params>>(
+            view.spec.params,
+            rawArgs,
+          ),
+        )
 
       const compiledView =
         view.spec.context === "sender"
@@ -493,12 +645,14 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
                 name: exportName,
                 public: view.spec.public,
               },
+              params,
               returnType,
-              (ctx) => {
-                const value = invokeCompilerSenderView<Module, unknown>(
-                  view,
-                  ctx,
-                )
+              (ctx, rawArgs) => {
+                const value = invokeCompilerSenderView<
+                  Module,
+                  unknown,
+                  unknown
+                >(view, ctx, decodeArgs(rawArgs))
 
                 return wrapCallableDecode(
                   key,
@@ -514,12 +668,14 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
                 name: exportName,
                 public: view.spec.public,
               },
+              params,
               returnType,
-              (ctx) => {
-                const value = invokeCompilerAnonymousView<Module, unknown>(
-                  view,
-                  ctx,
-                )
+              (ctx, rawArgs) => {
+                const value = invokeCompilerAnonymousView<
+                  Module,
+                  unknown,
+                  unknown
+                >(view, ctx, decodeArgs(rawArgs))
 
                 return wrapCallableDecode(
                   key,
@@ -550,18 +706,28 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
         continue
       }
 
+      // A hook's sender failure is the module refusing its caller (a
+      // `clientConnected` refusing a connection, an `init` refusing a
+      // publish): it must reach the host as the host's own `SenderError`, as a
+      // reducer's does, or the host reads it as a fault of the module.
+      const invokeLifecycle = (
+        ctx: Parameters<typeof toCompilerReducerCtx>[0],
+      ) => {
+        try {
+          lifecycle.invoke(toCompilerReducerCtx<Module>(ctx))
+        } catch (cause) {
+          throw asCompilerSenderError(cause) ?? cause
+        }
+      }
       const compiledLifecycle =
         key === "init"
-          ? defineCompilerHostInit(compiledSchema, (ctx) => {
-              lifecycle.invoke(toCompilerReducerCtx<Module>(ctx))
-            })
+          ? defineCompilerHostInit(compiledSchema, invokeLifecycle)
           : key === "clientConnected"
-            ? defineCompilerHostClientConnected(compiledSchema, (ctx) => {
-                lifecycle.invoke(toCompilerReducerCtx<Module>(ctx))
-              })
-            : defineCompilerHostClientDisconnected(compiledSchema, (ctx) => {
-                lifecycle.invoke(toCompilerReducerCtx<Module>(ctx))
-              })
+            ? defineCompilerHostClientConnected(compiledSchema, invokeLifecycle)
+            : defineCompilerHostClientDisconnected(
+                compiledSchema,
+                invokeLifecycle,
+              )
 
       setCompiledExport(key, compiledLifecycle)
     }

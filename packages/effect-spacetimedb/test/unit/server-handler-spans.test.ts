@@ -13,6 +13,7 @@ import { make as makeServer } from "../../src/server/bind.ts"
 import type { InternalServerInstance } from "../../src/server/handler-types.ts"
 import { makeDeterministicNativeSpanFactory } from "../../src/server/tracing.ts"
 import { compileModule } from "../helpers/compile-module"
+import { testViewRowsLength } from "../helpers/array-bounds"
 
 const { describe, expect, it } = EffectVitest
 
@@ -32,7 +33,7 @@ const SpanCallables = Stdb.StdbGroup.make("Spans")
   )
   .add(
     Stdb.StdbFn.anonymousView("spanView", {
-      returns: Stdb.array(SpanRow),
+      returns: Stdb.array(SpanRow, testViewRowsLength),
     }),
   )
 

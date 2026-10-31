@@ -17,8 +17,15 @@ import { type AnyModuleSpec, type ModuleSpec } from "../contract/module.ts"
 import type { ModuleBrand } from "../identity-brand.ts"
 import { type ProcedureSpec } from "../contract/procedure.ts"
 import { type ReducerSpec } from "../contract/reducer.ts"
+import type { Declarations as EnvironmentDeclarations } from "../contract/environment.ts"
 import type { ModuleSettings } from "../contract/settings.ts"
 import type { AnyScheduledTableSpec, AnyTableSpec } from "../contract/table.ts"
+import type {
+  AnyOutboxTableSpec,
+  OutboxResultMetadata,
+} from "../contract/outbox-table.ts"
+import type { OutboxResult } from "../contract/outbox-result.ts"
+import type { ReceiverSpec } from "../contract/remote-interface.ts"
 import {
   type AnyValueType,
   type StructLikeValueType,
@@ -140,24 +147,63 @@ export type ScheduledProcedureDecl<
   readonly spec: ScheduledProcedureSpec<Table, Errors>
 }
 
+export type ReceiverDecl<
+  Name extends string = string,
+  Params extends StructLikeValueType = StructLikeValueType,
+  Errors extends AnyErrorDefinition | undefined =
+    | AnyErrorDefinition
+    | undefined,
+> = ReducerDecl<Name, Params, Errors, true> & {
+  readonly spec: ReceiverSpec<Params, Errors>
+}
+
+export type OutboxResultParams<Table extends AnyTableSpec> =
+  StructLikeValueType & {
+    readonly Type: {
+      readonly row: TypeOf<Table["row"]>
+      readonly result: OutboxResult
+    }
+  }
+
+/**
+ * A settle reducer: the host runs it once per outbox row, as the zero identity,
+ * with the row and how the receiver answered, then deletes the row in the same
+ * transaction. It declares no errors and its handler may not fail: a failed
+ * settle is rolled back and its outcome is lost.
+ */
+export type OutboxResultSpec<
+  Table extends AnyOutboxTableSpec = AnyOutboxTableSpec,
+> = ReducerSpec<OutboxResultParams<Table>, undefined, false> & {
+  readonly outboxResult: OutboxResultMetadata<Table>
+}
+
+export type OutboxResultDecl<
+  Name extends string = string,
+  Table extends AnyOutboxTableSpec = AnyOutboxTableSpec,
+> = ReducerDecl<Name, OutboxResultParams<Table>, undefined, false> & {
+  readonly spec: OutboxResultSpec<Table>
+}
+
 export type SenderViewDecl<
   Name extends string = string,
   Returns extends AnyValueType = AnyValueType,
   Public extends boolean = boolean,
+  Params extends StructLikeValueType = StructLikeValueType,
 > = {
   readonly declKind: "view"
   readonly name: Name
-  readonly spec: ViewSpec<"sender", Returns, Public>
+  readonly spec: ViewSpec<"sender", Returns, Public, Params>
 }
 
 export type AnonymousViewDecl<
   Name extends string = string,
   Returns extends AnyValueType = AnyValueType,
   Public extends boolean = boolean,
+  Params extends StructLikeValueType = StructLikeValueType,
 > = {
   readonly declKind: "view"
   readonly name: Name
-  readonly spec: ViewSpec<"anonymous", Returns, Public>
+  readonly spec: ViewSpec<"anonymous", Returns, Public, Params>
 }
 
 export type LifecycleDecl<Name extends LifecycleName = LifecycleName> = {
@@ -249,6 +295,7 @@ export type AnyGroup =
 export type RuntimeModuleState = {
   readonly id: string
   readonly settings: ModuleSettings
+  readonly environment: EnvironmentDeclarations
   readonly tables: Record<string, AnyTableSpec>
   readonly lifecycle: LifecycleSpecs
   readonly groups: ReadonlyArray<AnyGroup>
@@ -316,6 +363,18 @@ export type ModuleAccessors<Spec extends AnyModuleSpec> = {
     ServerContext.HttpService<Spec>,
     never,
     ServerContext.Http
+  >
+  /**
+   * The module's declared database environment: one effect per declared key,
+   * each reading the host when it runs (never cached). Secrets read back as
+   * `Redacted<string>` and absent optional keys as `undefined`. Available to
+   * reducers, lifecycle hooks, procedures, views, HTTP handlers and
+   * transaction bodies; a key the module did not declare does not type-check.
+   */
+  readonly Env: Effect.Effect<
+    ServerContext.EnvService<Spec>,
+    never,
+    ModuleScopedRequirement<Spec, ServerContext.Env>
   >
   readonly Tx: Effect.Effect<
     ServerContext.TxRunnerService<Spec>,

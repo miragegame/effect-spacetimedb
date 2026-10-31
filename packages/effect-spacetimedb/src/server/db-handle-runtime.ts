@@ -12,6 +12,7 @@ import {
   type StdbDecodePhase,
 } from "../decode-error.ts"
 
+import type { OutboxSendContext } from "./outbox.ts"
 import type { DbShape } from "./runtime-types.ts"
 
 import {
@@ -73,16 +74,32 @@ export type TableCodec = {
   ) => unknown
 }
 
+/** What an outbox table handle needs beyond the generic table plan. */
+export type OutboxTablePlan = {
+  readonly tableName: string
+  readonly row: AnyTableSpec["row"]
+  readonly rowBytesMax: number
+}
+
 export type TablePlan = {
   readonly key: string
   readonly op: string
   readonly scheduled: boolean
+  readonly outbox: OutboxTablePlan | undefined
   readonly codec: TableCodec
   readonly lookups: ReadonlyArray<LookupPlan>
 }
 
 export type DbHandleFactory<Module extends AnyModuleSpec> = {
-  readonly readwrite: (rawDb: DbShape<Module>) => EffectDbView<Module>
+  /**
+   * `send` is the transaction an outbox insert stamps and checks its target
+   * against. Without it (an HTTP handler transaction) an outbox insert dies:
+   * calls are sent only from reducers and procedure transactions.
+   */
+  readonly readwrite: (
+    rawDb: DbShape<Module>,
+    send?: OutboxSendContext,
+  ) => EffectDbView<Module>
   readonly readonly: (rawDb: DbShape<Module>) => ReadonlyEffectDbView<Module>
 }
 

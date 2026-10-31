@@ -32,6 +32,26 @@ describe("identity normalization", () => {
     expect(identityEquals(new Identity(2n), 1n)).toBe(false)
   })
 
+  it("canonicalizes an Identity from the SDK's server entry", () => {
+    // A module bundle holds a second Identity class (the server entry's), and
+    // host contexts carry instances of it: same field, different class.
+    class ServerEntryIdentity {
+      readonly __identity__: bigint
+      constructor(value: bigint) {
+        this.__identity__ = value
+      }
+      toHexString(): string {
+        return this.__identity__.toString(16).padStart(64, "0")
+      }
+    }
+    const sender = new ServerEntryIdentity(1n)
+    expect(sender instanceof Identity).toBe(false)
+    expectNormalized(sender, one)
+    expect(identityEquals(sender, one)).toBe(true)
+    expect(identityEquals(sender, new Identity(1n))).toBe(true)
+    expect(identityEquals(sender, new ServerEntryIdentity(2n))).toBe(false)
+  })
+
   it("rejects malformed, negative, oversized, and unsupported inputs", () => {
     const invalid = [
       "1",

@@ -1,4 +1,3 @@
-
 import { make as makeServer } from "../../src/server/bind.ts"
 import * as EffectVitest from "@effect/vitest"
 import * as Cause from "effect/Cause"
@@ -22,6 +21,7 @@ import {
   testEffectCallbackError,
   unwrapTestEffectCallbackError,
 } from "../helpers/effect-errors"
+import { fixtureCallDurationMax } from "../helpers/transport-bounds"
 
 const { expect } = EffectVitest
 
@@ -521,6 +521,7 @@ describe("server runtime", (it) => {
           module: FullModule,
           uri: "http://stdb.test",
           databaseName: "full",
+          callDurationMax: fixtureCallDurationMax,
         })
         const UserGetEnvelope = StdbTesting.procedureEnvelope(
           FullModule.procedures.userGet.returns,
@@ -624,6 +625,7 @@ describe("server runtime", (it) => {
         module: FullModule,
         uri: "http://stdb.test",
         databaseName: "full",
+        callDurationMax: fixtureCallDurationMax,
       })
       const UserGetEnvelope = StdbTesting.procedureEnvelope(
         FullModule.procedures.userGet.returns,
@@ -1038,7 +1040,7 @@ describe("server runtime", (it) => {
       const unrecognizedIdentityCtx = {
         ...makeNativeProcedureCtx(makeFakeDb([])),
         sender: { value: 1n },
-        identity: { value: 1n },
+        databaseIdentity: { value: 1n },
       }
 
       expect(() =>

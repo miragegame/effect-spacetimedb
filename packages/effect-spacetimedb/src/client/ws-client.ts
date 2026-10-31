@@ -50,11 +50,7 @@ import {
   type TableChangeWithContext,
 } from "./session-stream.ts"
 import * as ValueCodec from "./value-codec.ts"
-import {
-  type WaitUntil,
-  type WaitUntilOptions,
-  WaitUntilTimeoutError,
-} from "./wait-until.ts"
+import { type WaitUntil, WaitUntilTimeoutError } from "./wait-until.ts"
 import {
   ensureWsParamsObject,
   eventTableStreamOptions,
@@ -67,9 +63,7 @@ import {
   subscriptionTargetLabel,
   type TableGroup,
   type TableGroupSnapshot,
-  targetToQuerySource,
-  type ViewGroup,
-  type ViewGroupSnapshot,
+  targetQuerySource,
   type WsCallableTransport,
   type WsClientOptions,
   type WsConnectionLike,
@@ -83,6 +77,7 @@ import {
   type SubscriptionFailure,
 } from "./ws-subscription.ts"
 import {
+  bindHandleToConnection,
   type SubscriptionHandleLike,
   type SubscriptionQuerySource,
   fromBuilder as subscriptionAdapterFromBuilder,
@@ -90,6 +85,7 @@ import {
   unsubscribeThen,
 } from "./ws-subscription-adapter.ts"
 import { makeTableRefAccess } from "./ws-table-ref.ts"
+import { makeWsViewReads } from "./ws-view-reads.ts"
 
 export type {
   NativeSubscriptionHandleLike,
@@ -106,7 +102,11 @@ export type {
   TableGroup,
   TableGroupSnapshot,
   ViewGroup,
+  ViewGroupArgs,
+  ViewGroupOptionsParam,
   ViewGroupSnapshot,
+  ViewRowsOptionsParam,
+  WaitUntilViewOptionsParam,
   WsCallableTransport,
   WsClientOptions,
   WsConnectionLike,
@@ -250,6 +250,12 @@ export const makeFromModulePlan = <
               attributes,
             }),
             Effect.raceFirst(invalidated),
+            Effect.tap((handle) =>
+              Effect.suspend(() => {
+                bindHandleToConnection(handle, connectionState)
+                return Effect.void
+              }),
+            ),
             Effect.interruptible,
           ),
           unsubscribeHandle,
@@ -265,21 +271,20 @@ export const makeFromModulePlan = <
     target: SubscriptionTarget<Module>,
     onAppliedError?: (failure: SubscriptionFailure) => void,
   ): Effect.Effect<SubscriptionHandleLike, SubscriptionFailure, Scope.Scope> =>
-    subscribeQuerySource(
-      targetToQuerySource(target),
-      subscriptionTargetLabel(options.plan, target),
-      onAppliedError,
+    targetQuerySource(target).pipe(
+      Effect.flatMap((query) =>
+        subscribeQuerySource(
+          query,
+          subscriptionTargetLabel(options.plan, target),
+          onAppliedError,
+        ),
+      ),
     )
 
   const subscribeTableTarget = <Key extends PublicPersistentTableKeys<Module>>(
     key: Key,
     onAppliedError?: (failure: SubscriptionFailure) => void,
   ) => subscribe(options.plan.targets.tables[key], onAppliedError)
-
-  const subscribeViewTarget = <Key extends PublicViewKeys<Module>>(
-    key: Key,
-    onAppliedError?: (failure: SubscriptionFailure) => void,
-  ) => subscribe(options.plan.targets.views[key], onAppliedError)
 
   const rpc = makeRpc({
     reducers: options.plan.publicReducers,
@@ -401,6 +406,14 @@ export const makeFromModulePlan = <
     }),
   ) as unknown as PublicViewCache<Module>
 
+  const viewReads = makeWsViewReads<Module, RelationContext>({
+    connectionState,
+    targets: options.plan.targets.views,
+    views,
+    viewRelation,
+    subscribe,
+  })
+
   function streamTable<Key extends PublicPersistentTableKeys<Module>>(
     key: Key,
     streamOptions?: WsStreamOptions,
@@ -435,24 +448,6 @@ export const makeFromModulePlan = <
       (onFailure) => subscribeTableTarget(key, onFailure),
     ).pipe(
       // Future yielding SDKs may emit extra snapshots here, never stale state.
-      Stream.chunks,
-      Stream.mapEffect(() => read),
-    )
-  }
-
-  function streamViewRows<Key extends PublicViewKeys<Module>>(
-    key: Key,
-  ): Stream.Stream<
-    ReadonlyArray<ViewRowOf<Module["views"][Key]>>,
-    SubscriptionFailure | StdbDecodeError,
-    Scope.Scope
-  > {
-    const read = views[key].toArray()
-    return streamTableSnapshotSignals(
-      connectionState,
-      viewRelation(key),
-      (onFailure) => subscribeViewTarget(key, onFailure),
-    ).pipe(
       Stream.chunks,
       Stream.mapEffect(() => read),
     )
@@ -529,49 +524,6 @@ export const makeFromModulePlan = <
       streamOptions?.buffer,
     ).pipe(
       // Future yielding SDKs may emit extra snapshots here, never stale state.
-      Stream.chunks,
-      Stream.mapEffect(() => readSnapshot),
-    )
-
-    return {
-      keys,
-      subscribe: groupSubscribe,
-      readSnapshot,
-      changes,
-    }
-  }
-
-  function viewGroup<const Keys extends ReadonlyArray<PublicViewKeys<Module>>>(
-    keys: Keys,
-    streamOptions?: WsStreamOptions,
-  ): ViewGroup<Module, Keys> {
-    const readSnapshot = Effect.forEach(keys, (key) =>
-      views[key].toArray().pipe(Effect.map((rows) => [key, rows] as const)),
-    ).pipe(
-      Effect.map(
-        (entries) =>
-          typedFromEntries(entries) as unknown as ViewGroupSnapshot<
-            Module,
-            Keys
-          >,
-      ),
-    )
-    const groupSubscribe = Effect.forEach(
-      keys,
-      function subscribeViewWithoutFailureSink(key) {
-        return subscribeViewTarget(key)
-      },
-      { discard: true },
-    )
-    const changes = streamTableGroupChanges(
-      connectionState,
-      keys.map((key) => viewRelation(key)),
-      (onFailure) =>
-        Effect.forEach(keys, (key) => subscribeViewTarget(key, onFailure), {
-          discard: true,
-        }),
-      streamOptions?.buffer,
-    ).pipe(
       Stream.chunks,
       Stream.mapEffect(() => readSnapshot),
     )
@@ -689,56 +641,6 @@ export const makeFromModulePlan = <
     )
   }
 
-  function waitUntilView<Key extends PublicViewKeys<Module>>(
-    key: Key,
-    predicate: (row: ViewRowOf<Module["views"][Key]>) => boolean,
-    waitOptions?: WaitUntilOptions,
-  ): Effect.Effect<
-    ReadonlyArray<ViewRowOf<Module["views"][Key]>>,
-    SubscriptionFailure | StdbDecodeError | WaitUntilTimeoutError,
-    Scope.Scope
-  > {
-    let snapshotSizeLast = 0
-    const timeout = waitOptions?.timeout ?? "10 seconds"
-    const matching = viewGroup([key] as const).changes.pipe(
-      Stream.map((snapshot) => snapshot[key]),
-      Stream.map((rows) => {
-        snapshotSizeLast = rows.length
-        return rows.filter(predicate)
-      }),
-      Stream.filter((rows) => rows.length > 0),
-      Stream.runHead,
-      Effect.flatMap((rows) =>
-        rows.pipe(
-          Match.value,
-          Match.when({ _tag: "Some" }, (some) => Effect.succeed(some.value)),
-          Match.orElse(() =>
-            Effect.fail(
-              new WaitUntilTimeoutError({
-                table: key,
-                timeoutMillis: Duration.toMillis(timeout),
-                snapshotSizeLast,
-              }),
-            ),
-          ),
-        ),
-      ),
-    )
-    return matching.pipe(
-      Effect.timeoutOrElse({
-        duration: timeout,
-        orElse: () =>
-          Effect.fail(
-            new WaitUntilTimeoutError({
-              table: key,
-              timeoutMillis: Duration.toMillis(timeout),
-              snapshotSizeLast,
-            }),
-          ),
-      }),
-    )
-  }
-
   return {
     moduleName: module.name,
     cache,
@@ -756,15 +658,15 @@ export const makeFromModulePlan = <
     rowMatchesPrimaryKey: tableRefAccess.rowMatchesPrimaryKey,
     streamEventTable: streamEventTableForKey,
     streamRows,
-    streamViewRows,
+    streamViewRows: viewReads.streamViewRows,
     tableGroup,
-    viewGroup,
+    viewGroup: viewReads.viewGroup,
     streamTableEvents,
     streamTable,
     streamTableWithContext,
     streamTarget,
     waitUntil,
-    waitUntilView,
+    waitUntilView: viewReads.waitUntilView,
   }
 }
 

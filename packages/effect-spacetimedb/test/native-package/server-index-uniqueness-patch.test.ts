@@ -60,6 +60,7 @@ describe("server index uniqueness patch", () => {
         `export const procedure_start_mut_tx = () => 0n`,
         `export const procedure_commit_mut_tx = () => undefined`,
         `export const procedure_abort_mut_tx = () => undefined`,
+        `export const env_get = () => null`,
       ].join("\n"),
     )
 
@@ -107,7 +108,7 @@ describe("server index uniqueness patch", () => {
           {
             name: "spacetime-sys-stub",
             setup(build) {
-              build.onResolve({ filter: /^spacetime:sys@2\.[01]$/ }, () => ({
+              build.onResolve({ filter: /^spacetime:sys@2\.[012]$/ }, () => ({
                 path: sysStub,
               }))
             },

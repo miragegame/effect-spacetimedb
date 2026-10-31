@@ -145,16 +145,37 @@ export const packPublishArchive = async (tempRoot) => {
     stdio: "inherit",
   })
 
-  const tarballs = (await readdir(resolvedTempRoot)).filter((entry) =>
+  return singlePackedTarball(resolvedTempRoot)
+}
+
+const singlePackedTarball = async (directory) => {
+  const tarballs = (await readdir(directory)).filter((entry) =>
     entry.endsWith(".tgz"),
   )
   if (tarballs.length !== 1) {
     throw new Error(
-      `Expected exactly one packed tarball in ${resolvedTempRoot}, found ${tarballs.length}`,
+      `Expected exactly one packed tarball in ${directory}, found ${tarballs.length}`,
     )
   }
+  return path.join(directory, tarballs[0])
+}
 
-  return path.join(resolvedTempRoot, tarballs[0])
+/**
+ * A job that runs several packed smokes back to back packs once into a
+ * package-scratch directory and names it here, so each smoke installs that one
+ * archive instead of rebuilding `dist` and repacking. Standalone runs leave it
+ * unset and pack their own. Relative values resolve against the package root.
+ */
+export const sharedPackDirectoryVariable = "EFFECT_SPACETIMEDB_SHARED_PACK_DIR"
+
+export const resolvePublishArchive = async (tempRoot) => {
+  const shared = process.env[sharedPackDirectoryVariable]?.trim()
+  if (shared === undefined || shared === "") {
+    return packPublishArchive(tempRoot)
+  }
+  return singlePackedTarball(
+    assertPackageScratchDestination(path.resolve(packageRoot, shared)),
+  )
 }
 
 const invokedPath = process.argv[1]

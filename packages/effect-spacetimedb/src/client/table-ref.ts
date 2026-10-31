@@ -1,13 +1,14 @@
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import * as Hex from "effect/encoding/Hex"
+import * as Equal from "effect/Equal"
 import * as Match from "effect/Match"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import type { StdbDecodeError } from "../decode-error.ts"
 import type { SnapshotSignal } from "./session-stream.ts"
 import type { SubscriptionFailure } from "./ws-subscription.ts"
@@ -148,16 +149,33 @@ const hasHexString = (
   "toHexString" in value &&
   typeof value.toHexString === "function"
 
+/**
+ * Value objects that pair Effect `Equal` with a stable string `key()` (checked
+ * quantities, points and identifiers, for example) own their identity: their
+ * state is private, so an entries walk would miss the value itself and trip
+ * over internal policy functions.
+ */
+const hasStableKey = (
+  value: unknown,
+): value is Equal.Equal & { readonly key: () => unknown } =>
+  Equal.isEqual(value) && "key" in value && typeof value.key === "function"
+
 const unsupportedCanonicalValue = (kind: string): never => {
   throw new TypeError(`Cannot build a stable subscription key for ${kind}`)
 }
 
 const canonicalValuePart = (value: unknown): unknown => {
   if (value instanceof Uint8Array) {
-    return ["bytes", Encoding.encodeHex(value)] as const
+    return ["bytes", Hex.encode(value)] as const
   }
   if (hasHexString(value)) {
     return ["hex", value.toHexString()] as const
+  }
+  if (hasStableKey(value)) {
+    const key = value.key()
+    return typeof key === "string"
+      ? (["key", key] as const)
+      : unsupportedCanonicalValue("value with a non-string key")
   }
   if (Array.isArray(value)) {
     return ["array", value.map(canonicalValuePart)] as const

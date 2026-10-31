@@ -6,10 +6,11 @@ import * as Duration from "effect/Duration"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as TestClock from "effect/testing/TestClock"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Stdb from "effect-spacetimedb"
 import { WsUnsupportedBuilderFeatureError } from "effect-spacetimedb/client"
 import * as StdbTesting from "effect-spacetimedb/testing"
@@ -21,6 +22,7 @@ import { Identity } from "spacetimedb"
 import { FullModule } from "../fixtures/full-module"
 import { TestLayer } from "../helpers/test-layer"
 import { makeFullModuleWsConnection } from "../helpers/ws-fixtures"
+import { fixtureConnectTimeoutMillis } from "../helpers/transport-bounds"
 
 const { expect } = EffectVitest
 const describe = EffectVitest.layer(TestLayer)
@@ -147,6 +149,7 @@ describe("ws resource fault injection", (it) => {
             builder: () => fault.builder,
             uri,
             databaseName,
+            connectTimeoutMillis: fixtureConnectTimeoutMillis,
           },
         })
         const awaitingInvalidation = yield* session
@@ -244,6 +247,7 @@ describe("ws resource fault injection", (it) => {
               DbConnection: { builder: () => fault.builder },
               uri,
               databaseName,
+              connectTimeoutMillis: fixtureConnectTimeoutMillis,
             })
             .pipe(Effect.scoped),
         )
@@ -276,6 +280,7 @@ describe("ws resource fault injection", (it) => {
               DbConnection: { builder: () => fault.builder },
               uri,
               databaseName,
+              connectTimeoutMillis: fixtureConnectTimeoutMillis,
             })
             .pipe(Effect.scoped),
         )
@@ -307,6 +312,7 @@ describe("ws resource fault injection", (it) => {
             DbConnection: { builder: () => fault.builder },
             uri,
             databaseName,
+            connectTimeoutMillis: fixtureConnectTimeoutMillis,
           })
           .pipe(Effect.scoped),
       )
@@ -341,6 +347,7 @@ describe("ws resource fault injection", (it) => {
               DbConnection: { builder: () => fault.builder },
               uri,
               databaseName,
+              connectTimeoutMillis: fixtureConnectTimeoutMillis,
             })
             .pipe(Effect.scoped),
         )
@@ -368,6 +375,7 @@ describe("ws resource fault injection", (it) => {
               DbConnection: { builder: () => fault.builder },
               uri,
               databaseName,
+              connectTimeoutMillis: fixtureConnectTimeoutMillis,
             })
             .pipe(Effect.scoped),
         )
@@ -430,6 +438,7 @@ describe("ws resource fault injection", (it) => {
             DbConnection: { builder: () => builder },
             uri,
             databaseName,
+            connectTimeoutMillis: fixtureConnectTimeoutMillis,
           })
           .pipe(Effect.scoped),
       )
@@ -459,6 +468,7 @@ describe("ws resource fault injection", (it) => {
             builder: () => fault.builder,
             uri,
             databaseName,
+            connectTimeoutMillis: fixtureConnectTimeoutMillis,
           },
         }).pipe(Effect.scoped),
       )
@@ -488,6 +498,7 @@ describe("ws resource fault injection", (it) => {
             builder: () => fault.builder,
             uri,
             databaseName,
+            connectTimeoutMillis: fixtureConnectTimeoutMillis,
           },
         }).pipe(Effect.scoped),
       )
@@ -626,6 +637,7 @@ describe("ws resource fault injection", (it) => {
           builder: () => fault.builder,
           uri,
           databaseName,
+          connectTimeoutMillis: fixtureConnectTimeoutMillis,
         },
       }).pipe(Effect.andThen(Effect.interrupt), Effect.scoped, Effect.exit)
 
@@ -634,6 +646,62 @@ describe("ws resource fault injection", (it) => {
       )
       expect(fault.disconnectCount()).toBe(1)
     }),
+  )
+
+  it.effect(
+    "releasing a live session fails calls still in flight and later calls on the released connection",
+    () =>
+      Effect.gen(function* () {
+        const reducerStarted = yield* Deferred.make<void>()
+        const reducerPending = Promise.withResolvers<void>().promise
+        let reducerCallCount = 0
+        const fault = makeFaultBuilder({
+          build: ({ onConnect, makeConnection }) => {
+            const connection = makeConnection({
+              callReducerWithParams: () => {
+                reducerCallCount += 1
+                Deferred.doneUnsafe(reducerStarted, Effect.void)
+                return reducerPending
+              },
+              callProcedureWithParams: () => Promise.resolve(undefined),
+            })
+            onConnect?.(connection, Identity.zero(), "token")
+            return connection
+          },
+        })
+        const sessionScope = yield* Scope.make()
+        const session = yield* StdbTesting.makeScopedFromModulePlan({
+          plan,
+          config: {
+            builder: () => fault.builder,
+            uri,
+            databaseName,
+            connectTimeoutMillis: fixtureConnectTimeoutMillis,
+          },
+        }).pipe(Scope.provide(sessionScope))
+        const reducerFiber = yield* session.reducers
+          .userUpsert({
+            userId: "user-1" as never,
+            name: "Ada" as never,
+          })
+          .pipe(Effect.forkScoped)
+        yield* Deferred.await(reducerStarted)
+
+        // The transport never reports the close: no `onDisconnect` fires.
+        yield* Scope.close(sessionScope, Exit.void)
+
+        const inFlightError = yield* Fiber.join(reducerFiber).pipe(Effect.flip)
+        expect(StdbTesting.ConnectionLostError.is(inFlightError)).toBe(true)
+        const laterError = yield* session.reducers
+          .userUpsert({
+            userId: "user-2" as never,
+            name: "Grace" as never,
+          })
+          .pipe(Effect.flip)
+        expect(StdbTesting.ConnectionLostError.is(laterError)).toBe(true)
+        expect(reducerCallCount).toBe(1)
+        expect(fault.disconnectCount()).toBe(1)
+      }).pipe(Effect.scoped),
   )
 
   it.effect(
@@ -651,6 +719,7 @@ describe("ws resource fault injection", (it) => {
               builder: () => fault.builder,
               uri,
               databaseName,
+              connectTimeoutMillis: fixtureConnectTimeoutMillis,
               createWebSocket: () => ({}),
             },
           }).pipe(Effect.scoped),
@@ -682,6 +751,7 @@ describe("ws resource fault injection", (it) => {
             builder: () => fault.builder,
             uri,
             databaseName,
+            connectTimeoutMillis: fixtureConnectTimeoutMillis,
           },
         })
         const awaitingInvalidation = yield* session
@@ -723,6 +793,7 @@ describe("ws resource fault injection", (it) => {
               builder: () => fault.builder,
               uri,
               databaseName,
+              connectTimeoutMillis: fixtureConnectTimeoutMillis,
             },
           }).pipe(Effect.scoped),
         )
@@ -753,6 +824,7 @@ describe("ws resource fault injection", (it) => {
               builder: () => fault.builder,
               uri,
               databaseName,
+              connectTimeoutMillis: fixtureConnectTimeoutMillis,
             },
           }).pipe(Effect.scoped),
         )

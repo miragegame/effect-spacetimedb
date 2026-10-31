@@ -32,15 +32,46 @@ const normalizeBigint = (
 }
 
 /**
- * Normalizes a native Identity, a non-negative U256 bigint, or an exactly
- * 64-digit hexadecimal string. Strings may use a lowercase `0x` prefix; the
- * canonical result is lowercase, full-width, and unprefixed.
+ * The U256 of a native Identity from either entry of the SDK. A module bundle
+ * carries the SDK's public entry and its server entry, each with its own
+ * Identity class, and the host builds `ctx.sender` and `ctx.identity` from the
+ * server one, which fails `instanceof Identity`. Both are class instances with
+ * the U256 in an own `__identity__` field; a plain record with that field is
+ * not an Identity.
+ */
+const nativeIdentityValue = (value: unknown): bigint | undefined => {
+  if (value instanceof Identity) {
+    return value.__identity__
+  }
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !Object.hasOwn(value, "__identity__")
+  ) {
+    return undefined
+  }
+  const native = value as {
+    readonly __identity__: unknown
+    readonly toHexString?: unknown
+  }
+  return typeof native.__identity__ === "bigint" &&
+    typeof native.toHexString === "function"
+    ? native.__identity__
+    : undefined
+}
+
+/**
+ * Normalizes a native Identity (from either entry of the SDK), a non-negative
+ * U256 bigint, or an exactly 64-digit hexadecimal string. Strings may use a
+ * lowercase `0x` prefix; the canonical result is lowercase, full-width, and
+ * unprefixed.
  */
 export const normalizeIdentity = (
   value: unknown,
 ): Result.Result<IdentityHex, IdentityFormatError> => {
-  if (value instanceof Identity) {
-    return normalizeBigint(value.__identity__, value)
+  const native = nativeIdentityValue(value)
+  if (native !== undefined) {
+    return normalizeBigint(native, value)
   }
   if (typeof value === "bigint") {
     return normalizeBigint(value, value)
