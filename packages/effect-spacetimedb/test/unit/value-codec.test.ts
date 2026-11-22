@@ -6,7 +6,7 @@ import * as SpacetimeDB from "spacetimedb"
 
 const { expect } = EffectVitest
 
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { ExampleErrors } from "../fixtures/full-module"
 import { codecCorpusEntries } from "../helpers/codec-corpus"
 import { nativeBytes, nativeRoundTrip } from "../helpers/native-serializer"
@@ -17,20 +17,22 @@ import { testArrayLength } from "../helpers/array-bounds"
 const describe = EffectVitest.layer(TestLayer)
 
 const expectNativeHostTransportRoundTrip = Effect.fn(function* <A>(
-  type: Parameters<typeof StdbTesting.ContractType.typeBuilderWithFactories>[0],
+  type: Parameters<
+    typeof StdbInternal.ContractType.typeBuilderWithFactories
+  >[0],
   value: A,
 ) {
-  const wsEncoded = yield* StdbTesting.ClientValueCodec.ws.encode(type, value)
+  const wsEncoded = yield* StdbInternal.ClientValueCodec.ws.encode(type, value)
   const wsNative = nativeRoundTrip(type, wsEncoded)
-  expect(yield* StdbTesting.ClientValueCodec.ws.decode(type, wsNative)).toEqual(
-    value,
-  )
+  expect(
+    yield* StdbInternal.ClientValueCodec.ws.decode(type, wsNative),
+  ).toEqual(value)
 
-  const dbEncoded = yield* StdbTesting.ClientValueCodec.db.encode(type, value)
+  const dbEncoded = yield* StdbInternal.ClientValueCodec.db.encode(type, value)
   const dbNative = nativeRoundTrip(type, dbEncoded)
-  expect(yield* StdbTesting.ClientValueCodec.db.decode(type, dbNative)).toEqual(
-    value,
-  )
+  expect(
+    yield* StdbInternal.ClientValueCodec.db.decode(type, dbNative),
+  ).toEqual(value)
 })
 
 describe("transport codec boundary", (it) => {
@@ -39,24 +41,24 @@ describe("transport codec boundary", (it) => {
       codecCorpusEntries,
       ([kind, sample]) =>
         Effect.gen(function* () {
-          const wsEncoded = yield* StdbTesting.ClientValueCodec.ws.encode(
+          const wsEncoded = yield* StdbInternal.ClientValueCodec.ws.encode(
             sample.type,
             sample.value,
           )
-          const dbEncoded = yield* StdbTesting.ClientValueCodec.db.encode(
+          const dbEncoded = yield* StdbInternal.ClientValueCodec.db.encode(
             sample.type,
             sample.value,
           )
 
           expect(
-            yield* StdbTesting.ClientValueCodec.ws.decode(
+            yield* StdbInternal.ClientValueCodec.ws.decode(
               sample.type,
               wsEncoded,
             ),
             `WS codec failed for ${kind}`,
           ).toEqual(sample.value)
           expect(
-            yield* StdbTesting.ClientValueCodec.db.decode(
+            yield* StdbInternal.ClientValueCodec.db.decode(
               sample.type,
               dbEncoded,
             ),
@@ -74,7 +76,7 @@ describe("transport codec boundary", (it) => {
         codecCorpusEntries,
         ([kind, sample]) =>
           Effect.gen(function* () {
-            const dbEncoded = yield* StdbTesting.ClientValueCodec.db.encode(
+            const dbEncoded = yield* StdbInternal.ClientValueCodec.db.encode(
               sample.type,
               sample.value,
             )
@@ -144,14 +146,14 @@ describe("transport codec boundary", (it) => {
 
   it.effect("normalizes HTTP JSON using authored Stdb type metadata", () =>
     Effect.gen(function* () {
-      const Row = StdbTesting.ContractType.struct({
-        id: StdbTesting.ContractType.u64(),
-        count: StdbTesting.ContractType.u32(),
-        name: StdbTesting.ContractType.string(),
+      const Row = StdbInternal.ContractType.struct({
+        id: StdbInternal.ContractType.u64(),
+        count: StdbInternal.ContractType.u32(),
+        name: StdbInternal.ContractType.string(),
       })
 
       const decoded =
-        yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput<{
+        yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput<{
           readonly id: bigint
           readonly count: number
           readonly name: string
@@ -163,21 +165,21 @@ describe("transport codec boundary", (it) => {
         name: "Ada",
       })
       expect(
-        StdbTesting.ClientValueCodec.httpJson.encodeInput([decoded.id]),
+        StdbInternal.ClientValueCodec.httpJson.encodeInput([decoded.id]),
       ).toBe("[18446744073709551615]")
     }),
   )
 
   it.effect("routes DB values through the explicit DB codec boundary", () =>
     Effect.gen(function* () {
-      const Row = StdbTesting.ContractType.struct({
-        id: StdbTesting.ContractType.u64(),
+      const Row = StdbInternal.ContractType.struct({
+        id: StdbInternal.ContractType.u64(),
       })
 
-      const encoded = yield* StdbTesting.ClientValueCodec.db.encode(Row, {
+      const encoded = yield* StdbInternal.ClientValueCodec.db.encode(Row, {
         id: 1n,
       })
-      const decoded = yield* StdbTesting.ClientValueCodec.db.decode(
+      const decoded = yield* StdbInternal.ClientValueCodec.db.decode(
         Row,
         encoded,
       )
@@ -190,24 +192,24 @@ describe("transport codec boundary", (it) => {
 
   it.effect("encodes option WS params as native bare values", () =>
     Effect.gen(function* () {
-      const PresenceSession = StdbTesting.ContractType.option(
-        StdbTesting.ContractType.string(),
+      const PresenceSession = StdbInternal.ContractType.option(
+        StdbInternal.ContractType.string(),
       )
 
       expect(
-        yield* StdbTesting.ClientValueCodec.ws.encode(
+        yield* StdbInternal.ClientValueCodec.ws.encode(
           PresenceSession,
           "session-1",
         ),
       ).toBe("session-1")
       expect(
-        yield* StdbTesting.ClientValueCodec.ws.encode(
+        yield* StdbInternal.ClientValueCodec.ws.encode(
           PresenceSession,
           undefined,
         ),
       ).toBeUndefined()
       expect(
-        yield* StdbTesting.ClientValueCodec.http.encode(
+        yield* StdbInternal.ClientValueCodec.http.encode(
           PresenceSession,
           "session-1",
         ),
@@ -219,23 +221,23 @@ describe("transport codec boundary", (it) => {
     "round-trips host transport containers through the native serializer",
     () =>
       Effect.gen(function* () {
-        const OptionString = StdbTesting.ContractType.option(
-          StdbTesting.ContractType.string(),
+        const OptionString = StdbInternal.ContractType.option(
+          StdbInternal.ContractType.string(),
         )
-        const ResultString = StdbTesting.ContractType.result(
-          StdbTesting.ContractType.string(),
-          StdbTesting.ContractType.string(),
+        const ResultString = StdbInternal.ContractType.result(
+          StdbInternal.ContractType.string(),
+          StdbInternal.ContractType.string(),
         )
-        const UnitResult = StdbTesting.ContractType.result(
-          StdbTesting.ContractType.unit(),
-          StdbTesting.ContractType.unit(),
+        const UnitResult = StdbInternal.ContractType.result(
+          StdbInternal.ContractType.unit(),
+          StdbInternal.ContractType.unit(),
         )
-        const Status = StdbTesting.ContractType.sum({
+        const Status = StdbInternal.ContractType.sum({
           Complete: ResultString,
-          Waiting: StdbTesting.ContractType.unit(),
+          Waiting: StdbInternal.ContractType.unit(),
         })
-        const Nested = StdbTesting.ContractType.struct({
-          sessions: StdbTesting.ContractType.array(
+        const Nested = StdbInternal.ContractType.struct({
+          sessions: StdbInternal.ContractType.array(
             OptionString,
             testArrayLength,
           ),
@@ -265,9 +267,9 @@ describe("transport codec boundary", (it) => {
 
   it.effect("encodes unbounded bigint values as native strings", () =>
     Effect.gen(function* () {
-      const Count = StdbTesting.ContractType.bigint()
+      const Count = StdbInternal.ContractType.bigint()
 
-      const encoded = yield* StdbTesting.ClientValueCodec.ws.encode(
+      const encoded = yield* StdbInternal.ClientValueCodec.ws.encode(
         Count,
         9007199254740993n,
       )
@@ -276,9 +278,9 @@ describe("transport codec boundary", (it) => {
 
       const native = nativeRoundTrip(Count, encoded)
       expect(native).toBe("9007199254740993")
-      expect(yield* StdbTesting.ClientValueCodec.ws.decode(Count, native)).toBe(
-        9007199254740993n,
-      )
+      expect(
+        yield* StdbInternal.ClientValueCodec.ws.decode(Count, native),
+      ).toBe(9007199254740993n)
     }),
   )
 
@@ -286,11 +288,11 @@ describe("transport codec boundary", (it) => {
     "decodes generated SDK unit enum payloads as authored literals",
     () =>
       Effect.gen(function* () {
-        const Row = StdbTesting.ContractType.struct({
-          state: StdbTesting.ContractType.literal("Active", "Ended"),
+        const Row = StdbInternal.ContractType.struct({
+          state: StdbInternal.ContractType.literal("Active", "Ended"),
         })
 
-        const decoded = yield* StdbTesting.ClientValueCodec.db.decode(Row, {
+        const decoded = yield* StdbInternal.ClientValueCodec.db.decode(Row, {
           state: {
             tag: "Active",
             value: {},
@@ -307,13 +309,13 @@ describe("transport codec boundary", (it) => {
     "decodes generated SDK unit result payloads as authored result values",
     () =>
       Effect.gen(function* () {
-        const Result = StdbTesting.ContractType.result(
-          StdbTesting.ContractType.unit(),
-          StdbTesting.ContractType.unit(),
+        const Result = StdbInternal.ContractType.result(
+          StdbInternal.ContractType.unit(),
+          StdbInternal.ContractType.unit(),
         )
 
         expect(
-          yield* StdbTesting.ClientValueCodec.db.decode(Result, {
+          yield* StdbInternal.ClientValueCodec.db.decode(Result, {
             tag: "ok",
             value: {},
           }),
@@ -321,7 +323,7 @@ describe("transport codec boundary", (it) => {
           ok: undefined,
         })
         expect(
-          yield* StdbTesting.ClientValueCodec.db.decode(Result, {
+          yield* StdbInternal.ClientValueCodec.db.decode(Result, {
             tag: "err",
             value: [],
           }),
@@ -333,12 +335,12 @@ describe("transport codec boundary", (it) => {
 
   it.effect("rejects non-unit generated SDK enum payload values", () =>
     Effect.gen(function* () {
-      const Row = StdbTesting.ContractType.struct({
-        state: StdbTesting.ContractType.literal("Active", "Ended"),
+      const Row = StdbInternal.ContractType.struct({
+        state: StdbInternal.ContractType.literal("Active", "Ended"),
       })
 
       const exit = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.db.decode(Row, {
+        StdbInternal.ClientValueCodec.db.decode(Row, {
           state: {
             tag: "Active",
             value: {
@@ -354,15 +356,15 @@ describe("transport codec boundary", (it) => {
 
   it.effect("decodes generated SDK PascalCase sum tags as authored tags", () =>
     Effect.gen(function* () {
-      const Content = StdbTesting.ContractType.sum({
-        prose: StdbTesting.ContractType.struct({
-          text: StdbTesting.ContractType.string(),
+      const Content = StdbInternal.ContractType.sum({
+        prose: StdbInternal.ContractType.struct({
+          text: StdbInternal.ContractType.string(),
         }),
-        untilRemoved: StdbTesting.ContractType.unit(),
+        untilRemoved: StdbInternal.ContractType.unit(),
       })
 
       expect(
-        yield* StdbTesting.ClientValueCodec.db.decode(Content, {
+        yield* StdbInternal.ClientValueCodec.db.decode(Content, {
           tag: "Prose",
           value: {
             text: "hello",
@@ -375,7 +377,7 @@ describe("transport codec boundary", (it) => {
         },
       })
       expect(
-        yield* StdbTesting.ClientValueCodec.db.decode(Content, {
+        yield* StdbInternal.ClientValueCodec.db.decode(Content, {
           tag: "UntilRemoved",
           value: {},
         }),
@@ -387,28 +389,28 @@ describe("transport codec boundary", (it) => {
 
   it.effect("round-trips byte arrays through HTTP JSON", () =>
     Effect.gen(function* () {
-      const Payload = StdbTesting.ContractType.struct({
-        data: StdbTesting.ContractType.bytes(),
+      const Payload = StdbInternal.ContractType.struct({
+        data: StdbInternal.ContractType.bytes(),
       })
       const value = {
         data: new Uint8Array([0, 1, 255]),
       }
 
-      expect(StdbTesting.ClientValueCodec.httpJson.encodeInput(value)).toBe(
+      expect(StdbInternal.ClientValueCodec.httpJson.encodeInput(value)).toBe(
         '{"data":[0,1,255]}',
       )
       expect(
-        StdbTesting.ClientValueCodec.httpJson.encodeInput({
+        StdbInternal.ClientValueCodec.httpJson.encodeInput({
           data: Buffer.from([0, 1, 255]),
         }),
       ).toBe('{"data":[0,1,255]}')
 
       const decodedHex =
-        yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput<{
+        yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput<{
           readonly data: Uint8Array
         }>(Payload, '{"data":"0001ff"}')
       const decodedArray =
-        yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput<{
+        yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput<{
           readonly data: Uint8Array
         }>(Payload, '{"data":[0,1,255]}')
 
@@ -419,11 +421,11 @@ describe("transport codec boundary", (it) => {
 
   it.effect("reports malformed HTTP JSON byte strings as decode failures", () =>
     Effect.gen(function* () {
-      const Payload = StdbTesting.ContractType.struct({
-        data: StdbTesting.ContractType.bytes(),
+      const Payload = StdbInternal.ContractType.struct({
+        data: StdbInternal.ContractType.bytes(),
       })
       const malformed = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput<{
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput<{
           readonly data: Uint8Array
         }>(Payload, '{"data":"not-hex"}'),
       )
@@ -434,20 +436,20 @@ describe("transport codec boundary", (it) => {
 
   it.effect("preserves nested HTTP JSON integers inside result envelopes", () =>
     Effect.gen(function* () {
-      const Result = StdbTesting.ContractType.result(
-        StdbTesting.ContractType.u64(),
-        StdbTesting.ContractType.string(),
+      const Result = StdbInternal.ContractType.result(
+        StdbInternal.ContractType.u64(),
+        StdbInternal.ContractType.string(),
       )
-      const Struct = StdbTesting.ContractType.struct({
+      const Struct = StdbInternal.ContractType.struct({
         result: Result,
       })
 
       const decoded =
-        yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput<{
+        yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput<{
           readonly result: { readonly ok: bigint }
         }>(Struct, '{"result":{"tag":"ok","value":18446744073709551615}}')
       const enumDecoded =
-        yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput<{
+        yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput<{
           readonly result: { readonly ok: bigint }
         }>(Struct, '{"result":[0,18446744073709551615]}')
 
@@ -464,17 +466,17 @@ describe("transport codec boundary", (it) => {
     "preserves HTTP JSON integer boundaries without JS number loss",
     () =>
       Effect.gen(function* () {
-        const Integers = StdbTesting.ContractType.struct({
-          i64: StdbTesting.ContractType.i64(),
-          u64: StdbTesting.ContractType.u64(),
-          i128: StdbTesting.ContractType.i128(),
-          u128: StdbTesting.ContractType.u128(),
-          u256: StdbTesting.ContractType.u256(),
-          unbounded: StdbTesting.ContractType.bigint(),
+        const Integers = StdbInternal.ContractType.struct({
+          i64: StdbInternal.ContractType.i64(),
+          u64: StdbInternal.ContractType.u64(),
+          i128: StdbInternal.ContractType.i128(),
+          u128: StdbInternal.ContractType.u128(),
+          u256: StdbInternal.ContractType.u256(),
+          unbounded: StdbInternal.ContractType.bigint(),
         })
 
         const decoded =
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput<{
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput<{
             readonly i64: bigint
             readonly u64: bigint
             readonly i128: bigint
@@ -504,7 +506,7 @@ describe("transport codec boundary", (it) => {
           unbounded: 9007199254740993n,
         })
         expect(
-          StdbTesting.ClientValueCodec.httpJson.encodeInput([decoded.u256]),
+          StdbInternal.ClientValueCodec.httpJson.encodeInput([decoded.u256]),
         ).toBe(
           "[115792089237316195423570985008687907853269984665640564039457584007913129639935]",
         )
@@ -515,20 +517,20 @@ describe("transport codec boundary", (it) => {
     "rebounds canonical HTTP JSON product fields to declared keys",
     () =>
       Effect.gen(function* () {
-        const Row = StdbTesting.ContractType.struct({
-          createdAt: StdbTesting.ContractType.string(),
-          nested: StdbTesting.ContractType.struct({
-            userId: StdbTesting.ContractType.string(),
+        const Row = StdbInternal.ContractType.struct({
+          createdAt: StdbInternal.ContractType.string(),
+          nested: StdbInternal.ContractType.struct({
+            userId: StdbInternal.ContractType.string(),
           }),
         })
 
         const canonical =
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput<{
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput<{
             readonly createdAt: string
             readonly nested: { readonly userId: string }
           }>(Row, '{"created_at":"now","nested":{"user_id":"user-1"}}')
         const declared =
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput<{
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput<{
             readonly createdAt: string
             readonly nested: { readonly userId: string }
           }>(Row, '{"createdAt":"now","nested":{"userId":"user-1"}}')
@@ -547,12 +549,12 @@ describe("transport codec boundary", (it) => {
 
   it.effect("rejects conflicting declared and canonical product fields", () =>
     Effect.gen(function* () {
-      const Row = StdbTesting.ContractType.struct({
-        createdAt: StdbTesting.ContractType.string(),
+      const Row = StdbInternal.ContractType.struct({
+        createdAt: StdbInternal.ContractType.string(),
       })
 
       const exit = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           Row,
           '{"createdAt":"declared","created_at":"canonical"}',
         ),
@@ -566,35 +568,35 @@ describe("transport codec boundary", (it) => {
     "normalizes string literal SATS enum objects through metadata",
     () =>
       Effect.gen(function* () {
-        const Status = StdbTesting.ContractType.literal("joined", "left")
-        const ReviewStatus = StdbTesting.ContractType.literal("pending_review")
+        const Status = StdbInternal.ContractType.literal("joined", "left")
+        const ReviewStatus = StdbInternal.ContractType.literal("pending_review")
 
         expect(
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
             Status,
             '{"joined":{}}',
           ),
         ).toBe("joined")
         expect(
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
             Status,
             "[1,[]]",
           ),
         ).toBe("left")
         expect(
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
             Status,
             '{"tag":0}',
           ),
         ).toBe("joined")
         expect(
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
             ReviewStatus,
             '{"PendingReview":{}}',
           ),
         ).toBe("pending_review")
         expect(
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
             ReviewStatus,
             '{"tag":"PendingReview"}',
           ),
@@ -606,15 +608,15 @@ describe("transport codec boundary", (it) => {
     "round-trips non-camelCase string literals across DB, HTTP, and generated-client transports",
     () =>
       Effect.gen(function* () {
-        const Status = StdbTesting.ContractType.literal("pending_review")
-        const Action = StdbTesting.ContractType.literal("edit-action")
-        const Mixed = StdbTesting.ContractType.literal(
+        const Status = StdbInternal.ContractType.literal("pending_review")
+        const Action = StdbInternal.ContractType.literal("edit-action")
+        const Mixed = StdbInternal.ContractType.literal(
           "pending_review",
           "edit-action",
         )
 
         expect(
-          yield* StdbTesting.ClientValueCodec.db.encode(
+          yield* StdbInternal.ClientValueCodec.db.encode(
             Status,
             "pending_review",
           ),
@@ -622,7 +624,7 @@ describe("transport codec boundary", (it) => {
           tag: "pending_review",
         })
         expect(
-          yield* StdbTesting.ClientValueCodec.http.encode(
+          yield* StdbInternal.ClientValueCodec.http.encode(
             Status,
             "pending_review",
           ),
@@ -630,20 +632,20 @@ describe("transport codec boundary", (it) => {
           tag: "pending_review",
         })
         expect(
-          StdbTesting.ClientHttpJson.prepareHttpInputValue(Status, {
+          StdbInternal.ClientHttpJson.prepareHttpInputValue(Status, {
             tag: "pending_review",
           }),
         ).toEqual({
           pending_review: {},
         })
         expect(
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
             Status,
             '{"pending_review":{}}',
           ),
         ).toBe("pending_review")
         expect(
-          yield* StdbTesting.ClientValueCodec.ws.encode(
+          yield* StdbInternal.ClientValueCodec.ws.encode(
             Status,
             "pending_review",
           ),
@@ -651,27 +653,27 @@ describe("transport codec boundary", (it) => {
           tag: "PendingReview",
         })
         expect(
-          yield* StdbTesting.ClientValueCodec.db.decode(Status, {
+          yield* StdbInternal.ClientValueCodec.db.decode(Status, {
             tag: "pending_review",
           }),
         ).toBe("pending_review")
         expect(
-          yield* StdbTesting.ClientValueCodec.db.decode(Status, {
+          yield* StdbInternal.ClientValueCodec.db.decode(Status, {
             tag: "PendingReview",
           }),
         ).toBe("pending_review")
         expect(
-          yield* StdbTesting.ClientValueCodec.http.decode(Status, {
+          yield* StdbInternal.ClientValueCodec.http.decode(Status, {
             tag: "PendingReview",
           }),
         ).toBe("pending_review")
         expect(
-          yield* StdbTesting.ClientValueCodec.db.encode(Action, "edit-action"),
+          yield* StdbInternal.ClientValueCodec.db.encode(Action, "edit-action"),
         ).toEqual({
           tag: "EditAction",
         })
         expect(
-          yield* StdbTesting.ClientValueCodec.http.encode(
+          yield* StdbInternal.ClientValueCodec.http.encode(
             Action,
             "edit-action",
           ),
@@ -679,7 +681,7 @@ describe("transport codec boundary", (it) => {
           tag: "EditAction",
         })
         expect(
-          StdbTesting.ClientHttpJson.prepareHttpInputValue(
+          StdbInternal.ClientHttpJson.prepareHttpInputValue(
             Action,
             "edit-action",
           ),
@@ -687,47 +689,47 @@ describe("transport codec boundary", (it) => {
           EditAction: {},
         })
         expect(
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
             Action,
             '{"EditAction":{}}',
           ),
         ).toBe("edit-action")
         expect(
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
             Action,
             '{"edit-action":{}}',
           ),
         ).toBe("edit-action")
         expect(
-          yield* StdbTesting.ClientValueCodec.ws.encode(Action, "edit-action"),
+          yield* StdbInternal.ClientValueCodec.ws.encode(Action, "edit-action"),
         ).toEqual({
           tag: "EditAction",
         })
         expect(
-          yield* StdbTesting.ClientValueCodec.db.decode(Action, {
+          yield* StdbInternal.ClientValueCodec.db.decode(Action, {
             tag: "edit-action",
           }),
         ).toBe("edit-action")
         expect(
-          yield* StdbTesting.ClientValueCodec.http.decode(Action, {
+          yield* StdbInternal.ClientValueCodec.http.decode(Action, {
             tag: "EditAction",
           }),
         ).toBe("edit-action")
         expect(
-          StdbTesting.ClientHttpJson.prepareHttpInputValue(Mixed, {
+          StdbInternal.ClientHttpJson.prepareHttpInputValue(Mixed, {
             tag: "edit-action",
           }),
         ).toEqual({
           EditAction: {},
         })
         expect(
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
             Mixed,
             "[0,{}]",
           ),
         ).toBe("pending_review")
         expect(
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
             Mixed,
             "[1,{}]",
           ),
@@ -737,14 +739,14 @@ describe("transport codec boundary", (it) => {
 
   it.effect("prepares string literal HTTP input as SATS enum objects", () =>
     Effect.gen(function* () {
-      const Directive = StdbTesting.ContractType.struct({
-        kind: StdbTesting.ContractType.literal("ResourceAdjustment"),
-        reason: StdbTesting.ContractType.option(
-          StdbTesting.ContractType.string(),
+      const Directive = StdbInternal.ContractType.struct({
+        kind: StdbInternal.ContractType.literal("ResourceAdjustment"),
+        reason: StdbInternal.ContractType.option(
+          StdbInternal.ContractType.string(),
         ),
-        targetCharacterId: StdbTesting.ContractType.string(),
+        targetCharacterId: StdbInternal.ContractType.string(),
       })
-      const encoded = yield* StdbTesting.ContractTypeCodec.http.encode(
+      const encoded = yield* StdbInternal.ContractTypeCodec.http.encode(
         Directive,
         {
           kind: "ResourceAdjustment",
@@ -763,7 +765,7 @@ describe("transport codec boundary", (it) => {
         targetCharacterId: "character-1",
       })
       expect(
-        StdbTesting.ClientHttpJson.prepareHttpInputValue(Directive, encoded),
+        StdbInternal.ClientHttpJson.prepareHttpInputValue(Directive, encoded),
       ).toEqual({
         kind: {
           ResourceAdjustment: {},
@@ -780,12 +782,12 @@ describe("transport codec boundary", (it) => {
     "prepares string literal WS input for native generated client enum tags",
     () =>
       Effect.gen(function* () {
-        const Params = StdbTesting.ContractType.struct({
-          kind: StdbTesting.ContractType.literal("joined", "left"),
+        const Params = StdbInternal.ContractType.struct({
+          kind: StdbInternal.ContractType.literal("joined", "left"),
         })
 
         expect(
-          yield* StdbTesting.ContractTypeCodec.ws.encode(Params, {
+          yield* StdbInternal.ContractTypeCodec.ws.encode(Params, {
             kind: "joined",
           }),
         ).toEqual({
@@ -798,17 +800,17 @@ describe("transport codec boundary", (it) => {
 
   it.effect("prepares sum WS input for native generated client enum tags", () =>
     Effect.gen(function* () {
-      const Params = StdbTesting.ContractType.struct({
-        content: StdbTesting.ContractType.sum({
-          itemEquipped: StdbTesting.ContractType.struct({
-            itemId: StdbTesting.ContractType.string(),
+      const Params = StdbInternal.ContractType.struct({
+        content: StdbInternal.ContractType.sum({
+          itemEquipped: StdbInternal.ContractType.struct({
+            itemId: StdbInternal.ContractType.string(),
           }),
-          untilRemoved: StdbTesting.ContractType.unit(),
+          untilRemoved: StdbInternal.ContractType.unit(),
         }),
       })
 
       expect(
-        yield* StdbTesting.ContractTypeCodec.ws.encode(Params, {
+        yield* StdbInternal.ContractTypeCodec.ws.encode(Params, {
           content: {
             tag: "itemEquipped",
             value: {
@@ -825,7 +827,7 @@ describe("transport codec boundary", (it) => {
         },
       })
       expect(
-        yield* StdbTesting.ContractTypeCodec.ws.encode(Params, {
+        yield* StdbInternal.ContractTypeCodec.ws.encode(Params, {
           content: {
             tag: "untilRemoved",
           },
@@ -836,7 +838,7 @@ describe("transport codec boundary", (it) => {
         },
       })
       expect(
-        yield* StdbTesting.ContractTypeCodec.ws.encode(Params, {
+        yield* StdbInternal.ContractTypeCodec.ws.encode(Params, {
           content: {
             tag: "ItemEquipped",
             value: {
@@ -859,18 +861,18 @@ describe("transport codec boundary", (it) => {
     "prepares live HTTP callable args with literal and result SATS shapes",
     () =>
       Effect.gen(function* () {
-        const Params = StdbTesting.ContractType.struct({
-          directive: StdbTesting.ContractType.struct({
-            kind: StdbTesting.ContractType.literal("ResourceAdjustment"),
-            outcome: StdbTesting.ContractType.result(
-              StdbTesting.ContractType.unit(),
-              StdbTesting.ContractType.string(),
+        const Params = StdbInternal.ContractType.struct({
+          directive: StdbInternal.ContractType.struct({
+            kind: StdbInternal.ContractType.literal("ResourceAdjustment"),
+            outcome: StdbInternal.ContractType.result(
+              StdbInternal.ContractType.unit(),
+              StdbInternal.ContractType.string(),
             ),
           }),
         })
 
         expect(
-          yield* StdbTesting.encodeArgsArray(Params, {
+          yield* StdbInternal.encodeArgsArray(Params, {
             directive: {
               kind: "ResourceAdjustment",
               outcome: { ok: undefined },
@@ -887,7 +889,7 @@ describe("transport codec boundary", (it) => {
           },
         ])
         expect(
-          yield* StdbTesting.encodeArgsArray(Params, {
+          yield* StdbInternal.encodeArgsArray(Params, {
             directive: {
               kind: "ResourceAdjustment",
               outcome: { err: "rejected" },
@@ -908,14 +910,14 @@ describe("transport codec boundary", (it) => {
 
   it.effect("rejects non-finite float args before HTTP JSON encoding", () =>
     Effect.gen(function* () {
-      const Params = StdbTesting.ContractType.struct({
-        x: StdbTesting.ContractType.f64(),
-        y: StdbTesting.ContractType.f32(),
+      const Params = StdbInternal.ContractType.struct({
+        x: StdbInternal.ContractType.f64(),
+        y: StdbInternal.ContractType.f32(),
       })
 
       expect(
-        StdbTesting.ClientHttpJson.encodeHttpInput(
-          yield* StdbTesting.encodeArgsArray(Params, {
+        StdbInternal.ClientHttpJson.encodeHttpInput(
+          yield* StdbInternal.encodeArgsArray(Params, {
             x: 1.5,
             y: 2.5,
           }),
@@ -925,35 +927,35 @@ describe("transport codec boundary", (it) => {
       yield* Effect.forEach(
         [Number.NaN, Infinity, -Infinity],
         Effect.fn(function* (value) {
-          const f64Failure = yield* StdbTesting.encodeArgsArray(Params, {
+          const f64Failure = yield* StdbInternal.encodeArgsArray(Params, {
             x: value,
             y: 1.5,
           }).pipe(Effect.flip)
-          const f32Failure = yield* StdbTesting.encodeArgsArray(Params, {
+          const f32Failure = yield* StdbInternal.encodeArgsArray(Params, {
             x: 1.5,
             y: value,
           }).pipe(Effect.flip)
 
-          expect(f64Failure).toBeInstanceOf(StdbTesting.StdbDecodeError)
-          expect(f32Failure).toBeInstanceOf(StdbTesting.StdbDecodeError)
+          expect(f64Failure).toBeInstanceOf(StdbInternal.StdbDecodeError)
+          expect(f32Failure).toBeInstanceOf(StdbInternal.StdbDecodeError)
         }),
       )
 
       expect(() =>
-        StdbTesting.ClientHttpJson.encodeHttpInput([Number.NaN]),
+        StdbInternal.ClientHttpJson.encodeHttpInput([Number.NaN]),
       ).toThrow("Cannot encode non-finite number over HTTP JSON")
     }),
   )
 
   it.effect("normalizes unit procedure envelopes from SATS enum objects", () =>
     Effect.gen(function* () {
-      const Envelope = StdbTesting.procedureEnvelope(
-        StdbTesting.ContractType.unit(),
+      const Envelope = StdbInternal.procedureEnvelope(
+        StdbInternal.ContractType.unit(),
         ExampleErrors,
       )
 
       expect(
-        yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           Envelope,
           '{"ok":{}}',
         ),
@@ -962,7 +964,7 @@ describe("transport codec boundary", (it) => {
       })
 
       const pascal = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           Envelope,
           '{"Ok":{}}',
         ),
@@ -976,16 +978,16 @@ describe("transport codec boundary", (it) => {
     "normalizes nested result values inside route-shaped procedure envelopes",
     () =>
       Effect.gen(function* () {
-        const Envelope = StdbTesting.procedureEnvelope(
-          StdbTesting.ContractType.result(
-            StdbTesting.ContractType.u64(),
-            StdbTesting.ContractType.string(),
+        const Envelope = StdbInternal.procedureEnvelope(
+          StdbInternal.ContractType.result(
+            StdbInternal.ContractType.u64(),
+            StdbInternal.ContractType.string(),
           ),
           ExampleErrors,
         )
 
         expect(
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
             Envelope,
             "[0,[0,18446744073709551615]]",
           ),
@@ -996,7 +998,7 @@ describe("transport codec boundary", (it) => {
           },
         })
         expect(
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
             Envelope,
             '[0,[1,"nope"]]',
           ),
@@ -1007,7 +1009,7 @@ describe("transport codec boundary", (it) => {
           },
         })
         expect(
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
             Envelope,
             '[1,"{\\"tag\\":\\"MissingAuth\\"}"]',
           ),
@@ -1020,15 +1022,15 @@ describe("transport codec boundary", (it) => {
 
   it.effect("rejects malformed SATS option tuple variants", () =>
     Effect.gen(function* () {
-      const Option = StdbTesting.ContractType.option(
-        StdbTesting.ContractType.u64(),
+      const Option = StdbInternal.ContractType.option(
+        StdbInternal.ContractType.u64(),
       )
 
       const badVariant = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(Option, "[2,[]]"),
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(Option, "[2,[]]"),
       )
       const badNonePayload = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(Option, "[1,123]"),
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(Option, "[1,123]"),
       )
 
       expect(Exit.isFailure(badVariant)).toBe(true)
@@ -1038,16 +1040,17 @@ describe("transport codec boundary", (it) => {
 
   it.effect("rejects malformed SATS none objects", () =>
     Effect.gen(function* () {
-      const Option = StdbTesting.ContractType.option(
-        StdbTesting.ContractType.u64(),
+      const Option = StdbInternal.ContractType.option(
+        StdbInternal.ContractType.u64(),
       )
 
-      const decoded = yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
-        Option,
-        '{"none":{}}',
-      )
+      const decoded =
+        yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
+          Option,
+          '{"none":{}}',
+        )
       const badNonePayload = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           Option,
           '{"none":123}',
         ),
@@ -1060,22 +1063,25 @@ describe("transport codec boundary", (it) => {
 
   it.effect("rejects malformed unit result payloads", () =>
     Effect.gen(function* () {
-      const Envelope = StdbTesting.procedureEnvelope(
-        StdbTesting.ContractType.unit(),
+      const Envelope = StdbInternal.procedureEnvelope(
+        StdbInternal.ContractType.unit(),
         ExampleErrors,
       )
 
       const badTuple = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(Envelope, "[0,123]"),
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(
+          Envelope,
+          "[0,123]",
+        ),
       )
       const badEnumObject = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           Envelope,
           '{"ok":123}',
         ),
       )
       const badTaggedObject = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           Envelope,
           '{"tag":"ok","value":123}',
         ),
@@ -1089,12 +1095,12 @@ describe("transport codec boundary", (it) => {
 
   it.effect("rejects extra fields on procedure envelope encode", () =>
     Effect.gen(function* () {
-      const Envelope = StdbTesting.procedureEnvelope(
-        StdbTesting.ContractType.u64(),
+      const Envelope = StdbInternal.procedureEnvelope(
+        StdbInternal.ContractType.u64(),
         ExampleErrors,
       )
-      const UnitEnvelope = StdbTesting.procedureEnvelope(
-        StdbTesting.ContractType.unit(),
+      const UnitEnvelope = StdbInternal.procedureEnvelope(
+        StdbInternal.ContractType.unit(),
         ExampleErrors,
       )
 
@@ -1127,29 +1133,29 @@ describe("transport codec boundary", (it) => {
 
   it.effect("rejects extra fields on tagged HTTP procedure envelopes", () =>
     Effect.gen(function* () {
-      const Envelope = StdbTesting.procedureEnvelope(
-        StdbTesting.ContractType.u64(),
+      const Envelope = StdbInternal.procedureEnvelope(
+        StdbInternal.ContractType.u64(),
         ExampleErrors,
       )
-      const UnitEnvelope = StdbTesting.procedureEnvelope(
-        StdbTesting.ContractType.unit(),
+      const UnitEnvelope = StdbInternal.procedureEnvelope(
+        StdbInternal.ContractType.unit(),
         ExampleErrors,
       )
 
       const extraOk = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           Envelope,
           '{"tag":"ok","value":1,"extra":true}',
         ),
       )
       const extraErr = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           Envelope,
           '{"tag":"err","value":"declared","extra":true}',
         ),
       )
       const extraUnitOk = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           UnitEnvelope,
           '{"tag":"ok","extra":true}',
         ),
@@ -1163,29 +1169,29 @@ describe("transport codec boundary", (it) => {
 
   it.effect("rejects missing values on non-unit tagged result envelopes", () =>
     Effect.gen(function* () {
-      const Envelope = StdbTesting.procedureEnvelope(
-        StdbTesting.ContractType.option(StdbTesting.ContractType.u64()),
+      const Envelope = StdbInternal.procedureEnvelope(
+        StdbInternal.ContractType.option(StdbInternal.ContractType.u64()),
         ExampleErrors,
       )
-      const Result = StdbTesting.ContractType.result(
-        StdbTesting.ContractType.option(StdbTesting.ContractType.u64()),
-        StdbTesting.ContractType.string(),
+      const Result = StdbInternal.ContractType.result(
+        StdbInternal.ContractType.option(StdbInternal.ContractType.u64()),
+        StdbInternal.ContractType.string(),
       )
 
       const missingProcedureOk = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           Envelope,
           '{"tag":"ok"}',
         ),
       )
       const missingProcedureErr = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           Envelope,
           '{"tag":"err"}',
         ),
       )
       const missingResultOk = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           Result,
           '{"tag":"ok"}',
         ),
@@ -1199,9 +1205,9 @@ describe("transport codec boundary", (it) => {
 
   it.effect("validates exact result schema envelopes", () =>
     Effect.gen(function* () {
-      const Result = StdbTesting.ContractType.result(
-        StdbTesting.ContractType.string(),
-        StdbTesting.ContractType.unit(),
+      const Result = StdbInternal.ContractType.result(
+        StdbInternal.ContractType.string(),
+        StdbInternal.ContractType.unit(),
       )
 
       expect(
@@ -1276,9 +1282,9 @@ describe("transport codec boundary", (it) => {
 
   it.effect("validates exact sum schema envelopes", () =>
     Effect.gen(function* () {
-      const Sum = StdbTesting.ContractType.sum({
-        active: StdbTesting.ContractType.string(),
-        deleted: StdbTesting.ContractType.unit(),
+      const Sum = StdbInternal.ContractType.sum({
+        active: StdbInternal.ContractType.string(),
+        deleted: StdbInternal.ContractType.unit(),
       })
 
       expect(
@@ -1336,13 +1342,13 @@ describe("transport codec boundary", (it) => {
 
   it.effect("validates struct optional and required field wire behavior", () =>
     Effect.gen(function* () {
-      const Row = StdbTesting.ContractType.struct({
-        id: StdbTesting.ContractType.string(),
-        maybeCount: StdbTesting.ContractType.option(
-          StdbTesting.ContractType.u32(),
+      const Row = StdbInternal.ContractType.struct({
+        id: StdbInternal.ContractType.string(),
+        maybeCount: StdbInternal.ContractType.option(
+          StdbInternal.ContractType.u32(),
         ),
-        nickname: StdbTesting.ContractType.optional(
-          StdbTesting.ContractType.string(),
+        nickname: StdbInternal.ContractType.optional(
+          StdbInternal.ContractType.string(),
         ),
       })
 

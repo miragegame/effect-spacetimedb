@@ -28,10 +28,12 @@ const isCompleteNativeHandle = (
 ): handle is NativeSubscriptionHandleLike & SubscriptionHandleLike =>
   handle.isActive !== undefined && handle.unsubscribeThen !== undefined
 
+type AdapterFailure = SubscriptionRejectedError | SubscriptionTransportError
+
 const handleDeactivators = new WeakMap<object, () => void>()
 const handleFailureSignals = new WeakMap<
   object,
-  Deferred.Deferred<never, SubscriptionRejectedError>
+  Deferred.Deferred<never, AdapterFailure>
 >()
 const handleConnectionStates = new WeakMap<object, WsConnectionState>()
 
@@ -92,7 +94,7 @@ const normalizeHandle = (
 export type SubscriptionAdapter<QueryRoot> = {
   readonly subscribe: (
     query: SubscriptionQuerySource<QueryRoot>,
-    onAppliedError?: (error: SubscriptionRejectedError) => void,
+    onAppliedError?: (error: AdapterFailure) => void,
   ) => Effect.Effect<
     SubscriptionHandleLike,
     SubscriptionRejectedError | SubscriptionTransportError,
@@ -128,6 +130,10 @@ export const unsubscribeThen = (
   SubscriptionRejectedError | SubscriptionTransportError
 > =>
   Effect.suspend(() => {
+    const failure = handleFailureSignals.get(handle)
+    if (failure !== undefined && Deferred.isDoneUnsafe(failure)) {
+      return Deferred.await(failure)
+    }
     const connectionState = handleConnectionStates.get(handle)
     if (connectionState === undefined) {
       return unsubscribeThenOnLiveConnection(handle)
@@ -177,10 +183,7 @@ export const fromBuilder = <ErrorContext, QueryRoot>(options: {
   subscribe: (query, onAppliedError) =>
     Effect.gen(function* () {
       let active = true
-      const failureSignal = Deferred.makeUnsafe<
-        never,
-        SubscriptionRejectedError
-      >()
+      const failureSignal = Deferred.makeUnsafe<never, AdapterFailure>()
       yield* Effect.addFinalizer(() =>
         Effect.suspend(() => {
           active = false
@@ -247,42 +250,43 @@ export const fromBuilder = <ErrorContext, QueryRoot>(options: {
                   return
                 }
 
-                const rejection = new SubscriptionRejectedError({
-                  raw: options.messageFromError(context, error),
-                })
-                Deferred.doneUnsafe(failureSignal, Effect.fail(rejection))
+                const failure = Result.match(
+                  Result.try(() => options.messageFromError(context, error)),
+                  {
+                    onSuccess: (raw) => new SubscriptionRejectedError({ raw }),
+                    onFailure: (cause) =>
+                      new SubscriptionTransportError({ cause }),
+                  },
+                )
 
                 if (applied) {
-                  // Ended by the server after it applied (an automatic
-                  // reconnect's replay): no replay waits on it any more.
                   active = false
                   if (handle != null) {
                     handleConnectionStates
                       .get(handle)
                       ?.untrackSubscription(handle)
                   }
-                  onAppliedError?.(rejection)
-                  return
+                  // A throwing sink is a defect of the owner. Its handle's end
+                  // waiter must still settle when the SDK swallows callback errors.
+                  try {
+                    onAppliedError?.(failure)
+                  } catch (cause) {
+                    Deferred.doneUnsafe(failureSignal, Effect.die(cause))
+                    return
+                  }
                 }
-
-                const message = rejection.raw
-                const currentHandle = handle
-                if (currentHandle == null) {
+                Deferred.doneUnsafe(failureSignal, Effect.fail(failure))
+                if (applied) return
+                if (handle == null) {
                   terminalBeforeHandle = true
+                  finish(callbackBeforeHandle("onError"))
+                } else {
+                  finish(
+                    unsubscribeHandle(handle).pipe(
+                      Effect.andThen(Effect.fail(failure)),
+                    ),
+                  )
                 }
-                finish(
-                  currentHandle != null
-                    ? unsubscribeHandle(currentHandle).pipe(
-                        Effect.andThen(
-                          Effect.fail(
-                            new SubscriptionRejectedError({
-                              raw: message,
-                            }),
-                          ),
-                        ),
-                      )
-                    : callbackBeforeHandle("onError"),
-                )
               })
 
             const nativeHandle = builder.subscribe(query)

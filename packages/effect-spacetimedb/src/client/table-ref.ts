@@ -11,7 +11,11 @@ import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import type { StdbDecodeError } from "../decode-error.ts"
 import type { SnapshotSignal } from "./session-stream.ts"
-import type { SubscriptionFailure } from "./ws-subscription.ts"
+import {
+  invalidationRevokesRows,
+  type SubscriptionFailure,
+  SubscriptionInvalidatedError,
+} from "./ws-subscription.ts"
 
 export type TableRefFailure = SubscriptionFailure | StdbDecodeError
 
@@ -48,18 +52,32 @@ const encodeCanonicalJson = Schema.encodeSync(
   Schema.fromJsonString(Schema.Unknown),
 )
 
-const asyncResultFailureFromCause = <A, E>(
+const revokesRows = (cause: Cause.Cause<unknown>): boolean =>
+  cause.reasons.some(
+    (reason) =>
+      Cause.isFailReason(reason) &&
+      SubscriptionInvalidatedError.is(reason.error) &&
+      invalidationRevokesRows(reason.error.kind),
+  )
+
+/**
+ * A failure over `current`. The rows a ref last held stay readable through
+ * `AsyncResult.value` while the failure is showing, so a dropped subscription
+ * does not blank what a client has on screen. An end that leaves the identity
+ * behind those rows unknown takes them with it.
+ */
+export const failureOver = <A, E>(
+  current: AsyncResult.AsyncResult<A, E>,
   cause: Cause.Cause<E>,
 ): AsyncResult.AsyncResult<A, E> =>
-  Option.match(Cause.findErrorOption(cause), {
-    onNone: () => AsyncResult.failure<A, E>(cause),
-    onSome: (error) => AsyncResult.fail<E, A>(error),
-  })
+  revokesRows(cause)
+    ? AsyncResult.failure(cause)
+    : AsyncResult.failureWithPrevious(cause, { previous: Option.some(current) })
 
-const publishFailureFromCause = <A, E>(
+const publishFailure = <A, E>(
   ref: SubscriptionRef.SubscriptionRef<AsyncResult.AsyncResult<A, E>>,
   cause: Cause.Cause<E>,
-) => SubscriptionRef.set(ref, asyncResultFailureFromCause<A, E>(cause))
+) => SubscriptionRef.update(ref, (current) => failureOver(current, cause))
 
 export const subscribeSnapshotRef = <Snapshot, E>(options: {
   readonly readSnapshot: Effect.Effect<Snapshot, E>
@@ -76,8 +94,7 @@ export const subscribeSnapshotRef = <Snapshot, E>(options: {
     >(AsyncResult.initial<Snapshot, E>(true))
     const publishSnapshot = options.readSnapshot.pipe(
       Effect.matchEffect({
-        onFailure: (error) =>
-          SubscriptionRef.set(ref, AsyncResult.fail<E, Snapshot>(error)),
+        onFailure: (error) => publishFailure(ref, Cause.fail(error)),
         onSuccess: (snapshot) =>
           SubscriptionRef.set(ref, AsyncResult.success<Snapshot, E>(snapshot)),
       }),
@@ -92,7 +109,7 @@ export const subscribeSnapshotRef = <Snapshot, E>(options: {
         return applied ? publishSnapshot : Effect.void
       }),
       Effect.matchCauseEffect({
-        onFailure: (cause) => publishFailureFromCause(ref, cause),
+        onFailure: (cause) => publishFailure(ref, cause),
         onSuccess: () => Effect.void,
       }),
       Effect.forkScoped,
@@ -126,7 +143,7 @@ export const subscribeRowRef = <Row, E>(options: {
     yield* SubscriptionRef.changes(table).pipe(
       Stream.runForEach((result) => SubscriptionRef.set(ref, select(result))),
       Effect.matchCauseEffect({
-        onFailure: (cause) => publishFailureFromCause(ref, cause),
+        onFailure: (cause) => publishFailure(ref, cause),
         onSuccess: () => Effect.void,
       }),
       Effect.forkScoped,

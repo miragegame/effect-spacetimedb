@@ -11,7 +11,7 @@ sidebar:
 Reducers run inside the host reducer transaction and may yield `Db` directly.
 Procedures and HTTP handlers open explicit transactions with `Tx` or `HttpTx`.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -22,23 +22,23 @@ const counter = Stdb.table("counter", {
   },
 })
 
-const Counters = Stdb.StdbGroup.make("Counters")
-  .add(Stdb.StdbFn.reducer("counter_inc", { params: Stdb.struct({ id: Stdb.string() }) }))
-  .add(Stdb.StdbFn.procedure("counter_read", {
+const Counters = Stdb.Group.make("Counters")
+  .add(Stdb.Fn.reducer("counterInc", { params: Stdb.struct({ id: Stdb.string() }) }))
+  .add(Stdb.Fn.procedure("counterRead", {
     params: Stdb.struct({ id: Stdb.string() }),
     returns: Stdb.option(counter.row),
   }))
 
-const Module = Stdb.StdbModule.make("app").addTables(counter).add(Counters)
+const Module = Stdb.Module.make("app").addTables(counter).add(Counters)
 const { Db, Tx } = Module
 
-const CountersLive = Stdb.StdbBuilder.group(Module, "Counters", {
-  counter_inc: Effect.fn(function* ({ id }) {
+const CountersLive = Stdb.Builder.group(Module, "Counters", {
+  counterInc: Effect.fn(function* ({ id }) {
     const db = yield* Db
     const current = yield* db.counter.id.find(id)
-    yield* db.counter.id.replace({ id, value: (current?.value ?? 0) + 1 })
+    yield* db.counter.id.update({ id, value: (current?.value ?? 0) + 1 })
   }),
-  counter_read: Effect.fn(function* ({ id }) {
+  counterRead: Effect.fn(function* ({ id }) {
     const tx = yield* Tx
     return yield* tx.run(
       Effect.gen(function* () {
@@ -63,7 +63,7 @@ transaction. Native host abort outcomes surface as typed errors such as
 
 HTTP handlers use `HttpTx` for the same explicit transaction boundary:
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
@@ -75,24 +75,24 @@ const counter = Stdb.table("counter", {
   },
 })
 
-const Routes = Stdb.StdbHttpGroup.make("Routes").add(
-  Stdb.StdbHttp.post("counter_inc", "/counter/inc", {
+const Routes = Stdb.HttpGroup.make("Routes").add(
+  Stdb.Http.post("counterInc", "/counter/inc", {
     request: Schema.Struct({ id: Schema.String }),
     response: Schema.Void,
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").addTables(counter).add(Routes)
+const Module = Stdb.Module.make("app").addTables(counter).add(Routes)
 const { Db, HttpTx } = Module
 
-const RoutesLive = Stdb.StdbBuilder.group(Module, "Routes", {
-  counter_inc: Effect.fn(function* ({ id }) {
+const RoutesLive = Stdb.Builder.group(Module, "Routes", {
+  counterInc: Effect.fn(function* ({ id }) {
     const tx = yield* HttpTx
     yield* tx.run(
       Effect.gen(function* () {
         const db = yield* Db
         const current = yield* db.counter.id.find(id)
-        yield* db.counter.id.replace({
+        yield* db.counter.id.update({
           id,
           value: (current?.value ?? 0) + 1,
         })

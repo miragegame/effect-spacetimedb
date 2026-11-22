@@ -2,11 +2,11 @@ import * as EffectVitest from "@effect/vitest"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import { ContractError as ErrorCodec } from "effect-spacetimedb/testing"
+import { ContractError as ErrorCodec } from "effect-spacetimedb/testing/internal"
 
 const { describe, expect, live } = EffectVitest
 
-import { ClientWs } from "effect-spacetimedb/testing"
+import { ClientWs } from "effect-spacetimedb/testing/internal"
 import {
   decodeThingId,
   decodeUserId,
@@ -20,6 +20,7 @@ import {
 } from "./helpers/example-live"
 import {
   callLiveProcedure,
+  callLiveProcedureResult,
   callLiveReducer,
   captureLiveEventContext,
   captureLiveTransportValue,
@@ -30,14 +31,6 @@ import {
   provideLiveTest,
 } from "./helpers/live-harness"
 import { waitForPredicate } from "./helpers/wait-for-predicate"
-
-type RawProcedureResult<A> =
-  | {
-      readonly ok: A
-    }
-  | {
-      readonly err: string
-    }
 
 type ThingRow = {
   readonly id: string
@@ -142,14 +135,12 @@ describe("effect-spacetimedb live reducer/procedure", () => {
           yield* session.reducers.userRequire({
             userId,
           })
-          const user = yield* callLiveProcedure<
-            RawProcedureResult<
-              | {
-                  readonly id: string
-                  readonly name: string
-                }
-              | undefined
-            >
+          const user = yield* callLiveProcedureResult<
+            | {
+                readonly id: string
+                readonly name: string
+              }
+            | undefined
           >(connection, wireFunction("userGet"), {
             userId,
           })
@@ -228,14 +219,12 @@ describe("effect-spacetimedb live reducer/procedure", () => {
               }),
             )
           }
-          const missing = yield* callLiveProcedure<
-            RawProcedureResult<
-              | {
-                  readonly id: string
-                  readonly name: string
-                }
-              | undefined
-            >
+          const missing = yield* callLiveProcedureResult<
+            | {
+                readonly id: string
+                readonly name: string
+              }
+            | undefined
           >(connection, wireFunction("userGet"), {
             userId: decodeUserId("missing-user"),
           })
@@ -410,7 +399,7 @@ describe("effect-spacetimedb live reducer/procedure", () => {
           )
           expect(reducerOkEmpty).toBeUndefined()
 
-          const procedureOk = yield* callLiveProcedure<unknown>(
+          const procedureOk = yield* callLiveProcedureResult<unknown>(
             connection,
             wireFunction("thingOutcome"),
             {
@@ -419,12 +408,14 @@ describe("effect-spacetimedb live reducer/procedure", () => {
           )
           expect(procedureOk).toEqual({
             ok: {
-              id: subscribeThingId,
-              label: "Subscribe Fixture",
-              count: 1n,
+              ok: {
+                id: subscribeThingId,
+                label: "Subscribe Fixture",
+                count: 1n,
+              },
             },
           })
-          const procedureErr = yield* callLiveProcedure<unknown>(
+          const procedureErr = yield* callLiveProcedureResult<unknown>(
             connection,
             wireFunction("thingOutcome"),
             {
@@ -432,7 +423,9 @@ describe("effect-spacetimedb live reducer/procedure", () => {
             },
           )
           expect(procedureErr).toEqual({
-            err: "thing missing",
+            ok: {
+              err: "thing missing",
+            },
           })
 
           yield* session.reducers

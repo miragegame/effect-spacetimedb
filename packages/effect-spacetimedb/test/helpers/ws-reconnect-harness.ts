@@ -3,7 +3,7 @@ import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { Identity, UnknownCallResultError } from "spacetimedb"
 import { FullModule, UserId, UserName } from "../fixtures/full-module"
 import {
@@ -18,23 +18,23 @@ import {
  * the SDK does.
  */
 
-export const plan = StdbTesting.makeModulePlan(FullModule)
-export const connectTimeoutMillis = 1_000
-export const automaticReconnect = { delayMillisMin: 500, delayMillisMax: 1_000 }
+export const plan = StdbInternal.makeModulePlan(FullModule)
+export const connectDurationMax = 1_000
+export const automaticReconnect = { delayMin: 500, delayMax: 1_000 }
 export const upsert = {
   userId: UserId.make("user-1"),
   name: UserName.make("Ada"),
 }
 
-type FullBuilder = StdbTesting.GeneratedWsBuilderLike<
+type FullBuilder = StdbInternal.GeneratedWsBuilderLike<
   typeof FullModule,
   unknown
 >
-type FullConnection = StdbTesting.ManagedWsConnection<
+type FullConnection = StdbInternal.ManagedWsConnection<
   typeof FullModule,
   unknown
 >
-type UserRow = StdbTesting.WsTableRow<typeof FullModule.tables.user>
+type UserRow = StdbInternal.WsTableRow<typeof FullModule.tables.user>
 type InsertCallback = (context: unknown, row: UserRow) => void
 
 const uri = "ws://localhost:3000"
@@ -86,6 +86,10 @@ export const makeReconnectHarness = Effect.fn(function* (
     readonly omit?: ReadonlyArray<
       "withAutomaticReconnect" | "withTokenProvider" | "onAutomaticReconnect"
     >
+    /** The socket error each numbered build fails to connect with. */
+    readonly connectFailures?: ReadonlyMap<number, Error>
+    /** The identity each numbered build connects as; by default they share one. */
+    readonly identityOf?: (build: number) => Identity
   } = {},
 ) {
   const subscriptions = yield* Queue.unbounded<PendingSubscription>()
@@ -96,6 +100,7 @@ export const makeReconnectHarness = Effect.fn(function* (
   const reconnectOptions: Array<unknown> = []
   const tokenProviders: Array<() => Promise<string>> = []
   const omitted = new Set(options.omit ?? [])
+  const identityOf = options.identityOf ?? (() => Identity.zero())
 
   const builder = (): FullBuilder => {
     let token: string | undefined
@@ -169,15 +174,15 @@ export const makeReconnectHarness = Effect.fn(function* (
           },
           id: { find: (_id: UserRow["id"]) => null },
         }
-        const subscriptionBuilder = (): StdbTesting.SubscriptionBuilderLike<
+        const subscriptionBuilder = (): StdbInternal.SubscriptionBuilderLike<
           unknown,
-          StdbTesting.ClientQueryRoot<typeof FullModule>
+          StdbInternal.ClientQueryRoot<typeof FullModule>
         > => {
           let onApplied: (() => void) | undefined
           let onError: ((context: unknown, error?: Error) => void) | undefined
-          const self: StdbTesting.SubscriptionBuilderLike<
+          const self: StdbInternal.SubscriptionBuilderLike<
             unknown,
-            StdbTesting.ClientQueryRoot<typeof FullModule>
+            StdbInternal.ClientQueryRoot<typeof FullModule>
           > = {
             onApplied: (callback) => {
               onApplied = callback
@@ -204,6 +209,18 @@ export const makeReconnectHarness = Effect.fn(function* (
           }
           return self
         }
+        const answerOrHold = <A>(answer: A): Promise<A> => {
+          if (rejection !== undefined) {
+            return Promise.reject(rejection)
+          }
+          if (!hold) {
+            return Promise.resolve(answer)
+          }
+          const pending = Promise.withResolvers<A>()
+          inFlight.add(pending.reject)
+          Queue.offerUnsafe(heldCalls, build)
+          return pending.promise
+        }
         const connection: FullConnection = {
           ...makeFullModuleWsConnection({
             db: { user: userRelation },
@@ -217,18 +234,9 @@ export const makeReconnectHarness = Effect.fn(function* (
           },
           callReducerWithParams: () => {
             reducerCalls += 1
-            if (rejection !== undefined) {
-              return Promise.reject(rejection)
-            }
-            if (!hold) {
-              return Promise.resolve()
-            }
-            const pending = Promise.withResolvers<void>()
-            inFlight.add(pending.reject)
-            Queue.offerUnsafe(heldCalls, build)
-            return pending.promise
+            return answerOrHold<void>(undefined)
           },
-          callProcedureWithParams: () => Promise.resolve(undefined),
+          callProcedureWithParams: () => answerOrHold(undefined),
           disconnect: () => {
             disconnects += 1
           },
@@ -263,7 +271,12 @@ export const makeReconnectHarness = Effect.fn(function* (
         }
         built.push(record)
         Queue.offerUnsafe(builds, record)
-        onConnect?.(connection, Identity.zero(), liveToken)
+        const connectFailure = options.connectFailures?.get(build)
+        if (connectFailure === undefined) {
+          onConnect?.(connection, identityOf(build), liveToken)
+        } else {
+          onConnectError?.(connection, connectFailure)
+        }
         return connection
       },
     }
@@ -313,7 +326,7 @@ export const makeReconnectHarness = Effect.fn(function* (
     reconnect: (build: number) =>
       at(build).onAutomaticReconnect?.(
         at(build).connection,
-        Identity.zero(),
+        identityOf(build),
         at(build).connection.token ?? "",
       ),
     nextBuild: Queue.take(builds),
@@ -326,22 +339,22 @@ export const makeReconnectHarness = Effect.fn(function* (
 export const reconnectConfig = (
   harness: { readonly builder: () => FullBuilder },
   overrides: Partial<
-    StdbTesting.WsBuilderConfig<typeof FullModule, unknown>
+    StdbInternal.WsBuilderConfig<typeof FullModule, unknown>
   > = {},
-): StdbTesting.WsBuilderConfig<typeof FullModule, unknown> => ({
+): StdbInternal.WsBuilderConfig<typeof FullModule, unknown> => ({
   builder: harness.builder,
   uri,
   databaseName,
-  connectTimeoutMillis,
+  connectDurationMax,
   automaticReconnect,
   ...overrides,
 })
 
 export const awaitPhase = <Failure>(
   phase: SubscriptionRef.SubscriptionRef<
-    StdbTesting.WsSessionSupervisorPhase<Failure>
+    StdbInternal.WsSessionSupervisorPhase<Failure>
   >,
-  predicate: (value: StdbTesting.WsSessionSupervisorPhase<Failure>) => boolean,
+  predicate: (value: StdbInternal.WsSessionSupervisorPhase<Failure>) => boolean,
 ) =>
   SubscriptionRef.changes(phase).pipe(
     Stream.filter(predicate),

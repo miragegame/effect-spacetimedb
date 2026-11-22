@@ -29,13 +29,17 @@ export class RemoteRejectedError extends Data.TaggedError(
   static is = hasErrorTypeId<RemoteRejectedError>(RemoteRejectedErrorTypeId)
 }
 
-const RemoteRejectedBodyTypeId = errorTypeId("RemoteRejectedBody")
-export class RemoteRejectedBody extends Data.TaggedError("RemoteRejectedBody")<{
+const RemoteRejectedBodyErrorTypeId = errorTypeId("RemoteRejectedBodyError")
+export class RemoteRejectedBodyError extends Data.TaggedError(
+  "RemoteRejectedBodyError",
+)<{
   readonly raw: string
   readonly status: number
 }> {
-  readonly [RemoteRejectedBodyTypeId] = RemoteRejectedBodyTypeId
-  static is = hasErrorTypeId<RemoteRejectedBody>(RemoteRejectedBodyTypeId)
+  readonly [RemoteRejectedBodyErrorTypeId] = RemoteRejectedBodyErrorTypeId
+  static is = hasErrorTypeId<RemoteRejectedBodyError>(
+    RemoteRejectedBodyErrorTypeId,
+  )
 }
 
 const TransportErrorTypeId = errorTypeId("TransportError")
@@ -49,9 +53,10 @@ export class TransportError extends Data.TaggedError("TransportError")<{
 const ConnectionLostErrorTypeId = errorTypeId("ConnectionLostError")
 /**
  * The call's outcome is unknown. Its connection was lost while the call was
- * in flight (or the session had already ended), so the reducer or procedure
- * may have committed on the server. Reconcile from subscribed state before
- * retrying anything that is not idempotent.
+ * in flight, the session had already ended, or the call outlived
+ * `callDurationMax`, which ends the connection, so the reducer or procedure may
+ * have committed on the server. Reconcile from subscribed state before retrying
+ * anything that is not idempotent.
  */
 export class ConnectionLostError extends Data.TaggedError(
   "ConnectionLostError",
@@ -104,46 +109,54 @@ export class WsRpcInvokeError extends Data.TaggedError("WsRpcInvokeError")<{
   static is = hasErrorTypeId<WsRpcInvokeError>(WsRpcInvokeErrorTypeId)
 }
 
+/** What a call can fail with on any transport. */
 export type CallFailure<E> =
   | E
-  | ConnectionLostError
-  | CallNotSentError
-  | ConnectionIdentityChangedError
   | RemoteRejectedError
   | TransportError
   | StdbDecodeError
 
+/** `CallFailure` of a `.raw` call, with domain errors kept in their wrapper. */
 export type RawCallFailure<E> =
   | DomainCallError<E>
-  | ConnectionLostError
-  | CallNotSentError
-  | ConnectionIdentityChangedError
   | RemoteRejectedError
   | TransportError
   | StdbDecodeError
 
 /**
- * The connection-level call failures: the call was not sent, its outcome is
- * unknown, or the session's identity changed. They pass through domain-error
+ * What only a WebSocket connection can do to a call: not send it, lose its
+ * outcome, or end because the session's identity changed. An HTTP call has no
+ * connection to outlive, so these never reach it.
+ */
+export type WsConnectionFailure =
+  | ConnectionLostError
+  | CallNotSentError
+  | ConnectionIdentityChangedError
+
+/** What a call on a WebSocket session can fail with. */
+export type WsCallFailure<E> = CallFailure<E> | WsConnectionFailure
+
+/** `WsCallFailure` of a `.raw` call, with domain errors kept in their wrapper. */
+export type RawWsCallFailure<E> = RawCallFailure<E> | WsConnectionFailure
+
+/**
+ * The connection-level call failures, which pass through domain-error
  * classification untouched.
  */
 export const isConnectionCallFailure = (
   cause: unknown,
-): cause is
-  | ConnectionLostError
-  | CallNotSentError
-  | ConnectionIdentityChangedError =>
+): cause is WsConnectionFailure =>
   ConnectionLostError.is(cause) ||
   CallNotSentError.is(cause) ||
   ConnectionIdentityChangedError.is(cause)
 
 export { StdbDecodeError }
 
-type TaggedDomainError = {
+export type TaggedDomainError = {
   readonly _tag: string
 }
 
-type DomainTagHandlers<
+export type DomainTagHandlers<
   Domain extends TaggedDomainError,
   Handlers extends object,
 > = {
@@ -154,10 +167,10 @@ type DomainTagHandlers<
     : never
 }
 
-type DefinitionDomain<Definition extends ErrorCodec.AnyErrorDefinition> =
+export type DefinitionDomain<Definition extends ErrorCodec.AnyErrorDefinition> =
   ErrorCodec.ErrorInstances<Definition> & TaggedDomainError
 
-type HandlerSuccess<Handlers> = {
+export type HandlerSuccess<Handlers> = {
   readonly [Key in keyof Handlers]: Handlers[Key] extends (
     ...args: ReadonlyArray<never>
   ) => Effect.Effect<infer A, unknown, unknown>
@@ -165,7 +178,7 @@ type HandlerSuccess<Handlers> = {
     : never
 }[keyof Handlers]
 
-type HandlerError<Handlers> = {
+export type HandlerError<Handlers> = {
   readonly [Key in keyof Handlers]: Handlers[Key] extends (
     ...args: ReadonlyArray<never>
   ) => Effect.Effect<unknown, infer E, unknown>
@@ -173,7 +186,7 @@ type HandlerError<Handlers> = {
     : never
 }[keyof Handlers]
 
-type HandlerContext<Handlers> = {
+export type HandlerContext<Handlers> = {
   readonly [Key in keyof Handlers]: Handlers[Key] extends (
     ...args: ReadonlyArray<never>
   ) => Effect.Effect<unknown, unknown, infer R>
@@ -181,17 +194,17 @@ type HandlerContext<Handlers> = {
     : never
 }[keyof Handlers]
 
-type HandledDomain<Domain extends TaggedDomainError, Handlers> = Extract<
+export type HandledDomain<Domain extends TaggedDomainError, Handlers> = Extract<
   Domain,
   { readonly _tag: Extract<keyof Handlers, string> }
 >
 
-type UnhandledDomain<Domain extends TaggedDomainError, Handlers> = Exclude<
-  Domain,
-  HandledDomain<Domain, Handlers>
->
+export type UnhandledDomain<
+  Domain extends TaggedDomainError,
+  Handlers,
+> = Exclude<Domain, HandledDomain<Domain, Handlers>>
 
-type UnhandledDomainError<Domain extends TaggedDomainError, Handlers> = [
+export type UnhandledDomainError<Domain extends TaggedDomainError, Handlers> = [
   UnhandledDomain<Domain, Handlers>,
 ] extends [never]
   ? never
@@ -287,7 +300,7 @@ export const remoteFailureMessageFromUnknown = (
   if (typeof cause === "string") {
     return cause
   }
-  if (RemoteRejectedBody.is(cause)) {
+  if (RemoteRejectedBodyError.is(cause)) {
     return cause.raw
   }
   if (cause instanceof SenderError || cause instanceof InternalError) {
@@ -406,14 +419,28 @@ export const remoteRejectedFromRaw = (
       })
 }
 
-export const classifyRawCallFailure = <E>(cause: unknown): CallFailure<E> =>
+/**
+ * A procedure's undeclared failure arrives in a 200 response's `err` arm, over
+ * HTTP and WebSocket alike. It reports the status it would have had as a host
+ * error, so that code reading `status` needs no second case: 400 for the
+ * caller's bad arguments, 500 for a failure of the module.
+ */
+export const remoteRejectedFromUndeclared = (
+  failure: ErrorCodec.UndeclaredFailure,
+): RemoteRejectedError =>
+  new RemoteRejectedError({
+    raw: failure.message,
+    status: failure.reason === "BadArguments" ? 400 : 500,
+  })
+
+export const classifyRawCallFailure = <E>(cause: unknown): WsCallFailure<E> =>
   isConnectionCallFailure(cause)
-    ? (cause as CallFailure<E>)
+    ? cause
     : WsRpcInvokeError.is(cause)
       ? classifyRawCallFailure(cause.cause)
-      : RemoteRejectedBody.is(cause) || typeof cause === "string"
-        ? (remoteRejectedFromRaw(
-            RemoteRejectedBody.is(cause) ? cause.raw : cause,
-            RemoteRejectedBody.is(cause) ? cause.status : undefined,
-          ) as CallFailure<E>)
-        : (new TransportError({ cause }) as CallFailure<E>)
+      : RemoteRejectedBodyError.is(cause) || typeof cause === "string"
+        ? remoteRejectedFromRaw(
+            RemoteRejectedBodyError.is(cause) ? cause.raw : cause,
+            RemoteRejectedBodyError.is(cause) ? cause.status : undefined,
+          )
+        : new TransportError({ cause })

@@ -2,7 +2,7 @@ import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { Identity, Timestamp } from "spacetimedb"
 import { generatedArtifactShapeError } from "../../src/client/generated-artifact-shape.ts"
 import { transform } from "../helpers/schema-transform.ts"
@@ -31,7 +31,7 @@ const indexedRow = Stdb.table("indexedRow", {
 })
 
 const IndexedModule =
-  Stdb.StdbModule.make("indexed_client").addTables(indexedRow).spec
+  Stdb.Module.make("indexed_client").addTables(indexedRow).spec
 
 const nativeValueRow = Stdb.table("nativeValueRow", {
   public: true,
@@ -53,7 +53,7 @@ const nativeValueRow = Stdb.table("nativeValueRow", {
   ],
 })
 
-const NativeValueModule = Stdb.StdbModule.make("native_value_client").addTables(
+const NativeValueModule = Stdb.Module.make("native_value_client").addTables(
   nativeValueRow,
 ).spec
 
@@ -64,7 +64,7 @@ const hashIndexedRow = Stdb.table("hashIndexedRow", {
   },
   indexes: [Stdb.index("byIdHash", ["id"], { algorithm: "hash" })],
 })
-const HashIndexedModule = Stdb.StdbModule.make("hash_indexed_client").addTables(
+const HashIndexedModule = Stdb.Module.make("hash_indexed_client").addTables(
   hashIndexedRow,
 ).spec
 
@@ -75,9 +75,9 @@ const directIndexedRow = Stdb.table("directIndexedRow", {
   },
   indexes: [Stdb.index("byIdDirect", ["id"], { algorithm: "direct" })],
 })
-const DirectIndexedModule = Stdb.StdbModule.make(
-  "direct_indexed_client",
-).addTables(directIndexedRow).spec
+const DirectIndexedModule = Stdb.Module.make("direct_indexed_client").addTables(
+  directIndexedRow,
+).spec
 
 const reorderedUniqueRow = Stdb.table("reorderedUniqueRow", {
   public: true,
@@ -93,11 +93,11 @@ const reorderedUniqueRow = Stdb.table("reorderedUniqueRow", {
     }),
   ],
 })
-const ReorderedUniqueModule = Stdb.StdbModule.make(
+const ReorderedUniqueModule = Stdb.Module.make(
   "reordered_unique_client",
 ).addTables(reorderedUniqueRow).spec
 
-type RawRow = StdbTesting.WsTableRow<typeof indexedRow>
+type RawRow = StdbInternal.WsTableRow<typeof indexedRow>
 
 class TestRange<T> {
   constructor(
@@ -161,7 +161,7 @@ describe("client indexed cache", () => {
             throw new Error("subscription is not used")
           },
         }
-        const client = StdbTesting.ClientWs.make({
+        const client = StdbInternal.ClientWs.make({
           module: IndexedModule,
           connection,
         })
@@ -240,7 +240,7 @@ describe("client indexed cache", () => {
             },
           },
         }
-        const client = StdbTesting.ClientWs.make({
+        const client = StdbInternal.ClientWs.make({
           module: NativeValueModule,
           connection: {
             isActive: true,
@@ -290,7 +290,7 @@ describe("client indexed cache", () => {
       count: () => 0n,
     }
     const error = generatedArtifactShapeError(
-      StdbTesting.makeModulePlan(HashIndexedModule),
+      StdbInternal.makeModulePlan(HashIndexedModule),
       {
         db: { hashIndexedRow: relation },
         disconnect: () => undefined,
@@ -300,7 +300,7 @@ describe("client indexed cache", () => {
       },
     )
 
-    expect(StdbTesting.GeneratedArtifactShapeError.is(error)).toBe(true)
+    expect(StdbInternal.GeneratedArtifactShapeError.is(error)).toBe(true)
     expect(error?.unsupportedIndexes).toEqual([
       "hashIndexedRow.byIdHash (hash)",
     ])
@@ -328,7 +328,7 @@ describe("client indexed cache", () => {
       },
     })
     const error = generatedArtifactShapeError(
-      StdbTesting.makeModulePlan(DirectIndexedModule),
+      StdbInternal.makeModulePlan(DirectIndexedModule),
       {
         db,
         disconnect: () => undefined,
@@ -338,7 +338,7 @@ describe("client indexed cache", () => {
       },
     )
 
-    expect(StdbTesting.GeneratedArtifactShapeError.is(error)).toBe(true)
+    expect(StdbInternal.GeneratedArtifactShapeError.is(error)).toBe(true)
     expect(error?.unsupportedIndexes).toEqual([
       "directIndexedRow.byIdDirect (direct)",
     ])
@@ -374,7 +374,7 @@ describe("client indexed cache", () => {
             throw new Error("subscription is not used")
           },
         }
-        const client = StdbTesting.ClientWs.make({
+        const client = StdbInternal.ClientWs.make({
           module: ReorderedUniqueModule,
           connection,
         })
@@ -388,7 +388,7 @@ describe("client indexed cache", () => {
         expect(inputs).toEqual([["row-a", "tenant-a"]])
         expect(
           generatedArtifactShapeError(
-            StdbTesting.makeModulePlan(ReorderedUniqueModule),
+            StdbInternal.makeModulePlan(ReorderedUniqueModule),
             {
               ...connection,
               disconnect: () => undefined,

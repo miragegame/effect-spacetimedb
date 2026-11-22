@@ -8,7 +8,7 @@ import { Timestamp } from "spacetimedb"
 
 const { expect } = EffectVitest
 
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { FullModule, UserId, UserName } from "../fixtures/full-module"
 import { TreeType } from "../fixtures/recursive-types"
 import { TestLayer } from "../helpers/test-layer"
@@ -42,72 +42,72 @@ describe("effect-spacetimedb value representations", (it) => {
   it.effect("pins host JS shapes per descriptor kind", () =>
     Effect.gen(function* () {
       const HostName = Schema.String.pipe(Schema.brand("HostName"))
-      const StringType = StdbTesting.ContractType.string(HostName)
-      const StatusType = StdbTesting.ContractType.literal("joined", "left")
-      const CountFromString = StdbTesting.ContractType.custom(
+      const StringType = StdbInternal.ContractType.string(HostName)
+      const StatusType = StdbInternal.ContractType.literal("joined", "left")
+      const CountFromString = StdbInternal.ContractType.custom(
         Schema.FiniteFromString,
         {
-          type: StdbTesting.ContractType.string(),
+          type: StdbInternal.ContractType.string(),
         },
       )
-      const LazyStruct = StdbTesting.ContractType.lazy(() =>
-        StdbTesting.ContractType.struct({
-          label: StdbTesting.ContractType.string(),
+      const LazyStruct = StdbInternal.ContractType.lazy(() =>
+        StdbInternal.ContractType.struct({
+          label: StdbInternal.ContractType.string(),
         }),
       )
-      const OptionalStruct = StdbTesting.ContractType.struct({
+      const OptionalStruct = StdbInternal.ContractType.struct({
         id: StringType,
-        nickname: StdbTesting.ContractType.optional(
-          StdbTesting.ContractType.string(),
+        nickname: StdbInternal.ContractType.optional(
+          StdbInternal.ContractType.string(),
         ),
-        note: StdbTesting.ContractType.option(
-          StdbTesting.ContractType.string(),
+        note: StdbInternal.ContractType.option(
+          StdbInternal.ContractType.string(),
         ),
       })
-      const ResultType = StdbTesting.ContractType.result(
-        StdbTesting.ContractType.string(),
-        StdbTesting.ContractType.string(),
+      const ResultType = StdbInternal.ContractType.result(
+        StdbInternal.ContractType.string(),
+        StdbInternal.ContractType.string(),
       )
-      const SumType = StdbTesting.ContractType.sum({
-        Active: StdbTesting.ContractType.string(),
-        Deleted: StdbTesting.ContractType.unit(),
+      const SumType = StdbInternal.ContractType.sum({
+        Active: StdbInternal.ContractType.string(),
+        Deleted: StdbInternal.ContractType.unit(),
       })
 
-      expect(StdbTesting.encodeHostValue(StringType, "Ada")).toBe("Ada")
-      expect(StdbTesting.encodeHostValue(StatusType, "joined")).toEqual({
+      expect(StdbInternal.encodeHostValue(StringType, "Ada")).toBe("Ada")
+      expect(StdbInternal.encodeHostValue(StatusType, "joined")).toEqual({
         tag: "joined",
       })
-      expect(StdbTesting.encodeHostValue(CountFromString, 42)).toBe("42")
+      expect(StdbInternal.encodeHostValue(CountFromString, 42)).toBe("42")
       expect(
-        StdbTesting.encodeHostValue(
-          StdbTesting.ContractType.array(StringType, testArrayLength),
+        StdbInternal.encodeHostValue(
+          StdbInternal.ContractType.array(StringType, testArrayLength),
           ["Ada", "Grace"],
         ),
       ).toEqual(["Ada", "Grace"])
       expect(
-        StdbTesting.encodeHostValue(
-          StdbTesting.ContractType.option(StringType),
+        StdbInternal.encodeHostValue(
+          StdbInternal.ContractType.option(StringType),
           undefined,
         ),
       ).toBeUndefined()
       expect(
-        StdbTesting.encodeHostValue(
-          StdbTesting.ContractType.option(StringType),
+        StdbInternal.encodeHostValue(
+          StdbInternal.ContractType.option(StringType),
           "Ada",
         ),
       ).toBe("Ada")
       expect(
-        StdbTesting.encodeHostValue(LazyStruct, { label: "nested" }),
+        StdbInternal.encodeHostValue(LazyStruct, { label: "nested" }),
       ).toEqual({ label: "nested" })
 
-      const absentOptional = StdbTesting.encodeHostValue(OptionalStruct, {
+      const absentOptional = StdbInternal.encodeHostValue(OptionalStruct, {
         id: "user-1",
       })
       expect(absentOptional).toEqual({ id: "user-1" })
       expect(Object.hasOwn(absentOptional as object, "nickname")).toBe(false)
       expect(Object.hasOwn(absentOptional as object, "note")).toBe(false)
 
-      const presentUndefined = StdbTesting.encodeHostValue(OptionalStruct, {
+      const presentUndefined = StdbInternal.encodeHostValue(OptionalStruct, {
         id: "user-1",
         nickname: undefined,
         note: undefined,
@@ -119,12 +119,12 @@ describe("effect-spacetimedb value representations", (it) => {
       })
 
       expect(
-        StdbTesting.encodeHostValue(ResultType, { ok: "accepted" }),
+        StdbInternal.encodeHostValue(ResultType, { ok: "accepted" }),
       ).toEqual({
         ok: "accepted",
       })
       expect(
-        StdbTesting.encodeHostValue(ResultType, {
+        StdbInternal.encodeHostValue(ResultType, {
           tag: "ok",
           value: "accepted",
         }),
@@ -132,7 +132,7 @@ describe("effect-spacetimedb value representations", (it) => {
         ok: "accepted",
       })
       expect(
-        StdbTesting.encodeHostValue(ResultType, {
+        StdbInternal.encodeHostValue(ResultType, {
           tag: "err",
           value: "rejected",
         }),
@@ -140,13 +140,13 @@ describe("effect-spacetimedb value representations", (it) => {
         err: "rejected",
       })
       expect(
-        StdbTesting.encodeHostValue(SumType, SumType.make.Active("on")),
+        StdbInternal.encodeHostValue(SumType, SumType.make.Active("on")),
       ).toEqual({
         tag: "Active",
         value: "on",
       })
       expect(
-        StdbTesting.encodeHostValue(SumType, SumType.make.Deleted),
+        StdbInternal.encodeHostValue(SumType, SumType.make.Deleted),
       ).toEqual({
         tag: "Deleted",
       })
@@ -157,27 +157,27 @@ describe("effect-spacetimedb value representations", (it) => {
     "round-trips host JS forms through the DB codec where that representation is accepted",
     () =>
       Effect.gen(function* () {
-        const HostName = StdbTesting.ContractType.string(UserName)
-        const RequiredStruct = StdbTesting.ContractType.struct({
-          id: StdbTesting.ContractType.string(UserId),
-          count: StdbTesting.ContractType.u32(),
+        const HostName = StdbInternal.ContractType.string(UserName)
+        const RequiredStruct = StdbInternal.ContractType.struct({
+          id: StdbInternal.ContractType.string(UserId),
+          count: StdbInternal.ContractType.u32(),
         })
-        const OptionalStruct = StdbTesting.ContractType.struct({
-          id: StdbTesting.ContractType.string(UserId),
-          nickname: StdbTesting.ContractType.optional(HostName),
+        const OptionalStruct = StdbInternal.ContractType.struct({
+          id: StdbInternal.ContractType.string(UserId),
+          nickname: StdbInternal.ContractType.optional(HostName),
         })
-        const SumType = StdbTesting.ContractType.sum({
+        const SumType = StdbInternal.ContractType.sum({
           Active: HostName,
-          Deleted: StdbTesting.ContractType.unit(),
+          Deleted: StdbInternal.ContractType.unit(),
         })
-        const TimestampType = StdbTesting.ContractType.timestamp()
+        const TimestampType = StdbInternal.ContractType.timestamp()
         const fullModuleUser = FullModule.tables.user.row
         const adaName = Schema.decodeUnknownSync(UserName)("Ada")
         const graceName = Schema.decodeUnknownSync(UserName)("Grace")
 
         const corpus: ReadonlyArray<{
           readonly name: string
-          readonly type: StdbTesting.ContractType.AnyValueType
+          readonly type: StdbInternal.ContractType.AnyValueType
           readonly value: unknown
           readonly expected?: unknown
         }> = [
@@ -218,17 +218,17 @@ describe("effect-spacetimedb value representations", (it) => {
           },
           {
             name: "some option",
-            type: StdbTesting.ContractType.option(HostName),
+            type: StdbInternal.ContractType.option(HostName),
             value: adaName,
           },
           {
             name: "none option",
-            type: StdbTesting.ContractType.option(HostName),
+            type: StdbInternal.ContractType.option(HostName),
             value: undefined,
           },
           {
             name: "array",
-            type: StdbTesting.ContractType.array(HostName, testArrayLength),
+            type: StdbInternal.ContractType.array(HostName, testArrayLength),
             value: [adaName, graceName],
           },
           {
@@ -257,8 +257,8 @@ describe("effect-spacetimedb value representations", (it) => {
         yield* Effect.forEach(
           corpus,
           Effect.fn(function* (entry) {
-            const host = StdbTesting.encodeHostValue(entry.type, entry.value)
-            const decoded = StdbTesting.ContractType.dbCodec(
+            const host = StdbInternal.encodeHostValue(entry.type, entry.value)
+            const decoded = StdbInternal.ContractType.dbCodec(
               entry.type,
             ).decodeUnknownSync(host)
 
@@ -273,17 +273,17 @@ describe("effect-spacetimedb value representations", (it) => {
 
   it.effect("decodes Result host envelopes through the DB codec", () =>
     Effect.gen(function* () {
-      const ResultType = StdbTesting.ContractType.result(
-        StdbTesting.ContractType.string(),
-        StdbTesting.ContractType.string(),
+      const ResultType = StdbInternal.ContractType.result(
+        StdbInternal.ContractType.string(),
+        StdbInternal.ContractType.string(),
       )
-      const hostOk = StdbTesting.encodeHostValue(ResultType, {
+      const hostOk = StdbInternal.encodeHostValue(ResultType, {
         ok: "accepted",
       })
 
       expect(hostOk).toEqual({ ok: "accepted" })
       expect(
-        StdbTesting.ContractType.dbCodec(ResultType).decodeUnknownSync(hostOk),
+        StdbInternal.ContractType.dbCodec(ResultType).decodeUnknownSync(hostOk),
       ).toEqual({ ok: "accepted" })
     }),
   )
@@ -292,20 +292,20 @@ describe("effect-spacetimedb value representations", (it) => {
     "characterizes HTTP input preparation for structs and exact option envelopes",
     () =>
       Effect.gen(function* () {
-        const Params = StdbTesting.ContractType.struct({
-          targetCharacterId: StdbTesting.ContractType.string(),
-          reason: StdbTesting.ContractType.option(
-            StdbTesting.ContractType.struct({
-              displayName: StdbTesting.ContractType.literal("ReadyState"),
+        const Params = StdbInternal.ContractType.struct({
+          targetCharacterId: StdbInternal.ContractType.string(),
+          reason: StdbInternal.ContractType.option(
+            StdbInternal.ContractType.struct({
+              displayName: StdbInternal.ContractType.literal("ReadyState"),
             }),
           ),
         })
-        const OptionString = StdbTesting.ContractType.option(
-          StdbTesting.ContractType.string(),
+        const OptionString = StdbInternal.ContractType.option(
+          StdbInternal.ContractType.string(),
         )
 
         expect(
-          StdbTesting.ClientHttpJson.prepareHttpInputValue(Params, {
+          StdbInternal.ClientHttpJson.prepareHttpInputValue(Params, {
             targetCharacterId: "character-1",
             reason: {
               some: {
@@ -326,7 +326,7 @@ describe("effect-spacetimedb value representations", (it) => {
           },
         })
         expect(
-          StdbTesting.ClientHttpJson.prepareHttpInputValue(OptionString, {
+          StdbInternal.ClientHttpJson.prepareHttpInputValue(OptionString, {
             some: "kept",
             extra: true,
           }),
@@ -335,7 +335,7 @@ describe("effect-spacetimedb value representations", (it) => {
           extra: true,
         })
         expect(
-          StdbTesting.ClientHttpJson.prepareHttpInputValue(OptionString, {
+          StdbInternal.ClientHttpJson.prepareHttpInputValue(OptionString, {
             none: {},
           }),
         ).toEqual({ none: {} })
@@ -344,29 +344,29 @@ describe("effect-spacetimedb value representations", (it) => {
 
   it.effect("characterizes HTTP output normalization edge rules", () =>
     Effect.gen(function* () {
-      const OptionU64 = StdbTesting.ContractType.option(
-        StdbTesting.ContractType.u64(),
+      const OptionU64 = StdbInternal.ContractType.option(
+        StdbInternal.ContractType.u64(),
       )
-      const ResultType = StdbTesting.ContractType.result(
-        StdbTesting.ContractType.u64(),
-        StdbTesting.ContractType.string(),
+      const ResultType = StdbInternal.ContractType.result(
+        StdbInternal.ContractType.u64(),
+        StdbInternal.ContractType.string(),
       )
-      const SumType = StdbTesting.ContractType.sum({
-        Active: StdbTesting.ContractType.u64(),
-        Deleted: StdbTesting.ContractType.unit(),
+      const SumType = StdbInternal.ContractType.sum({
+        Active: StdbInternal.ContractType.u64(),
+        Deleted: StdbInternal.ContractType.unit(),
       })
-      const Row = StdbTesting.ContractType.struct({
-        createdAt: StdbTesting.ContractType.u64(),
+      const Row = StdbInternal.ContractType.struct({
+        createdAt: StdbInternal.ContractType.u64(),
       })
 
       expect(
-        yield* StdbTesting.ClientHttpJson.decodeHttpOutput(
+        yield* StdbInternal.ClientHttpJson.decodeHttpOutput(
           OptionU64,
           "18446744073709551615",
         ),
       ).toBe(18446744073709551615n)
       expect(
-        yield* StdbTesting.ClientHttpJson.decodeHttpOutput(
+        yield* StdbInternal.ClientHttpJson.decodeHttpOutput(
           Row,
           '{"created_at":18446744073709551615}',
         ),
@@ -374,7 +374,7 @@ describe("effect-spacetimedb value representations", (it) => {
         createdAt: 18446744073709551615n,
       })
       expect(
-        yield* StdbTesting.ClientHttpJson.decodeHttpOutput(
+        yield* StdbInternal.ClientHttpJson.decodeHttpOutput(
           Row,
           '{"createdAt":18446744073709551615}',
         ),
@@ -383,16 +383,16 @@ describe("effect-spacetimedb value representations", (it) => {
       })
 
       const malformedStruct = yield* Effect.exit(
-        StdbTesting.ClientHttpJson.decodeHttpOutput(Row, "123"),
+        StdbInternal.ClientHttpJson.decodeHttpOutput(Row, "123"),
       )
       const resultWithExtra = yield* Effect.exit(
-        StdbTesting.ClientHttpJson.decodeHttpOutput(
+        StdbInternal.ClientHttpJson.decodeHttpOutput(
           ResultType,
           '{"tag":"ok","value":1,"extra":true}',
         ),
       )
       const sumWithExtra = yield* Effect.exit(
-        StdbTesting.ClientHttpJson.decodeHttpOutput(
+        StdbInternal.ClientHttpJson.decodeHttpOutput(
           SumType,
           '{"tag":"Active","value":1,"extra":true}',
         ),
@@ -406,20 +406,20 @@ describe("effect-spacetimedb value representations", (it) => {
 
   it.effect("rejects malformed JSON number tokens before value decoding", () =>
     Effect.gen(function* () {
-      const F64 = StdbTesting.ContractType.f64()
-      const ArrayF64 = StdbTesting.ContractType.array(F64, testArrayLength)
-      const StructF64 = StdbTesting.ContractType.struct({
+      const F64 = StdbInternal.ContractType.f64()
+      const ArrayF64 = StdbInternal.ContractType.array(F64, testArrayLength)
+      const StructF64 = StdbInternal.ContractType.struct({
         x: F64,
       })
 
       const bareNumber = yield* Effect.exit(
-        StdbTesting.ClientHttpJson.decodeHttpOutput(F64, "-"),
+        StdbInternal.ClientHttpJson.decodeHttpOutput(F64, "-"),
       )
       const arrayNumber = yield* Effect.exit(
-        StdbTesting.ClientHttpJson.decodeHttpOutput(ArrayF64, "[-]"),
+        StdbInternal.ClientHttpJson.decodeHttpOutput(ArrayF64, "[-]"),
       )
       const structNumber = yield* Effect.exit(
-        StdbTesting.ClientHttpJson.decodeHttpOutput(StructF64, '{"x":-}'),
+        StdbInternal.ClientHttpJson.decodeHttpOutput(StructF64, '{"x":-}'),
       )
 
       expect(Exit.isFailure(bareNumber)).toBe(true)
@@ -436,56 +436,56 @@ describe("effect-spacetimedb value representations", (it) => {
   it.effect("fails typed on malformed native values in an HTTP body", () =>
     Effect.gen(function* () {
       const cases: ReadonlyArray<{
-        readonly type: StdbTesting.ContractType.AnyValueType
+        readonly type: StdbInternal.ContractType.AnyValueType
         readonly body: string
       }> = [
         {
-          type: StdbTesting.ContractType.identity(),
+          type: StdbInternal.ContractType.identity(),
           body: '{"__identity__":""}',
         },
         {
-          type: StdbTesting.ContractType.identity(),
+          type: StdbInternal.ContractType.identity(),
           body: '{"__identity__":"not-hex"}',
         },
         {
-          type: StdbTesting.ContractType.identity(),
+          type: StdbInternal.ContractType.identity(),
           body: '{"__identity__":true}',
         },
         {
-          type: StdbTesting.ContractType.identity(),
+          type: StdbInternal.ContractType.identity(),
           body: '{"__identity__":[42]}',
         },
         {
-          type: StdbTesting.ContractType.identity(),
+          type: StdbInternal.ContractType.identity(),
           body: '{"__identity__":null}',
         },
         {
-          type: StdbTesting.ContractType.connectionId(),
+          type: StdbInternal.ContractType.connectionId(),
           body: '{"__connection_id__":""}',
         },
         {
-          type: StdbTesting.ContractType.connectionId(),
+          type: StdbInternal.ContractType.connectionId(),
           body: '{"__connection_id__":true}',
         },
         {
-          type: StdbTesting.ContractType.uuid(),
+          type: StdbInternal.ContractType.uuid(),
           body: '{"__uuid__":"not-a-uuid"}',
         },
-        { type: StdbTesting.ContractType.uuid(), body: '{"__uuid__":[42]}' },
+        { type: StdbInternal.ContractType.uuid(), body: '{"__uuid__":[42]}' },
         {
-          type: StdbTesting.ContractType.timestamp(),
+          type: StdbInternal.ContractType.timestamp(),
           body: '{"__timestamp_micros_since_unix_epoch__":true}',
         },
         {
-          type: StdbTesting.ContractType.timestamp(),
+          type: StdbInternal.ContractType.timestamp(),
           body: '{"__timestamp_micros_since_unix_epoch__":""}',
         },
         {
-          type: StdbTesting.ContractType.timeDuration(),
+          type: StdbInternal.ContractType.timeDuration(),
           body: '{"__time_duration_micros__":[42]}',
         },
         {
-          type: StdbTesting.ContractType.timeDuration(),
+          type: StdbInternal.ContractType.timeDuration(),
           body: '{"__time_duration_micros__":null}',
         },
       ]
@@ -494,7 +494,7 @@ describe("effect-spacetimedb value representations", (it) => {
         cases,
         Effect.fn(function* ({ type, body }) {
           const exit = yield* Effect.exit(
-            StdbTesting.ClientHttpJson.decodeHttpOutput(type, body),
+            StdbInternal.ClientHttpJson.decodeHttpOutput(type, body),
           )
 
           expect(Exit.isFailure(exit)).toBe(true)
@@ -502,7 +502,7 @@ describe("effect-spacetimedb value representations", (it) => {
             expect(Cause.hasDies(exit.cause)).toBe(false)
             expect(
               Option.getOrUndefined(Cause.findErrorOption(exit.cause)),
-            ).toBeInstanceOf(StdbTesting.StdbDecodeError)
+            ).toBeInstanceOf(StdbInternal.StdbDecodeError)
           }
         }),
         { concurrency: 1 },

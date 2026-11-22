@@ -1,4 +1,4 @@
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 
 export const encodeJson = (value: unknown): string =>
-  StdbTesting.ClientHttpJson.encodeHttpInput(value)
+  StdbInternal.ClientHttpJson.encodeHttpInput(value)

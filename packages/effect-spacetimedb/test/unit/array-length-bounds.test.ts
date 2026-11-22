@@ -1,9 +1,10 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Function from "effect/Function"
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { TestLayer } from "../helpers/test-layer"
 import { typeBuilder } from "../helpers/type-builder"
 
@@ -23,6 +24,57 @@ const encode = (type: Stdb.AnyValueType, value: unknown) =>
   Schema.encodeUnknownEffect(type.schema)(value)
 
 describe("Stdb.array length bounds", (it) => {
+  it.effect("checks only the bounds an array states", () => {
+    const items = (length: number) =>
+      Array.from({ length }, (_, index) => item(`i${index}`))
+    const accepted = (type: Stdb.AnyValueType, length: number) =>
+      Effect.gen(function* () {
+        const value = items(length)
+        expect(yield* decode(type, value)).toEqual(value)
+        expect(yield* encode(type, value)).toEqual(value)
+        expect(StdbInternal.encodeHostValue(type, value)).toHaveLength(length)
+      })
+    const refused = (type: Stdb.AnyValueType, length: number) =>
+      Effect.gen(function* () {
+        const value = items(length)
+        expect(Exit.isFailure(yield* Effect.exit(decode(type, value)))).toBe(
+          true,
+        )
+        expect(Exit.isFailure(yield* Effect.exit(encode(type, value)))).toBe(
+          true,
+        )
+        expect(() => StdbInternal.encodeHostValue(type, value)).toThrow(
+          StdbInternal.StdbHostEncodeError,
+        )
+      })
+    const Unbounded = Stdb.array(Item)
+    const AtLeastTwo = Stdb.array(Item, { minimum: 2 })
+    const AtMostTwo = Stdb.array(Item, { maximum: 2 })
+
+    return Effect.all(
+      [
+        accepted(Unbounded, 0),
+        accepted(Unbounded, 500),
+        accepted(AtLeastTwo, 2),
+        accepted(AtLeastTwo, 500),
+        refused(AtLeastTwo, 1),
+        accepted(AtMostTwo, 0),
+        accepted(AtMostTwo, 2),
+        refused(AtMostTwo, 3),
+      ],
+      { concurrency: 1, discard: true },
+    )
+  })
+
+  it.effect("works as a pipe step", () =>
+    Effect.gen(function* () {
+      const Names = Function.pipe(Stdb.string(), Stdb.array)
+
+      expect(yield* decode(Names, ["a", "b"])).toEqual(["a", "b"])
+      expect(Stdb.describe(Names)).toMatchObject({ _tag: "Array", length: {} })
+    }),
+  )
+
   it.effect("decodes and encodes lengths inside the inclusive bounds", () =>
     Effect.forEach(
       [1, 2, 3],
@@ -65,9 +117,9 @@ describe("Stdb.array length bounds", (it) => {
     const Holder = Stdb.struct({ items: BoundedItems })
     const WiderHolder = Stdb.struct({ items: WiderItems })
     const codecs = [
-      StdbTesting.ClientValueCodec.ws,
-      StdbTesting.ClientValueCodec.db,
-      StdbTesting.ClientValueCodec.http,
+      StdbInternal.ClientValueCodec.ws,
+      StdbInternal.ClientValueCodec.db,
+      StdbInternal.ClientValueCodec.http,
     ]
 
     return Effect.forEach(
@@ -98,18 +150,24 @@ describe("Stdb.array length bounds", (it) => {
   it("reports a structured host encode error for an out-of-bounds array", () => {
     let caught: unknown
     try {
-      StdbTesting.encodeHostValue(BoundedItems, [])
+      StdbInternal.encodeHostValue(BoundedItems, [])
     } catch (error) {
       caught = error
     }
 
-    expect(caught).toBeInstanceOf(StdbTesting.StdbHostEncodeError)
+    expect(caught).toBeInstanceOf(StdbInternal.StdbHostEncodeError)
     expect(caught).toMatchObject({
       reason: "ArrayLengthOutOfBounds",
       length: 0,
       bounds: { minimum: 1, maximum: 3 },
       message: "Host array length 0 is outside its declared bounds 1..3",
     })
+    expect(() =>
+      StdbInternal.encodeHostValue(
+        Stdb.array(Stdb.string(), { minimum: 1 }),
+        [],
+      ),
+    ).toThrow("Host array length 0 is outside its declared bounds 1..unbounded")
   })
 
   it("lowers arrays differing only in bounds to the same SATS type", () => {
@@ -118,13 +176,17 @@ describe("Stdb.array length bounds", (it) => {
     expect(
       typeBuilder(Stdb.array(Stdb.string(), { minimum: 1, maximum: 3 })),
     ).not.toEqual(typeBuilder(WiderItems))
-    expect(StdbTesting.ContractType.satsTypeFingerprint(BoundedItems)).toBe(
-      StdbTesting.ContractType.satsTypeFingerprint(WiderItems),
+    expect(StdbInternal.ContractType.satsTypeFingerprint(BoundedItems)).toBe(
+      StdbInternal.ContractType.satsTypeFingerprint(WiderItems),
     )
 
     const NarrowHost = Stdb.struct({ items: BoundedItems })
     const WiderHost = Stdb.struct({ items: WiderItems })
     expect(typeBuilder(NarrowHost)).toEqual(typeBuilder(WiderHost))
+    expect(typeBuilder(Stdb.array(Item))).toEqual(typeBuilder(BoundedItems))
+    expect(
+      StdbInternal.ContractType.satsTypeFingerprint(Stdb.array(Item)),
+    ).toBe(StdbInternal.ContractType.satsTypeFingerprint(BoundedItems))
   })
 
   it("records the bounds in the type descriptor", () => {
@@ -137,6 +199,10 @@ describe("Stdb.array length bounds", (it) => {
     expect(Stdb.describe(WiderItems)).toMatchObject({
       length: { minimum: 0, maximum: 100 },
     })
+    expect(Stdb.describe(Stdb.array(Item, { maximum: 3 }))).toMatchObject({
+      length: { maximum: 3 },
+    })
+    expect(Stdb.describe(Stdb.array(Item))).toMatchObject({ length: {} })
   })
 
   it.effect("accepts an exact length and an empty-only array", () =>
@@ -163,6 +229,8 @@ describe("Stdb.array length bounds", (it) => {
       { minimum: Number.NaN, maximum: 3 },
       { minimum: 0, maximum: Number.MAX_SAFE_INTEGER + 1 },
       { minimum: 4, maximum: 3 },
+      { minimum: -1 },
+      { maximum: 2.5 },
     ]
 
     for (const length of invalid) {

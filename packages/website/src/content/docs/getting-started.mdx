@@ -1,7 +1,7 @@
 ---
 draft: false
 title: Getting Started
-description: Install effect-spacetimedb, write a minimal module, build it, and generate a client.
+description: From an empty directory to a reducer call on a local SpacetimeDB, with effect-spacetimedb.
 sidebar:
   order: 1
 ---
@@ -10,198 +10,280 @@ import { TabItem, Tabs } from "@astrojs/starlight/components";
 
 `effect-spacetimedb` is an Effect-first authoring layer for SpaceTimeDB modules.
 You describe the module once, implement handlers with scoped Effect services,
-then build native module exports and generated clients from the same contract.
+then build native module exports and clients from the same contract.
 
-## Install
+This page goes from an empty directory to a reducer call on a server running on
+your machine. The commands use Bun, which runs TypeScript directly; the install
+step shows npm and pnpm too. Node.js must satisfy `^22.23.4 || ^24.22.1 || >=26.12.1`.
+
+## Install the CLI
+
+```sh
+curl -sSf https://install.spacetimedb.com | sh
+spacetime version install 2.16.1 --use
+spacetime --version
+```
+
+Open a new terminal if `spacetime` is not found yet: the installer adds it to
+your `PATH`. `spacetime --version` must report `2.16.1`. The CLI version must match the
+`spacetimedb` package your project depends on, because `spacetime build` and
+`spacetime generate` read a version-specific module format. If several versions
+are installed, make sure the matching `spacetime` is the one on your `PATH`.
+
+## Start a local server
+
+In a terminal of its own:
+
+```sh
+spacetime start
+```
+
+It listens on port 3000 and keeps running. A fresh CLI's default server is
+Maincloud, the hosted service, so the commands below all say `--server local`.
+
+## Create the project
+
+```sh
+mkdir stdb-hello
+cd stdb-hello
+echo '{ "name": "stdb-hello", "private": true, "type": "module" }' > package.json
+```
 
 <Tabs syncKey="package-manager">
+  <TabItem label="bun">
+
+    ```sh
+    bun add effect-spacetimedb effect@4.1.1 spacetimedb@2.16.1
+    bun add --dev typescript @types/node
+    ```
+
+  </TabItem>
   <TabItem label="npm">
 
     ```sh
-    npm install effect-spacetimedb effect@4.1.1 spacetimedb@2.14.0
+    npm install effect-spacetimedb effect@4.1.1 spacetimedb@2.16.1
+    npm install --save-dev typescript @types/node
     ```
 
   </TabItem>
   <TabItem label="pnpm">
 
     ```sh
-    pnpm add effect-spacetimedb effect@4.1.1 spacetimedb@2.14.0
-    ```
-
-  </TabItem>
-  <TabItem label="bun">
-
-    ```sh
-    bun add effect-spacetimedb effect@4.1.1 spacetimedb@2.14.0
+    pnpm add effect-spacetimedb effect@4.1.1 spacetimedb@2.16.1
+    pnpm add --save-dev typescript @types/node
     ```
 
   </TabItem>
 </Tabs>
 
-:::caution[Version match]
+Add a `tsconfig.json`. `moduleResolution` must be `Bundler`: under `nodenext`
+the code `spacetime generate` writes fails with `TS2305`.
 
-The SpaceTimeDB CLI version must match the `spacetimedb` package version your
-project depends on — `spacetime build` and `spacetime generate` read a
-version-specific module format:
-
-```sh
-spacetime --version   # must match your installed `spacetimedb` package
-```
-
-If several CLI versions are installed, make sure the matching `spacetime` is the
-one on your `PATH`, or invoke it by full path in your build scripts.
-
-:::
-
-### Patch the SDK
-
-The published `spacetimedb` 2.14.0 package has three defects that an install
-does not fix: `Prettify` turns branded primitives into object types
-([upstream fix](https://github.com/clockworklabs/SpacetimeDB/pull/5971), merged
-but not yet released), the client `TableCache` compares ranges over
-`Identity`, `Timestamp` and other object-backed keys by wrapper rather than
-value ([open PR](https://github.com/clockworklabs/SpacetimeDB/pull/5970)), and
-a non-unique index whose columns are a strict subset of a unique constraint
-loses its range methods
-([open PR](https://github.com/clockworklabs/SpacetimeDB/pull/5969)).
-
-Copy
-[`patches/spacetimedb@2.14.0.patch`](https://github.com/miragegame/effect-spacetimedb/blob/main/patches/spacetimedb@2.14.0.patch)
-into your project. Its paths are relative to the `spacetimedb` package root, so
-Bun applies it from your root `package.json`, and pnpm from the same entry
-under `pnpm.patchedDependencies` or in `pnpm-workspace.yaml`:
-
-```json
+```json title="tsconfig.json"
 {
-  "patchedDependencies": {
-    "spacetimedb@2.14.0": "patches/spacetimedb@2.14.0.patch"
-  }
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"]
 }
 ```
 
-Other package managers need their own patch mechanism. Apply it wherever the
-SDK is installed, module and client packages alike.
+## Write the module
 
-## Minimal Module
+A module is three files, split for a reason: a client must not import the module
+entry. The entry loads the host-only `spacetime:sys` modules, which exist only
+inside the server, so importing it elsewhere fails with
+`Cannot find package 'spacetime:sys@2.2'` on Bun and
+`ERR_UNSUPPORTED_ESM_URL_SCHEME` on Node.
 
-The same module — a `user` table and a `user_upsert` reducer — in
-effect-spacetimedb and in the native SpaceTimeDB SDK:
+The contract declares the table and the callable functions. Everything else
+imports it, and it imports nothing host-only.
 
-<Tabs syncKey="impl">
-  <TabItem label="effect-spacetimedb">
-
-```typescript twoslash
-import * as Effect from "effect/Effect"
-import * as Schema from "effect/Schema"
+```ts title="src/contract.ts"
 import * as Stdb from "effect-spacetimedb"
-import { build } from "effect-spacetimedb/server-compiler"
 
-// Branded + validated id. In the native SDK this column is just `string`.
-const UserId = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(64),
-  Schema.brand("UserId"),
-)
-
-const user = Stdb.table("user", {
+export const message = Stdb.table("message", {
   public: true,
   columns: {
-    // The Effect schema IS the column's value type, so the brand and the
-    // length validation flow through to handlers and generated clients.
-    id: Stdb.string(UserId).primaryKey(),
-    name: Stdb.string(),
+    id: Stdb.string().primaryKey(),
+    text: Stdb.string(),
   },
 })
 
-// camelCase names lower to snake_case on the wire (userUpsert -> user_upsert).
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.reducer("userUpsert", {
-    // Params are validated by the same schema; the native SDK accepts any string.
-    params: Stdb.struct({
-      id: Stdb.string(UserId),
-      name: Stdb.string(),
-    }),
+export const MessageRow = Stdb.struct({
+  id: Stdb.string(),
+  text: Stdb.string(),
+}).named("MessageRow")
+
+export const MessageFunctions = Stdb.Group.make("Messages").add(
+  Stdb.Fn.reducer("messageSend", {
+    params: MessageRow,
+  }),
+  Stdb.Fn.procedure("messageList", {
+    params: Stdb.struct({}),
+    returns: Stdb.array(MessageRow),
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
-const { Db } = Module
+export const QuickstartModule = Stdb.Module.make(
+  "effect_spacetimedb_quickstart",
+  {},
+)
+  .addTables(message)
+  .add(MessageFunctions)
+```
 
-const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
-  userUpsert: (args) =>
-    Effect.gen(function* () {
+The implementation attaches a handler to each function. Handlers get what they
+need by yielding services from the module.
+
+```ts title="src/live.ts"
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+import { QuickstartModule } from "./contract.ts"
+
+const { Db, Tx } = QuickstartModule
+
+export const MessageFunctionsLive = Stdb.Builder.group(
+  QuickstartModule,
+  "Messages",
+  {
+    messageSend: Effect.fn(function* ({ id, text }) {
       const db = yield* Db
-      yield* db.user.insert(args)
+      yield* db.message.insert({ id, text })
     }),
-})
+    messageList: Effect.fn(function* () {
+      const tx = yield* Tx
+      return yield* tx.run(
+        Effect.gen(function* () {
+          const db = yield* Db
+          return yield* db.message.toArray()
+        }),
+      )
+    }),
+  },
+)
+```
 
-export const compiled = build(Module, [UsersLive])
+The entry compiles the module. Its only exports are `ModuleExports` and the
+default schema: the SDK rejects any other named export, including an
+`export *` of the contract, with `TypeError: exporting something that is not a
+spacetime export`. A type-only re-export is erased and safe.
+
+```ts title="src/index.ts"
+import { build } from "effect-spacetimedb/server-compiler"
+import { QuickstartModule } from "./contract.ts"
+import { MessageFunctionsLive } from "./live.ts"
+
+export type { QuickstartClientExample } from "./client.ts"
+
+const compiled = build(QuickstartModule, [MessageFunctionsLive])
+
 export const ModuleExports = compiled.exportGroup()
+
 export default compiled.schema
 ```
 
-  </TabItem>
-  <TabItem label="Native SDK">
+A contract that declares Effect `HttpApi` routes, or anything else that loads
+Effect's HTTP or encoding modules before `server-compiler` is imported, needs
+`import "effect-spacetimedb/server-polyfills"` as the entry's first line.
 
-```ts
-import { schema, table, t } from "spacetimedb/server"
+## Publish it
 
-const spacetime = schema({
-  user: table(
-    { public: true },
-    { id: t.string().primaryKey(), name: t.string() },
+From the project directory, build the module and publish it to the local server
+under the database name `stdb-hello`. Database names are lowercase words joined
+by dashes.
+
+```sh
+spacetime publish --server local --yes stdb-hello
+```
+
+## Call a reducer
+
+The client imports only the contract. `Stdb.project` turns it into a typed
+client with no generated code.
+
+```ts title="src/client.ts"
+import * as Stdb from "effect-spacetimedb"
+import type * as StdbClient from "effect-spacetimedb/client"
+import { QuickstartModule } from "./contract.ts"
+
+const Quickstart = Stdb.project(QuickstartModule.spec)
+
+/** Typechecked client calls shown in the package quick start. */
+const clientExample = (
+  http: StdbClient.ProjectedHttpClient<typeof QuickstartModule.spec>,
+  session: StdbClient.WsSession<typeof QuickstartModule.spec>,
+  messageId: string,
+) => ({
+  call: http.procedures.messageList({}),
+  subscribe: session.subscribe(
+    Quickstart.targets.tables.message.where((row) => row.id.eq(messageId)),
   ),
 })
 
-// The exported binding's name is the reducer name.
-export const user_upsert = spacetime.reducer(
-  { id: t.string(), name: t.string() },
-  (ctx, { id, name }) => {
-    ctx.db.user.insert({ id, name })
-  },
-)
-
-export default spacetime
+export type QuickstartClientExample = ReturnType<typeof clientExample>
 ```
 
-  </TabItem>
-</Tabs>
+Use a separate entry to run an HTTP call against the local database.
 
-The authoring flow is:
+```ts title="src/send.ts"
+import * as Effect from "effect/Effect"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
+import * as Stdb from "effect-spacetimedb"
+import { QuickstartModule } from "./contract.ts"
 
-1. Declare value types, tables, and endpoint groups.
-2. Assemble a module with `StdbModule.make(...).addTables(...).add(...)`.
-3. Implement each group with `StdbBuilder.group(...)`.
-4. Build the native module export with `build(...)` from
-   `effect-spacetimedb/server-compiler`.
+const client = Stdb.project(QuickstartModule.spec).client.http.make({
+  uri: "http://127.0.0.1:3000",
+  databaseName: "stdb-hello",
+})
 
-## Dev Loop
+const program = Effect.gen(function* () {
+  yield* client.reducers.messageSend({ id: "first", text: "Hello" })
+  yield* Effect.log(yield* client.procedures.messageList({}))
+})
 
-Build modules with the native SpaceTimeDB CLI. Put the build and client
-generation commands behind package scripts:
-
-```json
-{
-  "scripts": {
-    "build": "spacetime build --module-path .",
-    "generate-client": "spacetime generate --lang typescript --js-path ./dist/bundle.js --out-dir ./src/generated --yes"
-  }
-}
+Effect.runPromise(program.pipe(Effect.provide(FetchHttpClient.layer)))
 ```
-
-Then run the scripts from the module package:
 
 ```sh
-bun run build
-bun run generate-client
+bun run src/send.ts
 ```
 
-:::tip
+It logs the row it wrote. Typecheck the project with:
 
-Use `build` before publishing a module and `generate-client` after changing the
-module contract.
+```sh
+bunx tsc
+```
 
-:::
+The optional `token` in the client's config is a SpacetimeDB identity token.
+Without one, the server treats each call as a new anonymous identity.
+
+## Develop
+
+`spacetime dev` rebuilds and republishes on every change, and keeps generated
+client bindings in `src/module_bindings` up to date:
+
+```sh
+spacetime dev --server local --module-path . --server-only --yes stdb-hello
+```
+
+Run `spacetime generate` by hand for bindings without a dev loop. A WebSocket
+session and its live subscriptions take them as its `DbConnection`; see
+[Connection](/core-concepts/clients/connection).
+
+```sh
+spacetime generate --lang typescript --module-path . --out-dir src/module_bindings --yes
+```
 
 :::note
 
@@ -212,33 +294,59 @@ and a spec-typed facade described in [Codegen](/core-concepts/clients/codegen).
 
 :::
 
-## Testing your module off-host
+## Patch the SDK
 
-A module entry statically imports the host-only compiler (`build` from
-`effect-spacetimedb/server-compiler`). To import that entry in Vitest without a
-real SpaceTimeDB host, alias the host syscalls to the shipped stub and inline the
-`spacetimedb` package:
+The patch fixes [client range comparisons for object-backed keys](https://github.com/clockworklabs/SpacetimeDB/pull/5970),
+[host index classification for overlapping constraints](https://github.com/clockworklabs/SpacetimeDB/pull/5969)
+and [branded primitive inputs to native builders](https://github.com/clockworklabs/SpacetimeDB/pull/6660)
+in SDK 2.16.1.
 
-```ts
-// vitest.config.ts
-import { defineConfig } from "vitest/config"
-import { spacetimeSysAlias } from "effect-spacetimedb/testing"
+Before relying on these SDK features, copy
+[`patches/spacetimedb@2.16.1.patch`](https://github.com/miragegame/effect-spacetimedb/blob/v0.9.0/patches/spacetimedb@2.16.1.patch)
+into your project. Its paths are relative to the `spacetimedb` package root, so
+Bun applies it from your root `package.json`, and pnpm from the same entry
+under `pnpm.patchedDependencies` or in `pnpm-workspace.yaml`:
 
-export default defineConfig({
-  test: {
-    server: { deps: { inline: ["spacetimedb"] } },
-  },
-  resolve: {
-    alias: { ...spacetimeSysAlias },
-  },
-})
+```json
+{
+  "patchedDependencies": {
+    "spacetimedb@2.16.1": "patches/spacetimedb@2.16.1.patch"
+  }
+}
 ```
 
-The stub keeps `console` and the deterministic backstops usable off-host, so
-importing or building a module entry in tests does not require a running host.
+Other package managers need their own patch mechanism. Apply it wherever the
+SDK is installed, module and client packages alike.
+
+## The same module in the native SDK
+
+For comparison, the table and reducer above with no Effect layer. The params
+accept any string, and the failure paths are yours to write.
+
+```ts
+import { schema, table, t } from "spacetimedb/server"
+
+const spacetime = schema({
+  message: table(
+    { public: true },
+    { id: t.string().primaryKey(), text: t.string() },
+  ),
+})
+
+// The exported binding's name is the reducer name.
+export const message_send = spacetime.reducer(
+  { id: t.string(), text: t.string() },
+  (ctx, { id, text }) => {
+    ctx.db.message.insert({ id, text })
+  },
+)
+
+export default spacetime
+```
 
 ## Next Pages
 
+- [Testing](/core-concepts/testing)
 - [Reducers](/core-concepts/functions/reducers)
 - [Tables / Column Types](/core-concepts/tables/column-types)
 - [Runtime model](/the-effect-layer/runtime-model)

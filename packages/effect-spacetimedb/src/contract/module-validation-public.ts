@@ -1,4 +1,6 @@
-import { StdbDiagnostic, StdbValidationError } from "./diagnostic.ts"
+import { validateMountTree } from "./module-validation-mounts.ts"
+import { isTableCachePolicy } from "./table-cache-policy.ts"
+import { Diagnostic, StdbValidationDefect } from "./diagnostic.ts"
 
 import { HttpRouterExportKey } from "./http-handler.ts"
 
@@ -39,7 +41,7 @@ import { children } from "./type/descriptor.ts"
 import { satsTypeFingerprint } from "./type/fingerprint.ts"
 
 const validateDuplicateDeclaredTypeNames = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   module: AnyModuleSpec,
 ): void => {
   const seenNames = new Map<string, string>()
@@ -124,10 +126,8 @@ const validateDuplicateDeclaredTypeNames = (
   }
 }
 
-export const validate = (
-  module: AnyModuleSpec,
-): ReadonlyArray<StdbDiagnostic> => {
-  const diagnostics: Array<StdbDiagnostic> = []
+const validateLocal = (module: AnyModuleSpec): ReadonlyArray<Diagnostic> => {
+  const diagnostics: Array<Diagnostic> = []
   validateCanonicalModuleNames(diagnostics, module)
   const duplicateRelation = hasDuplicates([
     ...Object.values(module.tables).map((table) => table.name),
@@ -168,13 +168,22 @@ export const validate = (
     )
   }
 
+  const defaultPolicy = module.settings.tableCachePolicyDefault
+  if (defaultPolicy !== undefined && !isTableCachePolicy(defaultPolicy)) {
+    pushDiagnostic(
+      diagnostics,
+      "UnknownTableCachePolicy",
+      ["settings", "tableCachePolicyDefault"],
+      `Unknown module default table cache policy ${String(defaultPolicy)}`,
+    )
+  }
   const completedValueTypes = new WeakSet<object>()
   for (const [tableKey, table] of Object.entries(module.tables)) {
     validateTable(
       diagnostics,
       tableKey,
       table,
-      module.settings.caseConversionPolicy,
+      module.settings,
       completedValueTypes,
     )
   }
@@ -197,11 +206,14 @@ export const validate = (
   return diagnostics
 }
 
+export const validate = (module: AnyModuleSpec): ReadonlyArray<Diagnostic> =>
+  validateMountTree(module, validateLocal)
+
 export const validateServerHandlers = (
   module: AnyModuleSpec,
   handlers: ServerHandlerDefinitions,
-): ReadonlyArray<StdbDiagnostic> => {
-  const diagnostics: Array<StdbDiagnostic> = []
+): ReadonlyArray<Diagnostic> => {
+  const diagnostics: Array<Diagnostic> = []
   assertDeclaredHandlersPresent(
     diagnostics,
     "reducers",
@@ -241,6 +253,6 @@ export const assertValid = (module: AnyModuleSpec): void => {
     (entry) => entry.severity === "error",
   )
   if (diagnostics.length > 0) {
-    throw new StdbValidationError({ diagnostics })
+    throw new StdbValidationDefect({ diagnostics })
   }
 }

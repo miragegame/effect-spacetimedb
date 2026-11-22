@@ -20,15 +20,15 @@ avoids runtime import cycles.
 ```text
 schema.ts             shared Effect schemas and value types
 tables/users.ts       table declarations
-users/contract.ts     StdbGroup.make().add(...)
-module.ts             StdbModule.make(...).addTables(...).add(...)
-users/live.ts         StdbBuilder.group(Module, "Users", ...)
+users/contract.ts     Group.make().add(...)
+module.ts             Module.make(...).addTables(...).add(...)
+users/live.ts         Builder.group(Module, "Users", ...)
 index.ts              build(Module, [...])
 ```
 
 ## Assemble The Module Once
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
 const user = Stdb.table("user", {
@@ -36,13 +36,13 @@ const user = Stdb.table("user", {
   columns: { id: Stdb.string().primaryKey() },
 })
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.reducer("user_upsert", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.reducer("userUpsert", {
     params: Stdb.struct({ id: Stdb.string(), name: Stdb.string() }),
   }),
 )
 
-export const Module = Stdb.StdbModule.make("app")
+export const Module = Stdb.Module.make("app")
   .addTables(user)
   .add(Users)
 
@@ -54,11 +54,11 @@ handlers. They are typed against the module's tables and scopes.
 
 ## Implement Groups By Name
 
-`StdbBuilder.group(Module, "GroupName", handlers)` takes a record whose keys
+`Builder.group(Module, "GroupName", handlers)` takes a record whose keys
 match endpoint names in the group. The builder checks that every endpoint is
 implemented exactly once.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -67,24 +67,24 @@ const user = Stdb.table("user", {
   columns: { id: Stdb.string().primaryKey(), name: Stdb.string() },
 })
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.reducer("user_upsert", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.reducer("userUpsert", {
     params: Stdb.struct({ id: Stdb.string(), name: Stdb.string() }),
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const Module = Stdb.Module.make("app").addTables(user).add(Users)
 const { Db } = Module
 
-const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
-  user_upsert: Effect.fn(function* (args) {
+const UsersLive = Stdb.Builder.group(Module, "Users", {
+  userUpsert: Effect.fn(function* (args) {
     const db = yield* Db
-    yield* db.user.id.replace(args)
+    yield* db.user.id.update(args)
   }),
 })
 ```
 
-Reducers are declared as data with `StdbFn.reducer(...)` and
+Reducers are declared as data with `Fn.reducer(...)` and
 implemented later with Effect handlers. Reducer handlers may yield `Db`,
 `ReducerCtx`, and `MutationCtx`; transaction boundaries remain the host reducer
 call.
@@ -99,15 +99,15 @@ no-argument `new Date()` throw typed runtime errors. Use `Random.*` from
 
 :::
 
-Lifecycle hooks use `StdbBuilder.lifecycle(Module, handlers)`. HTTP route groups
-use the same `StdbBuilder.group` shape as callable groups.
+Lifecycle hooks use `Builder.lifecycle(Module, handlers)`. HTTP route groups
+use the same `Builder.group` shape as callable groups.
 
 ## Build The Native Export
 
 ```ts
 import { build } from "effect-spacetimedb/server-compiler"
 
-export const compiled = build(Module, [UsersLive])
+const compiled = build(Module, [UsersLive])
 export const ModuleExports = compiled.exportGroup()
 export default compiled.schema
 ```
@@ -115,8 +115,8 @@ export default compiled.schema
 When storing implementations before building, keep the array readonly:
 
 ```ts
-export const LiveGroups = [UsersLive] as const
-export const compiled = build(Module, LiveGroups)
+const LiveGroups = [UsersLive] as const
+const compiled = build(Module, LiveGroups)
 ```
 
 :::note
@@ -132,14 +132,14 @@ import * as Layer from "effect/Layer"
 import { build } from "effect-spacetimedb/server-compiler"
 
 // A custom capability your handlers need — here, injected config.
-class AppConfig extends Context.Tag("AppConfig")<
+class AppConfig extends Context.Service<
   AppConfig,
   { readonly welcomeMessage: string }
->() {}
+>()("AppConfig") {}
 
 // Handlers read it with `const config = yield* AppConfig`. Because a handler
 // requires AppConfig, build now asks for its runtime layer.
 const AppConfigLive = Layer.succeed(AppConfig, { welcomeMessage: "welcome" })
 
-export const compiled = build(Module, [UsersLive], { runtime: AppConfigLive })
+const compiled = build(Module, [UsersLive], { runtime: AppConfigLive })
 ```

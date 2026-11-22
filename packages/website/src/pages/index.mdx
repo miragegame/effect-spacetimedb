@@ -27,8 +27,8 @@ const AppErrors = Stdb.errors.namespace("App")({
   UserMissing: Stdb.error({ userId: Stdb.string(UserId) }),
 })
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.procedure("user_get", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.procedure("user_get", {
     params: Stdb.struct({ userId: Stdb.string(UserId) }),
     returns: Stdb.option(user.row),
     errors: AppErrors,

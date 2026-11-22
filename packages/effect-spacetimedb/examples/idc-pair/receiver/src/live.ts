@@ -26,7 +26,7 @@ export const requireTrustedSender = Effect.gen(function* () {
   }
 })
 
-export const IdcPairInboxLive = Stdb.StdbBuilder.group(
+export const IdcPairInboxLive = Stdb.Builder.group(
   IdcPairReceiverModule,
   "IdcPairInbox",
   {

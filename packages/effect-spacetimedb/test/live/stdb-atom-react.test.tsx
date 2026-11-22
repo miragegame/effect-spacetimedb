@@ -17,9 +17,9 @@ import * as React from "react"
 const { describe, expect, live } = EffectVitest
 
 import {
-  rowAtomFamily,
-  tableAtomFamily,
-  tableGroupAtomFamily,
+  wsRowAtomFamily,
+  wsTableAtomFamily,
+  wsTableGroupAtomFamily,
 } from "effect-spacetimedb/client/atom"
 import { scopedAtomRegistry } from "./helpers/atom-registry"
 import {
@@ -61,9 +61,9 @@ describe("live STDB atoms rendered via @effect/atom-react useAtomValue", () => {
               {children}
             </AtomReact.RegistryContext.Provider>
           )
-          const tables = tableAtomFamily<typeof LiveModule>(session)
-          const rows = rowAtomFamily<typeof LiveModule>(session)
-          const groups = tableGroupAtomFamily<typeof LiveModule>(session)
+          const tables = wsTableAtomFamily<typeof LiveModule>(session)
+          const rows = wsRowAtomFamily<typeof LiveModule>(session)
+          const groups = wsTableGroupAtomFamily<typeof LiveModule>(session)
           const userId = decodeUserId("atom-react-user")
           const tableRender = renderHook(
             () => AtomReact.useAtomValue(tables("user")),

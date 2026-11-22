@@ -1,47 +1,46 @@
 import * as Stdb from "effect-spacetimedb"
-import { ResultRowsLength, String255 } from "../schema"
 
 export const MembershipView = Stdb.struct({
-  tenantId: String255,
-  email: String255,
-  note: String255,
+  tenantId: Stdb.string(),
+  email: Stdb.string(),
+  note: Stdb.string(),
 }).named("MembershipView")
 
-export const MembershipFunctions = Stdb.StdbGroup.make("Memberships")
+export const MembershipFunctions = Stdb.Group.make("Memberships")
   .add(
-    Stdb.StdbFn.reducer("membershipUpsert", {
+    Stdb.Fn.reducer("membershipUpsert", {
       params: Stdb.struct({
-        tenantId: String255,
-        email: String255,
-        note: String255,
+        tenantId: Stdb.string(),
+        email: Stdb.string(),
+        note: Stdb.string(),
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("membershipInsertStrict", {
+    Stdb.Fn.reducer("membershipInsertStrict", {
       params: Stdb.struct({
-        tenantId: String255,
-        email: String255,
-        note: String255,
+        tenantId: Stdb.string(),
+        email: Stdb.string(),
+        note: Stdb.string(),
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("membershipGet", {
+    Stdb.Fn.procedure("membershipGet", {
       params: Stdb.struct({
-        tenantId: String255,
-        email: String255,
+        tenantId: Stdb.string(),
+        email: Stdb.string(),
       }),
       returns: Stdb.option(MembershipView),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("membershipByTenantEmailRange", {
+    Stdb.Fn.procedure("membershipByTenantEmailRange", {
       params: Stdb.struct({
-        tenantId: String255,
-        emailLo: String255,
-        emailHi: String255,
+        tenantId: Stdb.string(),
+        emailLo: Stdb.string(),
+        emailHi: Stdb.string(),
       }),
-      returns: Stdb.array(MembershipView, ResultRowsLength),
+      returns: Stdb.array(MembershipView),
     }),
   )

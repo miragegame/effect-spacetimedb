@@ -1,7 +1,7 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Equal from "effect/Equal"
 import * as Hash from "effect/Hash"
-import { canonicalValueKey } from "effect-spacetimedb/client"
+import { canonicalValueKey } from "effect-spacetimedb/testing/internal"
 
 /** A value object whose state is private, like a checked quantity or identifier. */
 class KeyedValue implements Equal.Equal {

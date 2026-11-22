@@ -1,6 +1,10 @@
 import * as Match from "effect/Match"
 import { canonicalNameForPolicy } from "../contract/canonical-name.ts"
 import type { IndexAlgorithm } from "../contract/table-index.ts"
+import {
+  resolveTableCachePolicy,
+  type TableCachePolicy,
+} from "../contract/table-cache-policy.ts"
 import type { ModuleSettings } from "../contract/settings.ts"
 import type { AnyTableSpec } from "../contract/table.ts"
 
@@ -32,6 +36,7 @@ export type MaterializedUniqueConstraint = {
 export type MaterializedTableOptions = {
   readonly name: string
   readonly public: boolean
+  readonly cachePolicy?: TableCachePolicy
   readonly event?: true
   readonly indexes?: ReadonlyArray<MaterializedIndex>
   readonly constraints?: ReadonlyArray<MaterializedUniqueConstraint>
@@ -103,25 +108,32 @@ export const materializeConstraints = (
 
 export const materializeTableOptions = (
   tableSpec: AnyTableSpec,
-  policy?: ModuleSettings["caseConversionPolicy"],
+  settings: ModuleSettings = {},
+  name = tableSpec.name,
 ): MaterializedTableOptions => {
   const options: {
     name: string
     public: boolean
+    cachePolicy?: TableCachePolicy
     event?: true
     indexes?: Array<MaterializedIndex>
     constraints?: Array<MaterializedUniqueConstraint>
   } = {
-    name: tableSpec.name,
+    name,
     public: tableSpec.public,
   }
+
+  const cachePolicy = resolveTableCachePolicy(tableSpec, settings)
+  if (cachePolicy !== "required_in_memory") options.cachePolicy = cachePolicy
 
   if (tableSpec.event) {
     options.event = true
   }
 
   if (tableSpec.indexes.length > 0) {
-    options.indexes = [...materializeIndexes(tableSpec, policy)]
+    options.indexes = [
+      ...materializeIndexes(tableSpec, settings.caseConversionPolicy),
+    ]
   }
 
   if (tableSpec.constraints.length > 0) {

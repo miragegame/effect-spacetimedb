@@ -1,11 +1,11 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Result from "effect/Result"
 import { Identity } from "spacetimedb"
+import { identityEquals } from "effect-spacetimedb"
 import {
-  identityEquals,
   IdentityFormatError,
   normalizeIdentity,
-} from "../../src/index.ts"
+} from "effect-spacetimedb/testing/internal"
 
 const { describe, expect, it } = EffectVitest
 

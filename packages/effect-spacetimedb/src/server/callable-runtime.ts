@@ -9,7 +9,11 @@ import { SenderError } from "spacetimedb"
 import * as ErrorCodec from "../contract/error.ts"
 import type { HttpHandlerSpec } from "../contract/http-handler.ts"
 import { isTypedHttpHandlerSpec } from "../contract/http-handler.ts"
-import { decodeDefectFromCause } from "../decode-error.ts"
+import {
+  decodeDefectFromCause,
+  renderStructuredCause,
+  StdbDecodeError,
+} from "../decode-error.ts"
 import { readTaggedErrorTag } from "../error-identity.ts"
 import {
   SyncResponse as NativeSyncResponse,
@@ -23,15 +27,15 @@ import {
 import { declaredErrorFromCause } from "./declared-errors.ts"
 import { HostErrorNames } from "./host-abi-runtime.ts"
 import {
-  CallableInterruptedError,
+  CallableInterruptedDefect,
   isStdbHostFailure,
-  ReducerAsyncNotAllowedError,
+  HandlerAsyncNotAllowedDefect,
   StdbAutoIncOverflowError,
   StdbHostCallError,
-  type StdbHostFailure,
+  type HostFailure,
   StdbNoSuchRowError,
   StdbScheduleDelayTooLongError,
-  StdbSenderFailure,
+  StdbSenderError,
   StdbUniqueAlreadyExistsError,
 } from "./services.ts"
 
@@ -39,13 +43,15 @@ export const stringifyFailure = (error: unknown): string => {
   if (typeof error === "string") {
     return error
   }
-  if (StdbSenderFailure.is(error)) {
+  if (StdbSenderError.is(error)) {
     return error.value
   }
   if (error instanceof Error) {
     return error.message
   }
-  return String(error)
+  return typeof error === "object" && error !== null
+    ? renderStructuredCause(error)
+    : String(error)
 }
 
 const asyncFiberFailure = (
@@ -56,15 +62,95 @@ const asyncFiberFailure = (
     .map((reason) => reason.defect)
     .find(Cause.isAsyncFiberError)
 
-const reducerAsyncNotAllowedDefect = (
+/**
+ * A handler that went asynchronous leaves a suspended fiber behind and comes
+ * back as an `AsyncFiberError`, which says nothing to whoever reads the cause.
+ * The boundary resolves it first, so every later step sees the clear defect.
+ */
+export const resolveAsyncEscape = (
   cause: Cause.Cause<unknown>,
-): ReducerAsyncNotAllowedError | undefined =>
-  cause.reasons
-    .filter(Cause.isDieReason)
-    .map((reason) => reason.defect)
-    .find(ReducerAsyncNotAllowedError.is)
+): Cause.Cause<unknown> => {
+  const asyncFailure = asyncFiberFailure(cause)
+  if (asyncFailure === undefined) {
+    return cause
+  }
 
-const hostFailureToken = (error: StdbHostFailure): string => {
+  asyncFailure.fiber.interruptUnsafe()
+  return Cause.die(new HandlerAsyncNotAllowedDefect())
+}
+
+/**
+ * In a reducer or a lifecycle hook, a sender failure is the module refusing its
+ * caller, which is an answer and not a fault. Those two are the only callables
+ * the host gives a `SenderError` to: anywhere else it is an undeclared failure.
+ */
+export const isSenderRefusal = (cause: Cause.Cause<unknown>): boolean =>
+  !Cause.hasDies(cause) &&
+  StdbSenderError.is(Cause.findErrorOption(cause).pipe(Option.getOrUndefined))
+
+/** Own fields a pretty cause already prints, or that say nothing of use. */
+const prettyRenderedFields: ReadonlySet<string> = new Set([
+  "_tag",
+  "cause",
+  "message",
+  "name",
+  "stack",
+])
+
+const unrenderedErrorFields = (value: unknown): ReadonlyArray<string> => {
+  if (!(value instanceof Error)) {
+    return []
+  }
+
+  const fields = Object.entries(value).filter(
+    ([key]) => !prettyRenderedFields.has(key),
+  )
+  return fields.length === 0
+    ? []
+    : [
+        `${value.name} fields: ${renderStructuredCause(Object.fromEntries(fields))}`,
+      ]
+}
+
+/**
+ * `Cause.pretty`, plus what it drops: a tagged error's own fields, which are
+ * all a tagged defect without a message has to say for itself.
+ */
+export const prettyFailureCause = (cause: Cause.Cause<unknown>): string =>
+  [
+    Cause.pretty(cause),
+    ...cause.reasons.flatMap((reason) =>
+      Cause.isDieReason(reason)
+        ? unrenderedErrorFields(reason.defect)
+        : Cause.isFailReason(reason)
+          ? unrenderedErrorFields(reason.error)
+          : [],
+    ),
+  ].join("\n")
+
+/** The longest account of a caller's bad arguments a response carries. */
+const callArgumentsMessageCharsMax = 1024
+
+/**
+ * What the caller did wrong, if anything: the schema's account of its
+ * arguments. `undefined` means the failure is the module's own, which never
+ * reaches a caller as text.
+ */
+export const callRefusalMessage = (
+  callable: string,
+  cause: unknown,
+): string | undefined => {
+  if (!StdbDecodeError.is(cause) || !Schema.isSchemaError(cause.cause)) {
+    return undefined
+  }
+
+  return `Invalid arguments for ${callable}: ${cause.cause.message}`.slice(
+    0,
+    callArgumentsMessageCharsMax,
+  )
+}
+
+const hostFailureToken = (error: HostFailure): string => {
   if (StdbUniqueAlreadyExistsError.is(error)) {
     return HostErrorNames.UniqueAlreadyExists
   }
@@ -83,7 +169,7 @@ const hostFailureToken = (error: StdbHostFailure): string => {
   return "HostCallError"
 }
 
-const hostFailureToThrow = (error: StdbHostFailure): Error =>
+const hostFailureToThrow = (error: HostFailure): Error =>
   new Error(
     `SpaceTimeDB host call failed at ${error.op} [${hostFailureToken(error)}]: ${stringifyFailure(error.cause)}`,
     {
@@ -124,12 +210,12 @@ const {
   DeclaredError: HttpDeclaredError,
 } = Data.taggedEnum<HttpResult>()
 
-class HttpDeclaredErrorDefinitionMissing extends Data.TaggedError(
-  "HttpDeclaredErrorDefinitionMissing",
+class HttpDeclaredErrorDefinitionMissingDefect extends Data.TaggedError(
+  "HttpDeclaredErrorDefinitionMissingDefect",
 ) {}
 
-class InvalidRawHttpResponse extends Data.TaggedError(
-  "InvalidRawHttpResponse",
+class InvalidRawHttpResponseDefect extends Data.TaggedError(
+  "InvalidRawHttpResponseDefect",
 ) {}
 
 const successStatus = (spec: HttpHandlerSpec): number =>
@@ -154,7 +240,7 @@ const encodeHttpSuccess = <Spec extends HttpHandlerSpec, A>(
   if (!isTypedHttpHandlerSpec(spec)) {
     return value instanceof SyncResponse
       ? Effect.succeed(HttpRaw({ response: value }))
-      : Effect.die(new InvalidRawHttpResponse())
+      : Effect.die(new InvalidRawHttpResponseDefect())
   }
 
   if (isHttpEmptySchema(spec.response)) {
@@ -191,7 +277,7 @@ const encodeDeclaredHttpError = (
 ): Effect.Effect<HttpResult, HttpResponseEncodeError> => {
   const errors = spec.errors
   if (errors == null) {
-    return Effect.die(new HttpDeclaredErrorDefinitionMissing())
+    return Effect.die(new HttpDeclaredErrorDefinitionMissingDefect())
   }
 
   return encodeHttpWire(errors.schema, error).pipe(
@@ -296,31 +382,7 @@ export const isHttpClientFault = (cause: Cause.Cause<unknown>): boolean =>
   cause.pipe(Cause.findErrorOption, Option.getOrUndefined) instanceof
   HttpRequestDecodeError
 
-export const logHttpFailureCause = <A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R> =>
-  effect.pipe(
-    Effect.tapCause((cause) =>
-      isHttpClientFault(cause)
-        ? // Request decode failures are intentional 400 responses and are not
-          // error-logged; server failures retain their full pretty-printed cause.
-          Effect.void
-        : cause.pipe(Cause.pretty, Effect.logError),
-    ),
-  )
-
-const throwAsyncOrDecodeDefect = (cause: Cause.Cause<unknown>): void => {
-  const directAsyncFailure = reducerAsyncNotAllowedDefect(cause)
-  if (directAsyncFailure != null) {
-    throw directAsyncFailure
-  }
-
-  const asyncFailure = asyncFiberFailure(cause)
-  if (asyncFailure != null) {
-    asyncFailure.fiber.interruptUnsafe()
-    throw new ReducerAsyncNotAllowedError()
-  }
-
+const throwDecodeDefect = (cause: Cause.Cause<unknown>): void => {
   const directDecodeFailure = decodeDefectFromCause(cause)
   if (directDecodeFailure != null) {
     throw directDecodeFailure
@@ -343,7 +405,7 @@ const throwFailureValue = (
   if (isStdbHostFailure(error)) {
     throw hostFailureToThrow(error)
   }
-  if (options.senderError === true && StdbSenderFailure.is(error)) {
+  if (options.senderError === true && StdbSenderError.is(error)) {
     throw new SenderError(error.value)
   }
 
@@ -353,17 +415,17 @@ const throwFailureValue = (
 const handleFailureCause = (
   cause: Cause.Cause<unknown>,
   options: {
-    readonly kind: "reducer" | "procedure" | "view" | "lifecycle"
+    readonly kind: "reducer" | "view" | "lifecycle"
     readonly senderError?: boolean
   },
 ): never => {
-  throwAsyncOrDecodeDefect(cause)
+  throwDecodeDefect(cause)
   throwUnhandledDefect(cause)
 
   const failure = Cause.findErrorOption(cause)
   return Option.match(failure, {
     onNone: () => {
-      throw new CallableInterruptedError({
+      throw new CallableInterruptedDefect({
         kind: options.kind,
         cause: Cause.squash(cause),
       })
@@ -386,17 +448,8 @@ export const toLifecycleThrow = (exit: Exit.Exit<unknown, unknown>): void =>
     onSuccess: () => undefined,
   })
 
-const toCallableValue = <A>(
-  kind: "procedure" | "view",
-  exit: Exit.Exit<A, unknown>,
-): A =>
+export const toViewValue = <A>(exit: Exit.Exit<A, unknown>): A =>
   Exit.match(exit, {
-    onFailure: (cause) => handleFailureCause(cause, { kind }),
+    onFailure: (cause) => handleFailureCause(cause, { kind: "view" }),
     onSuccess: (value) => value,
   })
-
-export const toProcedureValue = <A>(exit: Exit.Exit<A, unknown>): A =>
-  toCallableValue("procedure", exit)
-
-export const toViewValue = <A>(exit: Exit.Exit<A, unknown>): A =>
-  toCallableValue("view", exit)

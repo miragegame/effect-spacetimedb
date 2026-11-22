@@ -1,4 +1,4 @@
-import type { StdbDiagnostic } from "./diagnostic.ts"
+import type { Diagnostic } from "./diagnostic.ts"
 import { stringLiteralSatsVariantTag } from "./literal-tags.ts"
 import type { AnyModuleSpec } from "./module.ts"
 import { pushDiagnostic } from "./module-validation-common.ts"
@@ -19,7 +19,7 @@ import { type AnyValueType, structFields, structFieldWireType } from "./type.ts"
 const policyInvariantName = /^[a-z][a-z0-9]*$/
 
 const checkName = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   receiverKey: string,
   name: string,
   kind: "parameter" | "field" | "variant",
@@ -37,7 +37,7 @@ const checkName = (
 }
 
 const visitTypeNames = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   receiverKey: string,
   type: AnyValueType,
   path: ReadonlyArray<string | number>,
@@ -110,13 +110,13 @@ const visitTypeNames = (
 }
 
 /**
- * Rules for `StdbFn.receiver(...)` reducers: always public (the host delivers
- * only to client-callable reducers), never a schedule target or a settle
- * reducer, no parameter named like outbox metadata, and every name reachable
- * from the parameters policy-invariant.
+ * Rules for `Fn.receiver(...)` reducers: never a schedule target or a
+ * settle reducer (the host delivers only to client-callable reducers), no
+ * parameter named like outbox metadata, and every name reachable from the
+ * parameters policy-invariant.
  */
 export const validateReceivers = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   module: AnyModuleSpec,
 ): void => {
   for (const [key, reducer] of Object.entries(module.reducers)) {
@@ -125,14 +125,6 @@ export const validateReceivers = (
     }
 
     const path = ["reducers", key]
-    if (reducer.public !== true) {
-      pushDiagnostic(
-        diagnostics,
-        "InvalidReceiver",
-        [...path, "public"],
-        `Receiver ${key} must be public: the host delivers inter-database calls only to client-callable reducers.`,
-      )
-    }
     if ((reducer as { readonly scheduled?: unknown }).scheduled !== undefined) {
       pushDiagnostic(
         diagnostics,

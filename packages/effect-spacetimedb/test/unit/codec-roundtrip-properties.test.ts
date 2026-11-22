@@ -1,7 +1,7 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { decodeHostValue } from "../../src/contract/type/host-codec.ts"
 import { effectProperty } from "../helpers/effect-property"
 import { TestLayer } from "../helpers/test-layer"
@@ -24,7 +24,10 @@ EffectVitest.layer(TestLayer)("codec roundtrip properties", (it) => {
         valueArbitrary,
         (value) =>
           Effect.forEach(
-            [StdbTesting.ClientValueCodec.ws, StdbTesting.ClientValueCodec.db],
+            [
+              StdbInternal.ClientValueCodec.ws,
+              StdbInternal.ClientValueCodec.db,
+            ],
             Effect.fn(function* (codec) {
               const encoded = yield* codec.encode(type, value)
               const decoded = yield* codec.decode(type, encoded)
@@ -43,7 +46,7 @@ EffectVitest.layer(TestLayer)("codec roundtrip properties", (it) => {
         (value) =>
           Effect.try({
             try: () =>
-              decodeHostValue(type, StdbTesting.encodeHostValue(type, value)),
+              decodeHostValue(type, StdbInternal.encodeHostValue(type, value)),
             catch: (cause) => new HostRoundTripPropertyError({ cause }),
           }).pipe(
             Effect.map((decoded) => {

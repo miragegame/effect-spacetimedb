@@ -7,7 +7,7 @@ import * as Stdb from "effect-spacetimedb"
 import { Identity } from "spacetimedb"
 import { fixtureConnectTimeoutMillis } from "../helpers/transport-bounds"
 const { expect } = EffectVitest
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { FullModule } from "../fixtures/full-module"
 import { MinimalModule } from "../fixtures/minimal-module"
 import { TestLayer } from "../helpers/test-layer"
@@ -25,13 +25,13 @@ describe("ws resource", (it) => {
       let buildCount = 0
       let disconnectCount = 0
 
-      const scoped = StdbTesting.makeScopedFromModulePlan({
-        plan: StdbTesting.makeModulePlan(FullModule),
+      const scoped = StdbInternal.makeScopedFromModulePlan({
+        plan: StdbInternal.makeModulePlan(FullModule),
         config: {
           builder: () => {
             let onConnect:
               | ((
-                  connection: StdbTesting.ManagedWsConnection<
+                  connection: StdbInternal.ManagedWsConnection<
                     typeof FullModule,
                     unknown
                   >,
@@ -40,7 +40,7 @@ describe("ws resource", (it) => {
                 ) => void)
               | undefined
 
-            const builder: StdbTesting.GeneratedWsBuilderLike<
+            const builder: StdbInternal.GeneratedWsBuilderLike<
               typeof FullModule,
               unknown
             > = {
@@ -62,7 +62,7 @@ describe("ws resource", (it) => {
                   disconnect: () => {
                     disconnectCount += 1
                   },
-                } satisfies StdbTesting.ManagedWsConnection<
+                } satisfies StdbInternal.ManagedWsConnection<
                   typeof FullModule,
                   unknown
                 >
@@ -76,7 +76,7 @@ describe("ws resource", (it) => {
           },
           uri: "ws://localhost:3000",
           databaseName: "test",
-          connectTimeoutMillis: fixtureConnectTimeoutMillis,
+          connectDurationMax: fixtureConnectTimeoutMillis,
         },
       })
 
@@ -94,15 +94,15 @@ describe("ws resource", (it) => {
       Effect.gen(function* () {
         let disconnectCount = 0
 
-        const scoped = StdbTesting.makeScopedFromModulePlan({
-          plan: StdbTesting.makeModulePlan(FullModule),
+        const scoped = StdbInternal.makeScopedFromModulePlan({
+          plan: StdbInternal.makeModulePlan(FullModule),
           config: {
             builder: () => {
               let onConnectError:
                 | ((context: unknown, error: Error) => void)
                 | undefined
 
-              const builder: StdbTesting.GeneratedWsBuilderLike<
+              const builder: StdbInternal.GeneratedWsBuilderLike<
                 typeof FullModule,
                 unknown
               > = {
@@ -122,7 +122,7 @@ describe("ws resource", (it) => {
                     disconnect: () => {
                       disconnectCount = disconnectCount + 1
                     },
-                  } satisfies StdbTesting.ManagedWsConnection<
+                  } satisfies StdbInternal.ManagedWsConnection<
                     typeof FullModule,
                     unknown
                   >
@@ -136,7 +136,7 @@ describe("ws resource", (it) => {
             },
             uri: "ws://localhost:3000",
             databaseName: "test",
-            connectTimeoutMillis: fixtureConnectTimeoutMillis,
+            connectDurationMax: fixtureConnectTimeoutMillis,
           },
         })
 
@@ -151,15 +151,15 @@ describe("ws resource", (it) => {
     Effect.gen(function* () {
       let disconnectCount = 0
 
-      const scoped = StdbTesting.makeScopedFromModulePlan({
-        plan: StdbTesting.makeModulePlan(FullModule),
+      const scoped = StdbInternal.makeScopedFromModulePlan({
+        plan: StdbInternal.makeModulePlan(FullModule),
         config: {
           builder: () => {
             let onDisconnect:
               | ((context: unknown, error?: Error) => void)
               | undefined
 
-            const builder: StdbTesting.GeneratedWsBuilderLike<
+            const builder: StdbInternal.GeneratedWsBuilderLike<
               typeof FullModule,
               unknown
             > = {
@@ -179,7 +179,7 @@ describe("ws resource", (it) => {
                   disconnect: () => {
                     disconnectCount = disconnectCount + 1
                   },
-                } satisfies StdbTesting.ManagedWsConnection<
+                } satisfies StdbInternal.ManagedWsConnection<
                   typeof FullModule,
                   unknown
                 >
@@ -193,7 +193,7 @@ describe("ws resource", (it) => {
           },
           uri: "ws://localhost:3000",
           databaseName: "test",
-          connectTimeoutMillis: fixtureConnectTimeoutMillis,
+          connectDurationMax: fixtureConnectTimeoutMillis,
         },
       })
 
@@ -208,13 +208,13 @@ describe("ws resource", (it) => {
     Effect.gen(function* () {
       let disconnectCount = 0
 
-      const scoped = StdbTesting.makeScopedFromModulePlan({
-        plan: StdbTesting.makeModulePlan(FullModule),
+      const scoped = StdbInternal.makeScopedFromModulePlan({
+        plan: StdbInternal.makeModulePlan(FullModule),
         config: {
           builder: () => {
             let onConnect:
               | ((
-                  connection: StdbTesting.ManagedWsConnection<
+                  connection: StdbInternal.ManagedWsConnection<
                     typeof FullModule,
                     unknown
                   >,
@@ -226,7 +226,7 @@ describe("ws resource", (it) => {
               | ((context: unknown, error?: Error) => void)
               | undefined
 
-            const builder: StdbTesting.GeneratedWsBuilderLike<
+            const builder: StdbInternal.GeneratedWsBuilderLike<
               typeof FullModule,
               unknown
             > = {
@@ -249,7 +249,7 @@ describe("ws resource", (it) => {
                   disconnect: () => {
                     disconnectCount = disconnectCount + 1
                   },
-                } satisfies StdbTesting.ManagedWsConnection<
+                } satisfies StdbInternal.ManagedWsConnection<
                   typeof FullModule,
                   unknown
                 >
@@ -264,7 +264,7 @@ describe("ws resource", (it) => {
           },
           uri: "ws://localhost:3000",
           databaseName: "test",
-          connectTimeoutMillis: fixtureConnectTimeoutMillis,
+          connectDurationMax: fixtureConnectTimeoutMillis,
         },
       })
 
@@ -281,13 +281,13 @@ describe("ws resource", (it) => {
       Effect.gen(function* () {
         let disconnectCount = 0
 
-        const scoped = StdbTesting.makeScopedFromModulePlan({
-          plan: StdbTesting.makeModulePlan(FullModule),
+        const scoped = StdbInternal.makeScopedFromModulePlan({
+          plan: StdbInternal.makeModulePlan(FullModule),
           config: {
             builder: () => {
               let onConnect:
                 | ((
-                    connection: StdbTesting.ManagedWsConnection<
+                    connection: StdbInternal.ManagedWsConnection<
                       typeof FullModule,
                       unknown
                     >,
@@ -296,7 +296,7 @@ describe("ws resource", (it) => {
                   ) => void)
                 | undefined
 
-              const builder: StdbTesting.GeneratedWsBuilderLike<
+              const builder: StdbInternal.GeneratedWsBuilderLike<
                 typeof FullModule,
                 unknown
               > = {
@@ -316,7 +316,7 @@ describe("ws resource", (it) => {
                     disconnect: () => {
                       disconnectCount = disconnectCount + 1
                     },
-                  } satisfies StdbTesting.ManagedWsConnection<
+                  } satisfies StdbInternal.ManagedWsConnection<
                     typeof FullModule,
                     unknown
                   >
@@ -325,7 +325,7 @@ describe("ws resource", (it) => {
                     disconnect: () => {
                       disconnectCount = disconnectCount + 1
                     },
-                  } satisfies StdbTesting.ManagedWsConnection<
+                  } satisfies StdbInternal.ManagedWsConnection<
                     typeof FullModule,
                     unknown
                   >
@@ -339,7 +339,7 @@ describe("ws resource", (it) => {
             },
             uri: "ws://localhost:3000",
             databaseName: "test",
-            connectTimeoutMillis: fixtureConnectTimeoutMillis,
+            connectDurationMax: fixtureConnectTimeoutMillis,
           },
         })
 
@@ -357,7 +357,7 @@ describe("ws resource", (it) => {
         let disconnectCount = 0
         let onConnect:
           | ((
-              connection: StdbTesting.ManagedWsConnection<
+              connection: StdbInternal.ManagedWsConnection<
                 typeof FullModule,
                 unknown
               >,
@@ -367,11 +367,11 @@ describe("ws resource", (it) => {
           | undefined
         const built = yield* Deferred.make<void>()
 
-        const scoped = StdbTesting.makeScopedFromModulePlan({
-          plan: StdbTesting.makeModulePlan(FullModule),
+        const scoped = StdbInternal.makeScopedFromModulePlan({
+          plan: StdbInternal.makeModulePlan(FullModule),
           config: {
             builder: () => {
-              const builder: StdbTesting.GeneratedWsBuilderLike<
+              const builder: StdbInternal.GeneratedWsBuilderLike<
                 typeof FullModule,
                 unknown
               > = {
@@ -391,7 +391,7 @@ describe("ws resource", (it) => {
                     disconnect: () => {
                       disconnectCount = disconnectCount + 1
                     },
-                  } satisfies StdbTesting.ManagedWsConnection<
+                  } satisfies StdbInternal.ManagedWsConnection<
                     typeof FullModule,
                     unknown
                   >
@@ -405,7 +405,7 @@ describe("ws resource", (it) => {
             },
             uri: "ws://localhost:3000",
             databaseName: "test",
-            connectTimeoutMillis: fixtureConnectTimeoutMillis,
+            connectDurationMax: fixtureConnectTimeoutMillis,
           },
         })
 
@@ -420,7 +420,7 @@ describe("ws resource", (it) => {
           disconnect: () => {
             disconnectCount = disconnectCount + 1
           },
-        } satisfies StdbTesting.ManagedWsConnection<typeof FullModule, unknown>
+        } satisfies StdbInternal.ManagedWsConnection<typeof FullModule, unknown>
         onConnect?.(emittedConnection, Identity.zero(), "token")
 
         const exit = yield* Fiber.join(fiber)
@@ -436,13 +436,13 @@ describe("ws resource", (it) => {
       Effect.gen(function* () {
         let disconnectCount = 0
 
-        const scoped = StdbTesting.makeScopedFromModulePlan({
-          plan: StdbTesting.makeModulePlan(FullModule),
+        const scoped = StdbInternal.makeScopedFromModulePlan({
+          plan: StdbInternal.makeModulePlan(FullModule),
           config: {
             builder: () => {
               let onConnect:
                 | ((
-                    connection: StdbTesting.ManagedWsConnection<
+                    connection: StdbInternal.ManagedWsConnection<
                       typeof FullModule,
                       unknown
                     >,
@@ -454,7 +454,7 @@ describe("ws resource", (it) => {
                 | ((context: unknown, error?: Error) => void)
                 | undefined
 
-              const builder: StdbTesting.GeneratedWsBuilderLike<
+              const builder: StdbInternal.GeneratedWsBuilderLike<
                 typeof FullModule,
                 unknown
               > = {
@@ -477,7 +477,7 @@ describe("ws resource", (it) => {
                     disconnect: () => {
                       disconnectCount = disconnectCount + 1
                     },
-                  } satisfies StdbTesting.ManagedWsConnection<
+                  } satisfies StdbInternal.ManagedWsConnection<
                     typeof FullModule,
                     unknown
                   >
@@ -496,7 +496,7 @@ describe("ws resource", (it) => {
             },
             uri: "ws://localhost:3000",
             databaseName: "test",
-            connectTimeoutMillis: fixtureConnectTimeoutMillis,
+            connectDurationMax: fixtureConnectTimeoutMillis,
           },
         })
 
@@ -512,7 +512,7 @@ describe("ws resource", (it) => {
       let disconnectCount = 0
       let onConnect:
         | ((
-            connection: StdbTesting.ManagedWsConnection<
+            connection: StdbInternal.ManagedWsConnection<
               typeof FullModule,
               unknown
             >,
@@ -521,15 +521,15 @@ describe("ws resource", (it) => {
           ) => void)
         | undefined
       let connection:
-        | StdbTesting.ManagedWsConnection<typeof FullModule, unknown>
+        | StdbInternal.ManagedWsConnection<typeof FullModule, unknown>
         | undefined
       const built = yield* Deferred.make<void>()
 
-      const scoped = StdbTesting.makeScopedFromModulePlan({
-        plan: StdbTesting.makeModulePlan(FullModule),
+      const scoped = StdbInternal.makeScopedFromModulePlan({
+        plan: StdbInternal.makeModulePlan(FullModule),
         config: {
           builder: () => {
-            const builder: StdbTesting.GeneratedWsBuilderLike<
+            const builder: StdbInternal.GeneratedWsBuilderLike<
               typeof FullModule,
               unknown
             > = {
@@ -549,7 +549,7 @@ describe("ws resource", (it) => {
                   disconnect: () => {
                     disconnectCount = disconnectCount + 1
                   },
-                } satisfies StdbTesting.ManagedWsConnection<
+                } satisfies StdbInternal.ManagedWsConnection<
                   typeof FullModule,
                   unknown
                 >
@@ -563,7 +563,7 @@ describe("ws resource", (it) => {
           },
           uri: "ws://localhost:3000",
           databaseName: "test",
-          connectTimeoutMillis: fixtureConnectTimeoutMillis,
+          connectDurationMax: fixtureConnectTimeoutMillis,
         },
       })
 
@@ -588,13 +588,13 @@ describe("ws resource", (it) => {
     Effect.gen(function* () {
       let disconnectCount = 0
 
-      const scoped = StdbTesting.makeScopedFromModulePlan({
-        plan: StdbTesting.makeModulePlan(FullModule),
+      const scoped = StdbInternal.makeScopedFromModulePlan({
+        plan: StdbInternal.makeModulePlan(FullModule),
         config: {
           builder: () => {
             let onConnect:
               | ((
-                  connection: StdbTesting.ManagedWsConnection<
+                  connection: StdbInternal.ManagedWsConnection<
                     typeof FullModule,
                     unknown
                   >,
@@ -603,7 +603,7 @@ describe("ws resource", (it) => {
                 ) => void)
               | undefined
 
-            const builder: StdbTesting.GeneratedWsBuilderLike<
+            const builder: StdbInternal.GeneratedWsBuilderLike<
               typeof FullModule,
               unknown
             > = {
@@ -623,7 +623,7 @@ describe("ws resource", (it) => {
                   disconnect: () => {
                     disconnectCount = disconnectCount + 1
                   },
-                } satisfies StdbTesting.ManagedWsConnection<
+                } satisfies StdbInternal.ManagedWsConnection<
                   typeof FullModule,
                   unknown
                 >
@@ -638,7 +638,7 @@ describe("ws resource", (it) => {
           },
           uri: "ws://localhost:3000",
           databaseName: "test",
-          connectTimeoutMillis: fixtureConnectTimeoutMillis,
+          connectDurationMax: fixtureConnectTimeoutMillis,
         },
       })
 
@@ -651,8 +651,8 @@ describe("ws resource", (it) => {
 
   it.effect("scopes ws session tags per module instead of globally", () =>
     Effect.gen(function* () {
-      const full = StdbTesting.project(FullModule)
-      const minimal = StdbTesting.project(MinimalModule)
+      const full = StdbInternal.project(FullModule)
+      const minimal = StdbInternal.project(MinimalModule)
 
       expect(full.client.ws.tag()).not.toBe(minimal.client.ws.tag())
     }),
@@ -660,8 +660,8 @@ describe("ws resource", (it) => {
 
   it.effect("uses stable named ws session keys per projected module", () =>
     Effect.gen(function* () {
-      const full = StdbTesting.project(FullModule)
-      const minimal = StdbTesting.project(MinimalModule)
+      const full = StdbInternal.project(FullModule)
+      const minimal = StdbInternal.project(MinimalModule)
 
       expect(full.client.ws.tag().key).toBe(full.client.ws.Session.key)
       expect(full.client.ws.tag().key).toBe(
@@ -680,11 +680,11 @@ describe("ws resource", (it) => {
         minimal.client.ws.tag("main").key,
       )
 
-      const first = StdbTesting.project(
-        Stdb.StdbModule.make("a/b", {}).spec,
+      const first = StdbInternal.project(
+        Stdb.Module.make("a/b", {}).spec,
       ).client.ws.tag("c")
-      const second = StdbTesting.project(
-        Stdb.StdbModule.make("a", {}).spec,
+      const second = StdbInternal.project(
+        Stdb.Module.make("a", {}).spec,
       ).client.ws.tag("b/c")
       expect(first.key).not.toBe(second.key)
     }),
@@ -694,7 +694,7 @@ describe("ws resource", (it) => {
     "keeps typed ws session tags on the same runtime key as the convenience tag",
     () =>
       Effect.gen(function* () {
-        const full = StdbTesting.project(FullModule)
+        const full = StdbInternal.project(FullModule)
 
         type GeneratedErrorContext = {
           readonly generatedContext: "typed"
@@ -712,7 +712,7 @@ describe("ws resource", (it) => {
   it.effect("provides named projected ws session tags", () =>
     Effect.gen(function* () {
       let disconnectCount = 0
-      const full = StdbTesting.project(FullModule)
+      const full = StdbInternal.project(FullModule)
 
       const session = yield* full.client.ws.tag("main").pipe(
         Effect.provide(
@@ -721,7 +721,7 @@ describe("ws resource", (it) => {
               builder: () => {
                 let onConnect:
                   | ((
-                      connection: StdbTesting.ManagedWsConnection<
+                      connection: StdbInternal.ManagedWsConnection<
                         typeof FullModule,
                         unknown
                       >,
@@ -730,7 +730,7 @@ describe("ws resource", (it) => {
                     ) => void)
                   | undefined
 
-                const builder: StdbTesting.GeneratedWsBuilderLike<
+                const builder: StdbInternal.GeneratedWsBuilderLike<
                   typeof FullModule,
                   unknown
                 > = {
@@ -750,7 +750,7 @@ describe("ws resource", (it) => {
                       disconnect: () => {
                         disconnectCount = disconnectCount + 1
                       },
-                    } satisfies StdbTesting.ManagedWsConnection<
+                    } satisfies StdbInternal.ManagedWsConnection<
                       typeof FullModule,
                       unknown
                     >
@@ -764,7 +764,7 @@ describe("ws resource", (it) => {
               },
               uri: "ws://localhost:3000",
               databaseName: "test",
-              connectTimeoutMillis: fixtureConnectTimeoutMillis,
+              connectDurationMax: fixtureConnectTimeoutMillis,
             },
             { name: "main" },
           ),
@@ -780,13 +780,13 @@ describe("ws resource", (it) => {
     Effect.gen(function* () {
       const calls: Array<readonly [string, unknown]> = []
 
-      const scoped = StdbTesting.makeScopedFromModulePlan({
-        plan: StdbTesting.makeModulePlan(FullModule),
+      const scoped = StdbInternal.makeScopedFromModulePlan({
+        plan: StdbInternal.makeModulePlan(FullModule),
         config: {
           builder: () => {
             let onConnect:
               | ((
-                  connection: StdbTesting.ManagedWsConnection<
+                  connection: StdbInternal.ManagedWsConnection<
                     typeof FullModule,
                     unknown
                   >,
@@ -795,7 +795,7 @@ describe("ws resource", (it) => {
                 ) => void)
               | undefined
 
-            const builder: StdbTesting.GeneratedWsBuilderLike<
+            const builder: StdbInternal.GeneratedWsBuilderLike<
               typeof FullModule,
               unknown
             > = {
@@ -837,7 +837,7 @@ describe("ws resource", (it) => {
                 const connection = {
                   ...makeFullModuleWsConnection(),
                   disconnect: () => undefined,
-                } satisfies StdbTesting.ManagedWsConnection<
+                } satisfies StdbInternal.ManagedWsConnection<
                   typeof FullModule,
                   unknown
                 >
@@ -851,7 +851,7 @@ describe("ws resource", (it) => {
           },
           uri: "ws://localhost:3000",
           databaseName: "test",
-          connectTimeoutMillis: fixtureConnectTimeoutMillis,
+          connectDurationMax: fixtureConnectTimeoutMillis,
           token: "token",
           compression: "gzip",
           lightMode: true,
@@ -884,7 +884,7 @@ describe("ws resource", (it) => {
     () =>
       Effect.gen(function* () {
         let disconnectCount = 0
-        const full = StdbTesting.project(FullModule)
+        const full = StdbInternal.project(FullModule)
 
         const session = yield* full.client.ws
           .scopedGenerated({
@@ -892,7 +892,7 @@ describe("ws resource", (it) => {
               builder: () => {
                 let onConnect:
                   | ((
-                      connection: StdbTesting.ManagedWsConnection<
+                      connection: StdbInternal.ManagedWsConnection<
                         typeof FullModule,
                         unknown
                       >,
@@ -901,7 +901,7 @@ describe("ws resource", (it) => {
                     ) => void)
                   | undefined
 
-                const builder: StdbTesting.GeneratedWsBuilderLike<
+                const builder: StdbInternal.GeneratedWsBuilderLike<
                   typeof FullModule,
                   unknown
                 > = {
@@ -921,7 +921,7 @@ describe("ws resource", (it) => {
                       disconnect: () => {
                         disconnectCount = disconnectCount + 1
                       },
-                    } satisfies StdbTesting.ManagedWsConnection<
+                    } satisfies StdbInternal.ManagedWsConnection<
                       typeof FullModule,
                       unknown
                     >
@@ -936,7 +936,7 @@ describe("ws resource", (it) => {
             },
             uri: "ws://localhost:3000",
             databaseName: "test",
-            connectTimeoutMillis: fixtureConnectTimeoutMillis,
+            connectDurationMax: fixtureConnectTimeoutMillis,
           })
           .pipe(Effect.scoped)
 
@@ -946,17 +946,17 @@ describe("ws resource", (it) => {
   )
 
   it("rejects a connect timeout that bounds nothing when the resource is built", () => {
-    const unboundedTimeouts = [Number.POSITIVE_INFINITY, 0, -1, Number.NaN]
-    for (const connectTimeoutMillis of unboundedTimeouts) {
+    const unboundedTimeouts = [0, -1, Number.NaN]
+    for (const connectDurationMax of unboundedTimeouts) {
       expect(() =>
-        StdbTesting.makeScopedFromModulePlan({
-          plan: StdbTesting.makeModulePlan(FullModule),
+        StdbInternal.makeScopedFromModulePlan({
+          plan: StdbInternal.makeModulePlan(FullModule),
           config: {
             builder: () =>
               expect.unreachable("an invalid bound must fail first"),
             uri: "ws://localhost:3000",
             databaseName: "test",
-            connectTimeoutMillis,
+            connectDurationMax,
           },
         }),
       ).toThrow(TypeError)

@@ -9,5 +9,5 @@ export type {
   StdbResultDescriptor,
   StdbStructDescriptor,
   StdbSumDescriptor,
-  StdbTypeDescriptor,
+  TypeDescriptor,
 } from "../../contract/type/descriptor.ts"

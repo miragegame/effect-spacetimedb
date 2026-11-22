@@ -20,7 +20,7 @@ import {
 import { fixtureCallDurationMax } from "../helpers/transport-bounds"
 const { expect } = EffectVitest
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { ExampleErrors, FullModule, UserMissing } from "../fixtures/full-module"
 import { MinimalModule } from "../fixtures/minimal-module"
 import { encodeJson } from "../helpers/json"
@@ -240,8 +240,10 @@ describe("http client", (it) => {
           .userGet({ userId: "user-1" as never })
           .pipe(Effect.provide(reject), Effect.flip)
 
-        expect(reducerFailure).toBeInstanceOf(StdbTesting.RemoteRejectedError)
-        expect(procedureFailure).toBeInstanceOf(StdbTesting.RemoteRejectedError)
+        expect(reducerFailure).toBeInstanceOf(StdbInternal.RemoteRejectedError)
+        expect(procedureFailure).toBeInstanceOf(
+          StdbInternal.RemoteRejectedError,
+        )
         expect(reducerFailure).toMatchObject({
           status: 429,
           raw: "rate limited",
@@ -312,7 +314,7 @@ describe("http client", (it) => {
             Option.getOrUndefined,
           )
 
-          expect(failure).toBeInstanceOf(StdbTesting.StdbDecodeError)
+          expect(failure).toBeInstanceOf(StdbInternal.StdbDecodeError)
           expect(failure).toEqual(
             expect.objectContaining({
               phase: "args",
@@ -622,15 +624,18 @@ describe("http client", (it) => {
                     capturedArgs = request.body
                     return {
                       body: encodeJson([
+                        0,
                         [
                           [
-                            "artifact-1",
-                            [0, "build-1"],
-                            "2026-06-11T00:00:00.000Z",
+                            [
+                              "artifact-1",
+                              [0, "build-1"],
+                              "2026-06-11T00:00:00.000Z",
+                            ],
+                            ["artifact-2", [1, []], "2026-06-11T00:00:01.000Z"],
                           ],
-                          ["artifact-2", [1, []], "2026-06-11T00:00:01.000Z"],
+                          [0, ["artifact-1", ["stable", "candidate"]]],
                         ],
-                        [0, ["artifact-1", ["stable", "candidate"]]],
                       ]),
                     }
                   },
@@ -741,7 +746,7 @@ describe("http client", (it) => {
                 Effect.try({
                   try: () => {
                     capturedBodyText = request.bodyText
-                    return {}
+                    return { body: encodeJson([0, []]) }
                   },
                   catch: testEffectCallbackError(
                     "effect-spacetimedb/integration/http-client",
@@ -769,7 +774,7 @@ describe("http client", (it) => {
           Effect.provide(
             makeMockHttpClientLayer(() =>
               Effect.succeed({
-                body: `[42,${WideValue},${I64Min},${I128Min},[1234],[5000],[0],[17],[18]]`,
+                body: `[0,[42,${WideValue},${I64Min},${I128Min},[1234],[5000],[0],[17],[18]]]`,
               }),
             ),
           ),
@@ -789,7 +794,7 @@ describe("http client", (it) => {
           Effect.provide(
             makeMockHttpClientLayer(() =>
               Effect.succeed({
-                body: `[0,${WideU64}]`,
+                body: `[0,[0,${WideU64}]]`,
               }),
             ),
           ),
@@ -800,7 +805,7 @@ describe("http client", (it) => {
           Effect.provide(
             makeMockHttpClientLayer(() =>
               Effect.succeed({
-                body: "[1,[]]",
+                body: "[0,[1,[]]]",
               }),
             ),
           ),
@@ -811,7 +816,7 @@ describe("http client", (it) => {
           Effect.provide(
             makeMockHttpClientLayer(() =>
               Effect.succeed({
-                body: `[0,[${WideU64}]]`,
+                body: `[0,[0,[${WideU64}]]]`,
               }),
             ),
           ),
@@ -835,7 +840,7 @@ describe("http client", (it) => {
           Effect.provide(
             makeMockHttpClientLayer(() =>
               Effect.succeed({
-                body: "[]",
+                body: "[0,[]]",
               }),
             ),
           ),
@@ -853,7 +858,7 @@ describe("http client", (it) => {
         )
         expect(declaredDone).toBeUndefined()
 
-        const encodedError = yield* StdbTesting.ContractError.encodeString(
+        const encodedError = yield* StdbInternal.ContractError.encodeString(
           ExampleErrors,
           UserMissing.make({ userId: "user-1" as never }),
         )
@@ -947,7 +952,7 @@ describe("http client", (it) => {
         if (Exit.isFailure(exit)) {
           expect(
             Option.getOrUndefined(Cause.findErrorOption(exit.cause)),
-          ).toBeInstanceOf(StdbTesting.TransportError)
+          ).toBeInstanceOf(StdbInternal.TransportError)
         }
       }).pipe(Effect.provide(httpLayer))
     },
@@ -981,7 +986,7 @@ describe("http client", (it) => {
       if (Exit.isFailure(exit)) {
         expect(
           Option.getOrUndefined(Cause.findErrorOption(exit.cause)),
-        ).toBeInstanceOf(StdbTesting.StdbDecodeError)
+        ).toBeInstanceOf(StdbInternal.StdbDecodeError)
       }
     }).pipe(Effect.provide(httpLayer))
   })

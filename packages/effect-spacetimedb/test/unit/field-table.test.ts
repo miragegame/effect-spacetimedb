@@ -3,35 +3,127 @@ import * as EffectVitest from "@effect/vitest"
 import * as Schema from "effect/Schema"
 const { expect } = EffectVitest
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { TestLayer } from "../helpers/test-layer"
 
 const describe = EffectVitest.layer(TestLayer)
 
 describe("field and table contracts", (it) => {
+  it("resolves storage at module scope and omits the in-memory SDK default", () => {
+    const columns = { id: Stdb.u64().unique() }
+    const inherited = Stdb.table("inherited", { columns })
+    const disk = { tableCachePolicyDefault: "required_on_disk" } as const
+    const options = StdbInternal.materializeTableOptions
+    expect(inherited.cachePolicy).toBeUndefined()
+    expect(options(inherited).cachePolicy).toBeUndefined()
+    expect(options(inherited, disk).cachePolicy).toBe("required_on_disk")
+    expect(
+      options(
+        Stdb.table("memory", { columns, cachePolicy: "required_in_memory" }),
+        disk,
+      ).cachePolicy,
+    ).toBeUndefined()
+    expect(
+      options(Stdb.table("events", { columns, event: true }), disk).cachePolicy,
+    ).toBeUndefined()
+    expect(
+      options(
+        Stdb.scheduledTable("jobs", {
+          columns: {},
+          cachePolicy: "no_requirement",
+        }),
+        disk,
+      ).cachePolicy,
+    ).toBe("no_requirement")
+    expect(
+      Stdb.Module.make("valid", { settings: disk }).addTables(inherited).spec
+        .tables.inherited.cachePolicy,
+    ).toBeUndefined()
+  })
+
+  it("diagnoses invalid storage declarations and identifies each incompatible index", () => {
+    const disk = { tableCachePolicyDefault: "required_on_disk" } as const
+    const indexed = Stdb.table("rows", {
+      columns: { id: Stdb.u64().index("direct") },
+    })
+    const declared = Stdb.table("rows", {
+      cachePolicy: "no_requirement",
+      columns: { id: Stdb.u64() },
+      indexes: [{ name: "by_id", algorithm: "hash", columns: ["id"] }],
+    })
+    expect(
+      () =>
+        Stdb.Module.make("invalid", { settings: disk }).addTables(indexed).spec,
+    ).toThrow(/CachePolicyRequiresBTree.*rows.*module default.*id/s)
+    expect(
+      () => Stdb.Module.make("invalid", {}).addTables(declared).spec,
+    ).toThrow(/CachePolicyRequiresBTree.*rows.*no_requirement.*by_id/s)
+    const invalidPolicy = "cold" as Stdb.TableCachePolicy
+    expect(
+      () =>
+        Stdb.Module.make("invalid", {
+          settings: { tableCachePolicyDefault: invalidPolicy },
+        }).spec,
+    ).toThrow(/UnknownTableCachePolicy.*cold/)
+    expect(
+      () =>
+        Stdb.Module.make("invalid", {}).addTables({
+          ...indexed,
+          cachePolicy: invalidPolicy,
+        }).spec,
+    ).toThrow(/UnknownTableCachePolicy.*cold/)
+    expect(
+      () =>
+        Stdb.Module.make("invalid", {}).addTables({
+          ...declared,
+          event: true,
+        }).spec,
+    ).toThrow(/EventTableCachePolicy/)
+  })
+
   it.effect("validates field metadata invariants", () =>
     Effect.gen(function* () {
       expect(() => Stdb.string().primaryKey().optional()).toThrow(
         "optional and a primary key",
       )
 
-      expect(() => Stdb.u64().autoInc()).toThrow(
-        "autoInc fields must also be primary keys",
+      expect(() => Stdb.u64().autoInc().optional()).toThrow(
+        "both optional and autoInc",
       )
 
       expect(() => Stdb.u64().primaryKey().default(0n)).toThrow(
         "default cannot be combined with primaryKey",
       )
 
-      expect(() => Stdb.string().name("")).toThrow(
+      expect(() => Stdb.string().columnName("")).toThrow(
         "database name cannot be empty",
       )
 
-      expect(() => Stdb.string().name(" ")).toThrow(
+      expect(() => Stdb.string().columnName(" ")).toThrow(
         "database name cannot be blank",
       )
     }),
   )
+
+  it("takes autoInc on any integer column, in any chain order", () => {
+    const serials = {
+      plain: Stdb.u64().autoInc(),
+      uniqueFirst: Stdb.u64().unique().autoInc(),
+      uniqueLast: Stdb.u64().autoInc().unique(),
+      indexedFirst: Stdb.u64().index().autoInc(),
+      indexedLast: Stdb.u64().autoInc().index(),
+      keyLast: Stdb.u64().autoInc().primaryKey(),
+      keyFirst: Stdb.u64().primaryKey().autoInc(),
+    }
+
+    for (const column of Object.values(serials)) {
+      expect(StdbInternal.fieldOptions(column).autoInc).toBe(true)
+    }
+    expect(StdbInternal.fieldOptions(serials.uniqueLast).unique).toBe(true)
+    expect(StdbInternal.fieldOptions(serials.indexedLast).index).toBe("btree")
+    expect(StdbInternal.fieldOptions(serials.keyLast).primaryKey).toBe(true)
+    expect(() => Stdb.string().autoInc()).toThrow("autoInc is not supported")
+  })
 
   it.effect("rejects defaults and native names for non-column builders", () =>
     Effect.gen(function* () {
@@ -40,14 +132,17 @@ describe("field and table contracts", (it) => {
       })
 
       expect(() =>
-        Nested.default({ value: 1 }).name("nested_value"),
+        Nested.default({ value: 1 }).columnName("nested_value"),
       ).not.toThrow()
       expect(() => Stdb.unit().default(undefined)).toThrow(
         "default is not supported",
       )
       expect(() => Stdb.option(Stdb.string()).default(undefined)).not.toThrow()
       expect(() =>
-        Stdb.string().optional().default("optional").name("optional_name"),
+        Stdb.string()
+          .optional()
+          .default("optional")
+          .columnName("optional_name"),
       ).not.toThrow()
     }),
   )
@@ -57,22 +152,24 @@ describe("field and table contracts", (it) => {
       const userTable = Stdb.table("user", {
         columns: {
           id: Stdb.string().primaryKey(),
-          displayName: Stdb.string().name("display_name").default("anonymous"),
+          displayName: Stdb.string()
+            .columnName("display_name")
+            .default("anonymous"),
           score: Stdb.u32().default(0),
         },
       })
 
-      expect(StdbTesting.fieldOptions(userTable.columns.displayName).name).toBe(
-        "display_name",
-      )
       expect(
-        StdbTesting.fieldOptions(userTable.columns.displayName).hasDefault,
+        StdbInternal.fieldOptions(userTable.columns.displayName).name,
+      ).toBe("display_name")
+      expect(
+        StdbInternal.fieldOptions(userTable.columns.displayName).hasDefault,
       ).toBe(true)
       expect(
-        StdbTesting.fieldOptions(userTable.columns.displayName).valueDefault,
+        StdbInternal.fieldOptions(userTable.columns.displayName).valueDefault,
       ).toBe("anonymous")
       expect(
-        StdbTesting.fieldOptions(userTable.columns.score).valueDefault,
+        StdbInternal.fieldOptions(userTable.columns.score).valueDefault,
       ).toBe(0)
     }),
   )
@@ -111,13 +208,13 @@ describe("field and table contracts", (it) => {
       expect(reminderTable.indexes).toHaveLength(1)
       expect(reminderTable.constraints).toHaveLength(1)
       expect(
-        StdbTesting.fieldOptions(reminderTable.columns.scheduledId).autoInc,
+        StdbInternal.fieldOptions(reminderTable.columns.scheduledId).autoInc,
       ).toBe(true)
       expect(
-        StdbTesting.fieldOptions(reminderTable.columns.scheduledId).name,
+        StdbInternal.fieldOptions(reminderTable.columns.scheduledId).name,
       ).toBe("scheduled_id")
       expect(
-        StdbTesting.fieldOptions(reminderTable.columns.scheduledAt).name,
+        StdbInternal.fieldOptions(reminderTable.columns.scheduledAt).name,
       ).toBe("scheduled_at")
       expect(reminderTable.columns.scheduledAt).toBeDefined()
     }),
@@ -128,7 +225,7 @@ describe("field and table contracts", (it) => {
       expect(() =>
         Stdb.scheduledTable("reserved_native_id", {
           columns: {
-            note: Stdb.string().name("scheduled_id"),
+            note: Stdb.string().columnName("scheduled_id"),
           },
         }),
       ).toThrow("reserved native column name scheduled_id")
@@ -136,7 +233,7 @@ describe("field and table contracts", (it) => {
       expect(() =>
         Stdb.scheduledTable("reserved_native_at", {
           columns: {
-            note: Stdb.string().name("scheduled_at"),
+            note: Stdb.string().columnName("scheduled_at"),
           },
         }),
       ).toThrow("reserved native column name scheduled_at")
@@ -188,10 +285,10 @@ describe("field and table contracts", (it) => {
       })
 
       expect(
-        StdbTesting.fieldOptions(algorithmTable.columns.emailHash).index,
+        StdbInternal.fieldOptions(algorithmTable.columns.emailHash).index,
       ).toBe("hash")
       expect(
-        StdbTesting.fieldOptions(algorithmTable.columns.scoreDirect).index,
+        StdbInternal.fieldOptions(algorithmTable.columns.scoreDirect).index,
       ).toBe("direct")
       expect(algorithmTable.indexes).toEqual([
         {
@@ -211,7 +308,7 @@ describe("field and table contracts", (it) => {
         },
       ])
       expect(
-        StdbTesting.materializeTableOptions(algorithmTable).indexes,
+        StdbInternal.materializeTableOptions(algorithmTable).indexes,
       ).toEqual([
         {
           accessor: "emailHash",
@@ -252,7 +349,7 @@ describe("field and table contracts", (it) => {
         })
 
         expect(() =>
-          StdbTesting.materializeTableOptions(invalidDirectTable),
+          StdbInternal.materializeTableOptions(invalidDirectTable),
         ).toThrow(
           "Table invalidDirect direct index tenantScoreDirect must target exactly one column",
         )
@@ -268,7 +365,7 @@ describe("field and table contracts", (it) => {
         },
       })
 
-      expect(StdbTesting.fieldOptions(userTable.columns.note).optional).toBe(
+      expect(StdbInternal.fieldOptions(userTable.columns.note).optional).toBe(
         true,
       )
       expect(() =>
@@ -292,7 +389,7 @@ describe("field and table contracts", (it) => {
           id: Stdb.u64().primaryKey(),
         },
       })
-      const module = Stdb.StdbModule.make("table_builder_cutover", {})
+      const module = Stdb.Module.make("table_builder_cutover", {})
         .addTables(user)
         .addTables(audit)
 
@@ -309,7 +406,7 @@ describe("field and table contracts", (it) => {
           id: Stdb.string().primaryKey(),
         },
       })
-      const module = Stdb.StdbModule.make("single_table_builder", {}).addTables(
+      const module = Stdb.Module.make("single_table_builder", {}).addTables(
         user,
       )
 
@@ -332,7 +429,7 @@ describe("field and table contracts", (it) => {
       })
 
       expect(() =>
-        Stdb.StdbModule.make("duplicate_tables_same_call", {}).addTables(
+        Stdb.Module.make("duplicate_tables_same_call", {}).addTables(
           first,
           second,
         ),
@@ -354,7 +451,7 @@ describe("field and table contracts", (it) => {
       })
 
       expect(() =>
-        Stdb.StdbModule.make("duplicate_tables", {})
+        Stdb.Module.make("duplicate_tables", {})
           .addTables(first)
           .addTables(second),
       ).toThrow("duplicate table key duplicate_user")
@@ -375,11 +472,11 @@ describe("field and table contracts", (it) => {
 
         expect(
           () =>
-            Stdb.StdbModule.make("invalid", {})
+            Stdb.Module.make("invalid", {})
               .addTables(impossible)
               .add(
-                Stdb.StdbGroup.make("Invalid").add(
-                  Stdb.StdbFn.scheduledProcedure("noop", {
+                Stdb.Group.make("Invalid").add(
+                  Stdb.Fn.scheduledProcedure("noop", {
                     table: impossible,
                   }),
                 ),
@@ -405,11 +502,11 @@ describe("field and table contracts", (it) => {
 
         expect(() =>
           Stdb.project(
-            Stdb.StdbModule.make("invalid_schedule_target", {})
+            Stdb.Module.make("invalid_schedule_target", {})
               .addTables(reminder)
               .add(
-                Stdb.StdbGroup.make("InvalidSchedule").add(
-                  Stdb.StdbFn.scheduledReducer("reminderFire", {
+                Stdb.Group.make("InvalidSchedule").add(
+                  Stdb.Fn.scheduledReducer("reminderFire", {
                     table: unregistered,
                   }),
                 ),
@@ -431,8 +528,7 @@ describe("field and table contracts", (it) => {
         })
 
         expect(
-          () =>
-            Stdb.StdbModule.make("invalid", {}).addTables(plainScheduleAt).spec,
+          () => Stdb.Module.make("invalid", {}).addTables(plainScheduleAt).spec,
         ).toThrow("use Stdb.scheduledTable")
       }),
   )

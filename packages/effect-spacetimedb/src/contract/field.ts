@@ -16,25 +16,31 @@ export type FieldOptions<Value = unknown> = {
 
 export const FieldTypeId = "__effectSpacetimeDbFieldType" as const
 
-type NormalizedFieldOptions<Options extends FieldOptions = FieldOptions> = {
-  readonly primaryKey: Options["primaryKey"] extends true ? true : false
-  readonly autoInc: Options["autoInc"] extends true ? true : false
-  readonly unique: Options["unique"] extends true ? true : false
+// A chained field intersects one of these per chain step, so an option a step
+// does not set stays open. Closing it (`false`, `undefined`) would contradict the
+// later step that sets it, and the contradiction collapses the field's options
+// to `never`, which reads as a key that is also optional.
+export type NormalizedFieldOptions<
+  Options extends FieldOptions = FieldOptions,
+> = {
+  readonly primaryKey: Options["primaryKey"] extends true ? true : boolean
+  readonly autoInc: Options["autoInc"] extends true ? true : boolean
+  readonly unique: Options["unique"] extends true ? true : boolean
   readonly index: Options extends {
     readonly index: infer Algorithm extends IndexAlgorithm
   }
     ? Algorithm
-    : undefined
-  readonly optional: Options["optional"] extends true ? true : false
+    : IndexAlgorithm | undefined
+  readonly optional: Options["optional"] extends true ? true : boolean
   readonly hasDefault: Options extends { readonly default: unknown }
     ? true
-    : false
+    : boolean
   readonly valueDefault: Options extends { readonly default: infer Value }
     ? Value
-    : undefined
+    : unknown
   readonly name: Options extends { readonly name: infer Name extends string }
     ? Name
-    : undefined
+    : string | undefined
 }
 
 export type AnyNormalizedFieldOptions = {

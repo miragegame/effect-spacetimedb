@@ -1,4 +1,4 @@
-import { make as makeServer } from "../../src/server/bind.ts"
+import { makeServer } from "../helpers/module-server"
 import * as EffectVitest from "@effect/vitest"
 import * as Console from "effect/Console"
 import * as Data from "effect/Data"
@@ -207,28 +207,20 @@ describe("HTTP handler runtime", (it) => {
     try {
       const server = makeServer({ module: RuntimeModule })
       const handlers = server.httpHandlers({
-        raw: server.httpHandler(
-          Effect.fn(function* () {
-            return yield* new CompilerHttpHandlerBindingTestError({
-              cause: "undeclared failure",
-            })
-          }),
-        ) as never,
-        rawThrow: server.httpHandler(
-          Effect.fn(function* () {
-            return yield* Effect.die(new HttpHandlerRuntimeDefect())
-          }),
-        ) as never,
-        invalidResponse: server.httpHandler(
-          Effect.fn(function* () {
-            return { ok: "bad" } as unknown as { readonly ok: boolean }
-          }),
-        ),
-        voidRequest: server.httpHandler(
-          Effect.fn(function* () {
-            return { ok: true }
-          }),
-        ),
+        raw: Effect.fn(function* () {
+          return yield* new CompilerHttpHandlerBindingTestError({
+            cause: "undeclared failure",
+          })
+        }) as never,
+        rawThrow: Effect.fn(function* () {
+          return yield* Effect.die(new HttpHandlerRuntimeDefect())
+        }) as never,
+        invalidResponse: Effect.fn(function* () {
+          return { ok: "bad" } as unknown as { readonly ok: boolean }
+        }),
+        voidRequest: Effect.fn(function* () {
+          return { ok: true }
+        }),
       })
       const ctx = makeHttpCtx(makeDb().db)
       const invalid = handlers.invalidResponse.invoke(
@@ -300,58 +292,43 @@ describe("HTTP handler runtime", (it) => {
         runtime: TestSyncRunner,
       })
       const handlers = server.httpHandlers({
-        raw: server.httpHandler(
-          Effect.fn(function* (req: Stdb.Request) {
-            return new Stdb.SyncResponse(req.text(), { status: 201 })
-          }),
-        ),
-        rawThrow: server.httpHandler(
-          Effect.fn(function* (req: Stdb.Request) {
-            void req.json()
-            return new Stdb.SyncResponse("unreachable")
-          }),
-        ),
-        bigintValue: server.httpHandler(
-          Effect.fn(function* (input: { readonly value: bigint }) {
-            return { value: input.value + 1n }
-          }),
-        ),
-        voidRequest: server.httpHandler(
-          Effect.fn(function* (_input: void) {
-            return { ok: true }
-          }),
-        ),
-        undefinedRequest: server.httpHandler(
-          Effect.fn(function* (_input: undefined) {
-            return { ok: true }
-          }),
-        ),
-        voidResponse: server.httpHandler(
-          Effect.fn(function* (_input: { readonly ok: boolean }) {
-            return undefined
-          }),
-        ),
-        undefinedResponse: server.httpHandler(
-          Effect.fn(function* (_input: { readonly ok: boolean }) {
-            return undefined
-          }),
-        ),
-        invalidResponse: server.httpHandler(
-          Effect.fn(function* () {
-            return { ok: "not-bool" } as unknown as { readonly ok: boolean }
-          }),
-        ),
-        declaredError: server.httpHandler(
-          Effect.fn(function* () {
-            return yield* MissingUser.make({ id: "missing" })
-          }),
-        ),
-        mutate: server.httpHandler(
-          Effect.fn(function* (input: { readonly id: string }) {
-            yield* server.httpTransaction(({ db }) => db.user.insert(input))
-            return { ok: true }
-          }),
-        ),
+        raw: Effect.fn(function* (req: Stdb.Request) {
+          return new Stdb.SyncResponse(req.text(), { status: 201 })
+        }),
+        rawThrow: Effect.fn(function* (req: Stdb.Request) {
+          void req.json()
+          return new Stdb.SyncResponse("unreachable")
+        }),
+        bigintValue: Effect.fn(function* (input: { readonly value: bigint }) {
+          return { value: input.value + 1n }
+        }),
+        voidRequest: Effect.fn(function* (_input: void) {
+          return { ok: true }
+        }),
+        undefinedRequest: Effect.fn(function* (_input: undefined) {
+          return { ok: true }
+        }),
+        voidResponse: Effect.fn(function* (_input: { readonly ok: boolean }) {
+          return undefined
+        }),
+        undefinedResponse: Effect.fn(function* (_input: {
+          readonly ok: boolean
+        }) {
+          return undefined
+        }),
+        invalidResponse: Effect.fn(function* () {
+          return { ok: "not-bool" } as unknown as { readonly ok: boolean }
+        }),
+        declaredError: Effect.fn(function* () {
+          return yield* MissingUser.make({ id: "missing" })
+        }),
+        mutate: Effect.fn(function* (input: { readonly id: string }) {
+          const tx = yield* server.HttpTx
+          yield* tx.run(
+            Effect.flatMap(server.Db, (db) => db.user.insert(input)),
+          )
+          return { ok: true }
+        }),
       })
       const { db, users } = makeDb()
       const ctx = makeHttpCtx(db)
@@ -467,12 +444,10 @@ describe("HTTP handler runtime", (it) => {
       })
       const records: Array<CapturedLog> = []
       const handlers = server.httpHandlers({
-        raw: server.httpHandler(
-          Effect.fn(function* (_req: Stdb.Request) {
-            yield* logWithCapturedLogger(records, "http log")
-            return new Stdb.SyncResponse("ok")
-          }),
-        ),
+        raw: Effect.fn(function* (_req: Stdb.Request) {
+          yield* logWithCapturedLogger(records, "http log")
+          return new Stdb.SyncResponse("ok")
+        }),
       })
 
       const { db } = makeDb()
@@ -486,6 +461,7 @@ describe("HTTP handler runtime", (it) => {
       expect(records[0]?.annotations).toEqual({
         module: "http_runtime",
         handler: "raw",
+        route: "POST /raw",
         kind: "httpHandler",
       })
     }),
@@ -499,11 +475,9 @@ describe("HTTP handler runtime", (it) => {
         runtime: makeBoundaryThrowingSyncRunner(calls),
       })
       const handlers = server.httpHandlers({
-        boundary: server.httpHandler(
-          Effect.fn(function* (_req: Stdb.Request) {
-            return new Stdb.SyncResponse("unreachable")
-          }),
-        ),
+        boundary: Effect.fn(function* (_req: Stdb.Request) {
+          return new Stdb.SyncResponse("unreachable")
+        }),
       })
 
       const response = handlers.boundary.invoke(

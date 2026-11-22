@@ -1,7 +1,7 @@
+import type * as StdbServer from "effect-spacetimedb/server"
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 import { build } from "effect-spacetimedb/server-compiler"
-import type * as StdbServer from "effect-spacetimedb/server"
 
 const scheduledJob = Stdb.scheduledTable("scheduledJob", {
   columns: {
@@ -15,19 +15,19 @@ const user = Stdb.table("user", {
   },
 })
 
-const Scheduled = Stdb.StdbGroup.make("Scheduled").add(
-  Stdb.StdbFn.scheduledReducer("scheduledJobFire", {
+const Scheduled = Stdb.Group.make("Scheduled").add(
+  Stdb.Fn.scheduledReducer("scheduledJobFire", {
     table: scheduledJob,
   }),
 )
 
-const ScheduledModule = Stdb.StdbModule.make("scheduled_api", {})
+const ScheduledModule = Stdb.Module.make("scheduled_api", {})
   .addTables(scheduledJob, user)
   .add(Scheduled)
 
 const { Db } = ScheduledModule
 
-const ScheduledLive = Stdb.StdbBuilder.group(ScheduledModule, "Scheduled", {
+const ScheduledLive = Stdb.Builder.group(ScheduledModule, "Scheduled", {
   scheduledJobFire: Effect.fn(function* ({ data }) {
     const scheduledId: bigint = data.scheduledId
     const note: string = data.note
@@ -67,30 +67,29 @@ void readonlyDb.scheduledJob.schedule({
 })
 
 // @ts-expect-error scheduled targets must reference a scheduled table
-void Stdb.StdbFn.scheduledReducer("plainUserFire", { table: user })
+void Stdb.Fn.scheduledReducer("plainUserFire", { table: user })
 
 const missingTargetTable = Stdb.scheduledTable("missingTarget", {
   columns: {},
 })
-const MissingTargetModule = Stdb.StdbModule.make(
-  "missing_target",
-  {},
-).addTables(missingTargetTable)
+const MissingTargetModule = Stdb.Module.make("missing_target", {}).addTables(
+  missingTargetTable,
+)
 // @ts-expect-error scheduled tables must have a scheduled reducer or procedure
 void build(MissingTargetModule, [])
 
 const unregisteredTargetTable = Stdb.scheduledTable("unregisteredTarget", {
   columns: {},
 })
-const Unregistered = Stdb.StdbGroup.make("Unregistered").add(
-  Stdb.StdbFn.scheduledReducer("unregisteredTargetFire", {
+const Unregistered = Stdb.Group.make("Unregistered").add(
+  Stdb.Fn.scheduledReducer("unregisteredTargetFire", {
     table: unregisteredTargetTable,
   }),
 )
-const UnregisteredModule = Stdb.StdbModule.make("unregistered_target", {}).add(
+const UnregisteredModule = Stdb.Module.make("unregistered_target", {}).add(
   Unregistered,
 )
-const UnregisteredLive = Stdb.StdbBuilder.group(
+const UnregisteredLive = Stdb.Builder.group(
   UnregisteredModule,
   "Unregistered",
   {

@@ -16,7 +16,7 @@ const ManyGroupResponse = Schema.Struct({
 })
 
 const route = <const Name extends string>(name: Name) =>
-  Stdb.StdbHttp.post(name, `/${name}`, {
+  Stdb.Http.post(name, `/${name}`, {
     request: ManyGroupRequest,
     response: ManyGroupResponse,
   })
@@ -24,9 +24,9 @@ const route = <const Name extends string>(name: Name) =>
 const group = <const Id extends string, const Name extends string>(
   id: Id,
   name: Name,
-) => Stdb.StdbHttpGroup.make(id).add(route(name))
+) => Stdb.HttpGroup.make(id).add(route(name))
 
-const ManyHttpGroupsModule = Stdb.StdbModule.make(
+const ManyHttpGroupsModule = Stdb.Module.make(
   "http_api_projection_many_groups",
   {},
 ).add(

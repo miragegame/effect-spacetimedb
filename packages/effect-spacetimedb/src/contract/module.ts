@@ -1,4 +1,5 @@
 import type { Declarations as EnvironmentDeclarations } from "./environment.ts"
+import type { MountRecord } from "./mount.ts"
 import type { LifecycleSpecs } from "./lifecycle.ts"
 import type { HttpHandlerSpec } from "./http-handler.ts"
 import type { ProcedureSpec } from "./procedure.ts"
@@ -7,11 +8,13 @@ import type { ModuleSettings } from "./settings.ts"
 import type { AnyTableSpec } from "./table.ts"
 import type { AnyViewSpec } from "./view.ts"
 import { canonicalNameForPolicy, snakeCaseName } from "./canonical-name.ts"
-import { StdbValidationError, type StdbDiagnostic } from "./diagnostic.ts"
+import { StdbValidationDefect, type Diagnostic } from "./diagnostic.ts"
 import { validate } from "./module-validation-public.ts"
 import { isReceiverSpec } from "./remote-interface.ts"
 
 export type ModuleWireNames = {
+  /** Canonical SQL and wire namespaces indexed by the parent module's accessor keys. */
+  readonly mounts?: Record<string, string>
   readonly tables: Record<string, string>
   readonly views: Record<string, string>
   readonly functions: Record<string, string>
@@ -31,7 +34,10 @@ export type ModuleSpec<
   ReducerGroups extends Record<string, string> = Record<string, never>,
   ProcedureGroups extends Record<string, string> = Record<string, never>,
   Environment extends EnvironmentDeclarations = {},
+  Mounts extends MountRecord = {},
 > = {
+  /** The immediate Effect and native namespaces declared by this module. */
+  readonly mounts?: Mounts | undefined
   readonly kind: "module"
   readonly name: string
   readonly settings: ModuleSettings
@@ -45,12 +51,13 @@ export type ModuleSpec<
   readonly reducers: Reducers
   readonly procedures: Procedures
   readonly httpHandlers: HttpHandlers
+  readonly httpGroupNames?: readonly string[] | undefined
   readonly httpGroups: HttpGroups
   readonly reducerGroups: ReducerGroups
   readonly procedureGroups: ProcedureGroups
   readonly lifecycle: Lifecycle
   readonly wireNames: ModuleWireNames
-  readonly diagnostics: ReadonlyArray<StdbDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic>
 }
 
 export type AnyModuleSpec = ModuleSpec<
@@ -63,7 +70,8 @@ export type AnyModuleSpec = ModuleSpec<
   Record<string, string>,
   Record<string, string>,
   Record<string, string>,
-  EnvironmentDeclarations
+  EnvironmentDeclarations,
+  MountRecord
 >
 
 type TablesOf<Tables> = Tables extends Record<string, AnyTableSpec>
@@ -122,6 +130,7 @@ const wireNameRecord = (
   )
 
 export const computeWireNames = (options: {
+  readonly mounts?: MountRecord
   readonly settings: ModuleSettings
   readonly tables: Record<string, AnyTableSpec>
   readonly views: Record<string, AnyViewSpec>
@@ -136,6 +145,12 @@ export const computeWireNames = (options: {
     .filter(([, spec]) => isReceiverSpec(spec))
     .map(([key]) => key)
   return {
+    mounts: Object.fromEntries(
+      Object.entries(options.mounts ?? {}).map(([key, mount]) => [
+        key,
+        mount.wireNamespace,
+      ]),
+    ),
     tables: wireNameRecord(
       policy,
       Object.values(options.tables).map((table) => table.name),
@@ -169,7 +184,9 @@ export const define = <
   const ReducerGroups extends Record<string, string> | undefined = undefined,
   const ProcedureGroups extends Record<string, string> | undefined = undefined,
   const Environment extends EnvironmentDeclarations | undefined = undefined,
+  const Mounts extends MountRecord = {},
 >(options: {
+  readonly mounts?: Mounts
   readonly name: string
   readonly settings?: ModuleSettings
   readonly environment?: Environment | undefined
@@ -178,6 +195,7 @@ export const define = <
   readonly reducers?: Reducers
   readonly procedures?: Procedures
   readonly httpHandlers?: HttpHandlers
+  readonly httpGroupNames?: readonly string[] | undefined
   readonly httpGroups?: HttpGroups
   readonly reducerGroups?: ReducerGroups
   readonly procedureGroups?: ProcedureGroups
@@ -193,11 +211,13 @@ export const define = <
   HttpGroupsOf<HttpGroups>,
   ReducerGroupsOf<ReducerGroups>,
   ProcedureGroupsOf<ProcedureGroups>,
-  EnvironmentOf<Environment>
+  EnvironmentOf<Environment>,
+  Mounts
 > => {
   const module = {
     kind: "module" as const,
     name: options.name,
+    mounts: options.mounts ?? ({} as Mounts),
     settings: options.settings ?? {},
     environment: (options.environment ?? {}) as EnvironmentOf<Environment>,
     tables: (options.tables ?? {}) as TablesOf<Tables>,
@@ -205,6 +225,9 @@ export const define = <
     reducers: (options.reducers ?? {}) as ReducersOf<Reducers>,
     procedures: (options.procedures ?? {}) as ProceduresOf<Procedures>,
     httpHandlers: (options.httpHandlers ?? {}) as HttpHandlersOf<HttpHandlers>,
+    ...(options.httpGroupNames !== undefined && {
+      httpGroupNames: options.httpGroupNames,
+    }),
     httpGroups: (options.httpGroups ?? {}) as HttpGroupsOf<HttpGroups>,
     reducerGroups: (options.reducerGroups ??
       {}) as ReducerGroupsOf<ReducerGroups>,
@@ -216,13 +239,13 @@ export const define = <
   const definedModule = {
     ...module,
     wireNames: computeWireNames(module),
-    diagnostics: [] as ReadonlyArray<StdbDiagnostic>,
+    diagnostics: [] as ReadonlyArray<Diagnostic>,
   }
 
   const diagnostics = validate(definedModule)
   const errors = diagnostics.filter((entry) => entry.severity === "error")
   if (errors.length > 0) {
-    throw new StdbValidationError({ diagnostics: errors })
+    throw new StdbValidationDefect({ diagnostics: errors })
   }
 
   return { ...definedModule, diagnostics }

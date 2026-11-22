@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect"
 import * as EffectVitest from "@effect/vitest"
 const { expect } = EffectVitest
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { FullModule } from "../fixtures/full-module"
 import { TestLayer } from "../helpers/test-layer"
 
@@ -10,7 +10,7 @@ const describe = EffectVitest.layer(TestLayer)
 describe("module projections", (it) => {
   it.effect("keeps only derived module metadata we actually reuse", () =>
     Effect.gen(function* () {
-      const plan = StdbTesting.makeModulePlan(FullModule)
+      const plan = StdbInternal.makeModulePlan(FullModule)
 
       expect(plan.scheduleBindings).toEqual([
         {

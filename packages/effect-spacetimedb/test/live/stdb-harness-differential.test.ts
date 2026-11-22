@@ -187,7 +187,7 @@ const harnessOutcome = Effect.fn(function* () {
     (yield* harness.effectDb.thing.id.find(rollbackId)) === undefined
 
   return {
-    autoIncremented: audit.id !== undefined && audit.id > 0n,
+    autoIncremented: audit.id > 0n,
     uniqueFailureName:
       Result.isFailure(duplicate) &&
       duplicate.failure instanceof StdbUniqueAlreadyExistsError
@@ -338,9 +338,7 @@ const liveOutcome = Effect.fn(function* ({
     })) === undefined
 
   return {
-    autoIncremented: auditRows.every(
-      (row) => row.id !== undefined && row.id > 0n,
-    ),
+    autoIncremented: auditRows.every((row) => row.id > 0n),
     uniqueFailureName: "UniqueAlreadyExists",
     eventCleared,
     primaryKeyFound: found?.id === idFirst,
@@ -350,6 +348,88 @@ const liveOutcome = Effect.fn(function* ({
     timestampRangeLabels,
     rolledBack,
   } satisfies ObservableOutcome
+})
+
+type SerialEntryRow = {
+  readonly label: string
+  readonly plainSerial: bigint
+  readonly uniqueSerial: number
+  readonly indexedSerial: bigint
+}
+
+/**
+ * What the host does with auto-increment columns that are not keys. It reads
+ * order rather than values: a sequence's values depend on how much of it earlier
+ * calls and a retried attempt spent.
+ */
+const serialEntryOutcome = (rows: ReadonlyArray<SerialEntryRow>) => {
+  const labelled = (label: string) => rows.find((row) => row.label === label)
+  const first = labelled("first")
+  const second = labelled("second")
+  return {
+    generatedOnInsert:
+      first !== undefined &&
+      second !== undefined &&
+      first.plainSerial > 0n &&
+      first.uniqueSerial > 0 &&
+      first.indexedSerial > 0n &&
+      second.uniqueSerial > first.uniqueSerial &&
+      second.indexedSerial > first.indexedSerial,
+    explicitValueKept: labelled("numbered")?.plainSerial,
+    generatedOnUpdate:
+      first !== undefined &&
+      second !== undefined &&
+      first.plainSerial > second.plainSerial,
+  }
+}
+
+const harnessSerialEntryOutcome = Effect.fn(function* () {
+  const harness = StdbTesting.makeTestModuleHarness(LiveModule)
+  const zeros = { plainSerial: 0n, uniqueSerial: 0, indexedSerial: 0n }
+  const first = yield* harness.effectDb.serialEntry.insert({
+    label: "first",
+    ...zeros,
+  })
+  yield* harness.effectDb.serialEntry.insert({ label: "second", ...zeros })
+  yield* harness.effectDb.serialEntry.insert({
+    label: "numbered",
+    ...zeros,
+    plainSerial: 500n,
+  })
+  yield* harness.effectDb.serialEntry.label.update({
+    ...first,
+    plainSerial: 0n,
+  })
+  return serialEntryOutcome(yield* harness.effectDb.serialEntry.toArray())
+})
+
+const liveSerialEntryOutcome = Effect.fn(function* ({
+  connection,
+}: ExampleLiveSession) {
+  yield* callLiveReducer(connection, wireFunction("serialEntryClear"), {})
+  yield* Effect.forEach(
+    [
+      ["first", 0n],
+      ["second", 0n],
+      ["numbered", 500n],
+    ] as const,
+    ([label, plainSerial]) =>
+      callLiveReducer(connection, wireFunction("serialEntryInsert"), {
+        label,
+        plainSerial,
+      }),
+    { discard: true },
+  )
+  yield* callLiveReducer(connection, wireFunction("serialEntryRenumber"), {
+    label: "first",
+  })
+  return serialEntryOutcome(
+    yield* callLiveProcedure<ReadonlyArray<SerialEntryRow>>(
+      connection,
+      wireFunction("serialEntryList"),
+      {},
+    ),
+  )
 })
 
 const harnessOptionalRangeOutcome = Effect.fn(function* () {
@@ -920,7 +1000,7 @@ const harnessScheduleOutcome = Effect.fn(function* () {
           target: "reducer",
           note: data.note,
           sender: ctx.sender.toHexString(),
-          identity: ctx.identity.toHexString(),
+          identity: ctx.databaseIdentity.toHexString(),
           databaseIdentity: ctx.databaseIdentity.toHexString(),
         })
       }),
@@ -941,7 +1021,7 @@ const harnessScheduleOutcome = Effect.fn(function* () {
               target: "procedure",
               note: data.note,
               sender: ctx.sender.toHexString(),
-              identity: ctx.identity.toHexString(),
+              identity: ctx.databaseIdentity.toHexString(),
               databaseIdentity: ctx.databaseIdentity.toHexString(),
             })
           }),
@@ -1375,6 +1455,26 @@ const makeMemoizedDifferentialSession = Effect.fn(function* () {
 })
 
 describe("effect-spacetimedb test harness differential", () => {
+  live(
+    "generates auto-increment columns that are not keys on the live engine",
+    () =>
+      provideLiveTest(
+        Effect.gen(function* () {
+          const engine = yield* liveSerialEntryOutcome(
+            yield* makeExampleSession,
+          )
+
+          expect(engine).toEqual({
+            generatedOnInsert: true,
+            explicitValueKept: 500n,
+            generatedOnUpdate: true,
+          })
+          expect(yield* harnessSerialEntryOutcome()).toEqual(engine)
+        }).pipe(Effect.scoped),
+      ),
+    LIVE_TEST_TIMEOUT_MS,
+  )
+
   live(
     "matches the live engine across the differential behavior matrix",
     () =>

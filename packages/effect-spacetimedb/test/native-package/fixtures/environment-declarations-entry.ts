@@ -14,13 +14,13 @@ type NativeSchema = {
 const environmentOf = (schema: unknown): unknown =>
   (schema as NativeSchema).moduleDef.environment
 
-const PinnedModule = Stdb.StdbModule.make("pinned_environment", {
+const PinnedModule = Stdb.Module.make("pinned_environment", {
   environment: { PINNED: Stdb.Environment.literal("only") },
 })
 
 // Allowed values named like members of the SDK's type builders and of
 // `Object.prototype`, which a builder-property lowering would collide with.
-const CollidingModule = Stdb.StdbModule.make("colliding_environment", {
+const CollidingModule = Stdb.Module.make("colliding_environment", {
   environment: {
     LIFECYCLE: Stdb.Environment.literal("create", "update"),
     REQUIREDNESS: Stdb.Environment.optional(

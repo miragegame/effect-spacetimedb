@@ -5,9 +5,11 @@ import type * as Stdb from "effect-spacetimedb"
  * fixture value and property-generated array in this suite stays in single
  * digits, so 64 leaves headroom while remaining a real statement.
  */
+export const testArrayLengthMinimum = 0
+export const testArrayLengthMaximum = 64
 export const testArrayLength: Stdb.ArrayLengthBounds = {
-  minimum: 0,
-  maximum: 64,
+  minimum: testArrayLengthMinimum,
+  maximum: testArrayLengthMaximum,
 }
 
 /**

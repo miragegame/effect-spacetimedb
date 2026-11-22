@@ -13,16 +13,16 @@ values. The host validates them before `init` or a migration runs and keeps
 them across publishes. Declare keys on the module and read them through its
 `Env` accessor.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import * as Stdb from "effect-spacetimedb"
 
-const Settings = Stdb.StdbGroup.make("Settings").add(
-  Stdb.StdbFn.procedure("describe_settings", { returns: Stdb.string() }),
+const Settings = Stdb.Group.make("Settings").add(
+  Stdb.Fn.procedure("describeSettings", { returns: Stdb.string() }),
 )
 
-const Module = Stdb.StdbModule.make("app", {
+const Module = Stdb.Module.make("app", {
   environment: {
     API_KEY: Stdb.Environment.secret(),
     MODE: Stdb.Environment.literal("development", "production"),
@@ -33,8 +33,8 @@ const Module = Stdb.StdbModule.make("app", {
 }).add(Settings)
 const { Env } = Module
 
-const SettingsLive = Stdb.StdbBuilder.group(Module, "Settings", {
-  describe_settings: Effect.fn(function* () {
+const SettingsLive = Stdb.Builder.group(Module, "Settings", {
+  describeSettings: Effect.fn(function* () {
     const env = yield* Env
     const apiKey = yield* env.API_KEY // Redacted<string>
     const mode = yield* env.MODE // "development" | "production"
@@ -62,7 +62,7 @@ against the host's own limits:
   8 KiB each;
 - all keys and literals together are at most 2 MiB.
 
-A violation throws `StdbValidationError` with an `InvalidEnvironmentKey`,
+A violation throws `StdbValidationDefect` with an `InvalidEnvironmentKey`,
 `InvalidEnvironmentLiteral`, `InvalidEnvironmentDeclaration`,
 `EnvironmentDeclarationCountExceeded`, `EnvironmentUnionEntriesExceeded` or
 `EnvironmentSchemaBytesExceeded` diagnostic, so a module the host would refuse
@@ -185,7 +185,7 @@ A refused update leaves the stored values unchanged.
 ## Testing
 
 The module test harness takes values the way a publish does, and refuses an
-environment the host would refuse with `TestModuleEnvironmentError`:
+environment the host would refuse with `TestModuleEnvironmentDefect`:
 
 ```ts
 const harness = StdbTesting.makeTestModuleHarness(Module.spec, {
@@ -201,7 +201,9 @@ that calls the SDK's own `env_get` can be backed by the same values with
 synchronous body, or `withEnvironmentAsync` for one that awaits; outside such a
 scope the stub refuses, like every other host call.
 
-## Not supported
+## Mounted libraries
 
-Only a root module can declare an environment. The contract DSL does not model
-upstream submodules, which cannot declare one either.
+Declare environment keys on the root module. Read them in the root handler
+and pass the values the library needs to its operation. A mounted Effect
+module has an empty `Env`, and a native alias has no `env` reader.
+See [Submodules](/core-concepts/databases/submodules).

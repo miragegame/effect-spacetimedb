@@ -11,7 +11,7 @@ import * as Stream from "effect/Stream"
 
 const { describe, expect, live } = EffectVitest
 
-import type { NativeSubscriptionHandleLike } from "effect-spacetimedb/testing"
+import type { NativeSubscriptionHandleLike } from "effect-spacetimedb/testing/internal"
 import {
   CONVERGENCE_TIMEOUT_MS,
   decodeThingId,
@@ -64,9 +64,6 @@ type RawSqlSubscriptionBuilder = {
   ) => RawSqlSubscriptionBuilder
   readonly subscribe: (sql: string) => NativeSubscriptionHandleLike
 }
-
-// SpaceTimeDB includes this hint when rejecting private relation subscriptions.
-const privateAuditLogPrivateViewHint = "it may be marked private"
 
 const toHexString = Effect.fn(function* (value: unknown) {
   if (typeof value === "string") {
@@ -332,61 +329,6 @@ describe("effect-spacetimedb live views", () => {
               { id: identityUserId, name: "Called By Identity" },
             ],
           })
-        }),
-      ),
-    { timeout: LIVE_TEST_TIMEOUT_MS },
-  )
-
-  live(
-    "does not anonymously populate the privateAuditLog view",
-    () =>
-      provideLiveTest(
-        Effect.gen(function* () {
-          const live = yield* liveHarness
-          const connection = yield* live.makeAnonymousConnection(LiveModule)
-          const subscription = yield* subscribeViewSql(
-            connection,
-            "SELECT * FROM private_audit_log",
-          )
-
-          yield* waitForPredicate(
-            () =>
-              subscription
-                .errorMessage()
-                ?.includes(privateAuditLogPrivateViewHint) === true,
-            "private audit log view subscription was not rejected as private",
-            CONVERGENCE_TIMEOUT_MS,
-          )
-          expect(yield* readViewRows(connection, "private_audit_log")).toEqual(
-            [],
-          )
-        }),
-      ),
-    { timeout: LIVE_TEST_TIMEOUT_MS },
-  )
-
-  live(
-    "allows the owner to subscribe to the privateAuditLog view",
-    () =>
-      provideLiveTest(
-        Effect.gen(function* () {
-          const live = yield* liveHarness
-          const connection = yield* live.makeConnection(LiveModule)
-          const subscription = yield* subscribeViewSql(
-            connection,
-            "SELECT * FROM private_audit_log",
-          )
-
-          yield* waitForPredicate(
-            () => subscription.applied(),
-            "private audit log owner subscription was not applied",
-            CONVERGENCE_TIMEOUT_MS,
-          )
-          expect(subscription.applied()).toBe(true)
-          expect(subscription.errorMessage()).toBeUndefined()
-          expect(yield* readViewRows(connection, "private_audit_log")).toEqual(
-            [],
-          )
         }),
       ),
     { timeout: LIVE_TEST_TIMEOUT_MS },

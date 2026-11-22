@@ -49,7 +49,7 @@ const initialize = Effect.fn(function* () {
   yield* recordObservation("init")
 })
 
-export const EnvironmentFunctionsLive = Stdb.StdbBuilder.group(
+export const EnvironmentFunctionsLive = Stdb.Builder.group(
   EnvironmentModule,
   "Environment",
   {
@@ -66,7 +66,7 @@ export const EnvironmentFunctionsLive = Stdb.StdbBuilder.group(
   },
 )
 
-export const EnvironmentRoutesLive = Stdb.StdbBuilder.group(
+export const EnvironmentRoutesLive = Stdb.Builder.group(
   EnvironmentModule,
   "EnvironmentRoutes",
   {
@@ -78,7 +78,7 @@ export const EnvironmentRoutesLive = Stdb.StdbBuilder.group(
   },
 )
 
-export const EnvironmentLifecycleLive = Stdb.StdbBuilder.lifecycle(
+export const EnvironmentLifecycleLive = Stdb.Builder.lifecycle(
   EnvironmentModule,
   { init: initialize },
 )

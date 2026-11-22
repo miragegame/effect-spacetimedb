@@ -1,6 +1,6 @@
 import * as Match from "effect/Match"
 
-import { StdbDiagnostic } from "./diagnostic.ts"
+import { Diagnostic } from "./diagnostic.ts"
 
 import type { AnyModuleSpec } from "./module.ts"
 import {
@@ -11,7 +11,7 @@ import type { AnyTableSpec } from "./table.ts"
 import { structFields } from "./type.ts"
 
 export const validateScheduledTargets = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   module: AnyModuleSpec,
 ): void => {
   const scheduledTargetsByTable = new Map<
@@ -127,13 +127,13 @@ export const validateScheduledTargets = (
       diagnostics,
       "ScheduledTableWithoutTarget",
       ["tables", tableKey, "scheduled"],
-      `Scheduled table ${tableKey} must be targeted by StdbFn.scheduledReducer(...) or StdbFn.scheduledProcedure(...).`,
+      `Scheduled table ${tableKey} must be targeted by Fn.scheduledReducer(...) or Fn.scheduledProcedure(...).`,
     )
   }
 }
 
 export const validateCallableTypes = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   module: AnyModuleSpec,
   completed: WeakSet<object>,
 ) => {

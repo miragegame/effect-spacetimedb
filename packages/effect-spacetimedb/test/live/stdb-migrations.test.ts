@@ -3,6 +3,13 @@
  * @module-tag spacetimedb
  */
 
+import { project } from "effect-spacetimedb"
+import {
+  SubscriptionInvalidatedError,
+  type GeneratedWsBuilderLike,
+} from "effect-spacetimedb/client"
+import { MigrationModule } from "../../examples/migration-fixture/v1/src/contract"
+import { makeLiveWebSocket } from "./helpers/live-websocket"
 import { pathToFileURL } from "node:url"
 import * as EffectVitest from "@effect/vitest"
 import * as Data from "effect/Data"
@@ -10,7 +17,7 @@ import * as Effect from "effect/Effect"
 
 const { describe, expect, live } = EffectVitest
 
-import type { SubscriptionHandleLike } from "effect-spacetimedb/testing"
+import type { SubscriptionHandleLike } from "effect-spacetimedb/testing/internal"
 import {
   LIVE_TEST_TIMEOUT_MS,
   type MigrationLiveHarness,
@@ -57,9 +64,12 @@ type GeneratedBuilder = {
   readonly build: () => GeneratedConnection
 }
 
+const v1Projection = project(MigrationModule.spec)
+
 type GeneratedClient = {
   readonly DbConnection: {
-    readonly builder: () => GeneratedBuilder
+    readonly builder: () => GeneratedBuilder &
+      GeneratedWsBuilderLike<typeof MigrationModule.spec, unknown>
   }
 }
 
@@ -129,7 +139,7 @@ const importGeneratedClient = (directory: string) =>
     catch: (cause) => new MigrationGeneratedClientImportError({ cause }),
   })
 
-const generatedConnection = (
+const wsGeneratedConnection = (
   client: GeneratedClient,
   target: MigrationLiveHarness,
 ) =>
@@ -167,7 +177,7 @@ const withGeneratedConnection = <A, E>(
   target: MigrationLiveHarness,
   use: (connection: GeneratedConnection) => Effect.Effect<A, E>,
 ) =>
-  generatedConnection(client, target).pipe(Effect.flatMap(use), Effect.scoped)
+  wsGeneratedConnection(client, target).pipe(Effect.flatMap(use), Effect.scoped)
 
 const callReducer = (
   connection: GeneratedConnection,
@@ -186,12 +196,14 @@ const callProcedure = <A>(
 ) =>
   Effect.tryPromise({
     try: async () =>
-      (await connection.callProcedureWithParams(
-        name,
-        undefined,
-        args,
-        undefined,
-      )) as A,
+      (
+        (await connection.callProcedureWithParams(
+          name,
+          undefined,
+          args,
+          undefined,
+        )) as { readonly ok: A }
+      ).ok,
     catch: (cause) => new MigrationCallError({ cause }),
   })
 
@@ -268,7 +280,44 @@ describe("effect-spacetimedb live migrations", () => {
             }),
           )
 
+          const accountSession = (client: GeneratedClient) =>
+            v1Projection.client.ws.scoped({
+              builder: () => client.DbConnection.builder(),
+              uri: migration.baseUrl,
+              databaseName: migration.databaseName,
+              token: migration.token,
+              compression: "none",
+              createWebSocket: makeLiveWebSocket,
+            })
+          // New bindings expect trailing fields that the old host never sent.
+          yield* Effect.gen(function* () {
+            const session = yield* accountSession(v3)
+            const failure = yield* Effect.flip(
+              session.subscribe(v1Projection.targets.tables.account),
+            )
+            expect(
+              SubscriptionInvalidatedError.is(failure) && failure.kind,
+            ).toBe("protocolError")
+          }).pipe(Effect.scoped)
+
           yield* migration.republish(migration.bundlePaths.v2)
+          // Old bindings use the SDK row boundaries to skip the new trailing field.
+          yield* Effect.gen(function* () {
+            const session = yield* accountSession(v1)
+            yield* session.subscribe(v1Projection.targets.tables.account)
+            expect(yield* session.cache.tables.account.toArray()).toEqual([
+              { id: accountId, owner: "ada" },
+            ])
+            yield* session.reducers.accountCreate({ owner: "grace" })
+            const rows = yield* waitForRows(
+              () => session.cache.tables.account.toArray(),
+              (rows) => rows.length === 2,
+            )
+            expect(rows.map((row) => row.owner).sort()).toEqual([
+              "ada",
+              "grace",
+            ])
+          }).pipe(Effect.scoped)
           yield* withGeneratedConnection(
             v2,
             migration,

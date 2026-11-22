@@ -1,4 +1,5 @@
 import * as Data from "effect/Data"
+import * as Duration from "effect/Duration"
 import type { Identity } from "spacetimedb"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import {
@@ -6,11 +7,13 @@ import {
   hasErrorTypeId,
   readTaggedErrorTag,
 } from "../error-identity.ts"
+import { boundedCallDurationMax, durationMillis } from "./call-duration.ts"
 import { messageFromUnknown } from "./call-errors.ts"
 import { connectionStateFor } from "./connection-state.ts"
-import type {
-  ManagedWsConnection,
-  WsAutomaticReconnect,
+import {
+  type ManagedWsConnection,
+  type WsAutomaticReconnect,
+  nativeAutomaticReconnectOptions,
 } from "./generated-ws-adapter.ts"
 import { isSdkIdentityChangedError } from "./ws-call-liveness.ts"
 
@@ -22,6 +25,18 @@ export class WsConnectError extends Data.TaggedError("WsConnectError")<{
 }> {
   readonly [WsConnectErrorTypeId] = WsConnectErrorTypeId
   static is = hasErrorTypeId<WsConnectError>(WsConnectErrorTypeId)
+}
+
+const WsProtocolErrorTypeId = errorTypeId("WsProtocolError")
+/** The SDK could not decode or apply a server message. Supervisors park by default so callers can replace incompatible bindings. */
+export class WsProtocolError extends Data.TaggedError("WsProtocolError")<{
+  readonly cause: Error
+}> {
+  readonly [WsProtocolErrorTypeId] = WsProtocolErrorTypeId
+  static is = hasErrorTypeId<WsProtocolError>(WsProtocolErrorTypeId)
+  override get message(): string {
+    return this.cause.message
+  }
 }
 
 const WsConnectTimeoutErrorTypeId = errorTypeId("WsConnectTimeoutError")
@@ -54,7 +69,20 @@ export const connectError = (cause: unknown, context?: unknown) =>
  * again.
  */
 export const connectErrorOfReport = (error: unknown, context?: unknown) =>
-  WsConnectError.is(error) ? error : connectError(error, context)
+  WsConnectError.is(error)
+    ? error
+    : connectError(
+        // 2.16.1 keeps WebSocketProtocolError private, with name "Error".
+        // Only a failed message identifies a potentially incompatible binding.
+        // Close codes 1002, 1003, 1007 and 1008 use the same SDK class, but a
+        // fresh session can succeed. Treat them as lost and retry with backoff.
+        error instanceof Error &&
+          error.message === "Invalid server message" &&
+          "cause" in error
+          ? new WsProtocolError({ cause: error })
+          : error,
+        context,
+      )
 
 // The native disconnect context is the connection object itself, never a
 // carrier of human-readable text, so only the cause can name the reason. A
@@ -73,8 +101,8 @@ export const disconnectMessage = (cause: unknown): string => {
 
 /**
  * Invalidates a connection whose end was reported as `error`: an automatic
- * reconnect that changed identity ends it as `identityChanged`, every other
- * end as `lost`.
+ * reconnect that changed identity ends it as `identityChanged`, a failed
+ * message as `protocolError`, and an ordinary socket loss as `lost`.
  */
 export const invalidateDisconnected = (
   connection: object,
@@ -82,7 +110,9 @@ export const invalidateDisconnected = (
 ): void => {
   const state = connectionStateFor(connection)
   const message = disconnectMessage(error.cause)
-  if (isSdkIdentityChangedError(error.cause)) {
+  if (WsProtocolError.is(error.cause)) {
+    state.invalidateForProtocolError(error.cause)
+  } else if (isSdkIdentityChangedError(error.cause)) {
     state.invalidateForIdentityChange(message)
   } else {
     state.invalidateFromTransport(message)
@@ -90,92 +120,89 @@ export const invalidateDisconnected = (
 }
 
 /**
- * Throws a `TypeError` unless `connectTimeoutMillis` is a positive, finite
- * number of milliseconds, the way `Stdb.array(...)` rejects bad length bounds. `Infinity` never fires, `0` fires before any
- * connect can finish, and `NaN` reads as zero, so none of them is a bound.
+ * The bound on connection acquisition when a config does not set
+ * `connectDurationMax`.
  */
-export const assertConnectTimeoutBounded = (
-  connectTimeoutMillis: number,
-): void => {
-  if (!(Number.isFinite(connectTimeoutMillis) && connectTimeoutMillis > 0)) {
-    throw new TypeError(
-      `WebSocket connectTimeoutMillis must be a positive, finite number of milliseconds; received ${String(connectTimeoutMillis)}`,
-    )
-  }
-}
+export const connectDurationMaxDefault = Duration.seconds(30)
 
 /**
- * Throws a `TypeError` unless every configured automatic-reconnect delay is a
- * finite, non-negative number of milliseconds. The SDK raises a delay below
- * its floor (and a cap below the first delay) on its own, but accepts
- * `Infinity`, which would schedule a reconnect that never comes and make the
- * attempt's bound (delay plus `connectTimeoutMillis`) unbounded.
+ * How far one acquisition got. The native builder and its `onConnect` report a
+ * connection in either order, so an acquisition goes `idle -> built -> acquired`
+ * or `idle -> connectedEarly -> acquired`, and from any of those to `failed`.
+ * `released` is terminal and reachable from anywhere. Past `acquired`, a stage
+ * only remembers the connection, so a late report can still be matched to it.
  */
-export const assertAutomaticReconnectBounded = (
-  automaticReconnect: WsAutomaticReconnect | undefined,
-): void => {
-  for (const [name, delayMillis] of [
-    ["delayMillisMin", automaticReconnect?.delayMillisMin],
-    ["delayMillisMax", automaticReconnect?.delayMillisMax],
-  ] as const) {
-    if (
-      delayMillis !== undefined &&
-      !(Number.isFinite(delayMillis) && delayMillis >= 0)
-    ) {
-      throw new TypeError(
-        `WebSocket automaticReconnect.${name} must be a finite, non-negative number of milliseconds; received ${String(delayMillis)}`,
-      )
-    }
-  }
-}
-
-export type PendingConnect<
-  Module extends AnyModuleSpec,
-  ErrorContext,
-  RelationContext,
-> = {
-  readonly connection: ManagedWsConnection<
-    Module,
-    ErrorContext,
-    RelationContext
-  >
-  readonly identity: Identity
-  readonly token: string
-}
-
-// Acquisition lifecycle:
-// initial -> pending connection -> connected session -> scoped release.
 export type AcquisitionState<
   Module extends AnyModuleSpec,
   ErrorContext,
   RelationContext,
-  ValidationError,
-> = {
-  readonly built:
-    | ManagedWsConnection<Module, ErrorContext, RelationContext>
-    | undefined
-  readonly connected:
-    | PendingConnect<Module, ErrorContext, RelationContext>
-    | undefined
-  readonly acquired:
-    | ManagedWsConnection<Module, ErrorContext, RelationContext>
-    | undefined
-  readonly failed: WsConnectError | ValidationError | undefined
-  readonly released: boolean
-}
+> =
+  | { readonly stage: "idle" }
+  | {
+      readonly stage: "built"
+      readonly connection: ManagedWsConnection<
+        Module,
+        ErrorContext,
+        RelationContext
+      >
+    }
+  | {
+      readonly stage: "connectedEarly"
+      readonly connection: ManagedWsConnection<
+        Module,
+        ErrorContext,
+        RelationContext
+      >
+      readonly identity: Identity
+      readonly token: string
+    }
+  | {
+      readonly stage: "acquired"
+      readonly connection: ManagedWsConnection<
+        Module,
+        ErrorContext,
+        RelationContext
+      >
+    }
+  | {
+      readonly stage: "failed" | "released"
+      readonly connection:
+        | ManagedWsConnection<Module, ErrorContext, RelationContext>
+        | undefined
+    }
 
 /** The connection an acquisition holds, at whichever stage it reached. */
 export const knownConnection = <
   Module extends AnyModuleSpec,
   ErrorContext,
   RelationContext,
-  ValidationError,
 >(
-  state: AcquisitionState<
-    Module,
-    ErrorContext,
-    RelationContext,
-    ValidationError
-  >,
+  state: AcquisitionState<Module, ErrorContext, RelationContext>,
 ): ManagedWsConnection<Module, ErrorContext, RelationContext> | undefined =>
-  state.acquired ?? state.built ?? state.connected?.connection
+  state.stage === "idle" ? undefined : state.connection
+
+/**
+ * A config's connect bound, after throwing the `TypeError` of any of its bounds
+ * that is not one. Every WebSocket client (scoped, layered, supervised) is built
+ * through this, before any Effect runs.
+ */
+export const wsTimeBounds = (config: {
+  readonly connectDurationMax?: Duration.Input | undefined
+  readonly callDurationMax?: Duration.Input | undefined
+  readonly automaticReconnect?: WsAutomaticReconnect | undefined
+}) => {
+  const duration = config.connectDurationMax ?? connectDurationMaxDefault
+  const connectMillis = durationMillis(duration)
+  if (!(connectMillis > 0)) {
+    throw new TypeError(
+      `WebSocket connectDurationMax must be a positive duration; received ${String(duration)}`,
+    )
+  }
+  boundedCallDurationMax("WebSocket", config.callDurationMax)
+  return {
+    connectMillis,
+    automaticReconnect: nativeAutomaticReconnectOptions(
+      config.automaticReconnect,
+    ),
+  }
+}

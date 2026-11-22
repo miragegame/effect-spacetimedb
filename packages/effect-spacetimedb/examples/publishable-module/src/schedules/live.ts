@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 import { Db, ExampleModule, MutationCtx, Tx } from "../module"
 
-export const ScheduleFunctionsLive = Stdb.StdbBuilder.group(
+export const ScheduleFunctionsLive = Stdb.Builder.group(
   ExampleModule,
   "Schedules",
   {
@@ -70,7 +70,7 @@ export const ScheduleFunctionsLive = Stdb.StdbBuilder.group(
         target: "reducer",
         note: data.note,
         sender: ctx.sender.toHexString(),
-        identity: ctx.identity.toHexString(),
+        identity: ctx.databaseIdentity.toHexString(),
         databaseIdentity: ctx.databaseIdentity.toHexString(),
       })
     }),
@@ -86,7 +86,7 @@ export const ScheduleFunctionsLive = Stdb.StdbBuilder.group(
               target: "procedure",
               note: data.note,
               sender: ctx.sender.toHexString(),
-              identity: ctx.identity.toHexString(),
+              identity: ctx.databaseIdentity.toHexString(),
               databaseIdentity: ctx.databaseIdentity.toHexString(),
             })
             .pipe(Effect.asVoid)

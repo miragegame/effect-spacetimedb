@@ -1,3 +1,9 @@
+export type {
+  ReducerKeysInGroup,
+  ProcedureKeysInGroup,
+} from "../group-clients.ts"
+export type { WsGroupClients } from "../ws-client.ts"
+import type { MembersByPath } from "../../member-path.ts"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
 import * as Hash from "effect/Hash"
@@ -29,20 +35,27 @@ import type { TableGroupSnapshot, WsStreamOptions } from "../ws-client.ts"
 
 export type TableAtomSession<Module extends AnyModuleSpec> = {
   readonly moduleName: string
+  /** Whether what this session read may no longer be shown. */
+  readonly isRevoked: () => boolean
+  /**
+   * Opaque, and compared by reference: a session may show what another read only
+   * if both answer with the same value.
+   */
+  readonly rowsOwner: () => object
   readonly subscribeTableRef: <Key extends PublicPersistentTableKeys<Module>>(
     key: Key,
     options?: WsStreamOptions,
   ) => Effect.Effect<
-    TableRef<TableRow<Module["tables"][Key]>, TableRefFailure>,
+    TableRef<TableRow<MembersByPath<Module, "tables">[Key]>, TableRefFailure>,
     never,
     Scope.Scope
   >
   readonly subscribeRowRef: <Key extends PublicPersistentTableKeys<Module>>(
     key: Key,
-    primaryKey: SinglePrimaryKeyValue<Module["tables"][Key]>,
+    primaryKey: SinglePrimaryKeyValue<MembersByPath<Module, "tables">[Key]>,
     options?: WsStreamOptions,
   ) => Effect.Effect<
-    RowRef<TableRow<Module["tables"][Key]>, TableRefFailure>,
+    RowRef<TableRow<MembersByPath<Module, "tables">[Key]>, TableRefFailure>,
     never,
     Scope.Scope
   >
@@ -60,18 +73,18 @@ export type TableAtomSession<Module extends AnyModuleSpec> = {
     Key extends PublicPersistentTableKeys<Module>,
   >(
     key: Key,
-    row: TableRow<Module["tables"][Key]>,
-    primaryKey: SinglePrimaryKeyValue<Module["tables"][Key]>,
+    row: TableRow<MembersByPath<Module, "tables">[Key]>,
+    primaryKey: SinglePrimaryKeyValue<MembersByPath<Module, "tables">[Key]>,
   ) => boolean
 }
 
-type SupervisedSessionSource<Session, Failure> = {
+export type SupervisedSessionSource<Session, Failure> = {
   readonly session: SubscriptionRef.SubscriptionRef<
     AsyncResult.AsyncResult<Session, Failure>
   >
 }
 
-export const supervisedSessionAtom = <Session, Failure>(
+export const wsSupervisedSessionAtom = <Session, Failure>(
   acquire: Effect.Effect<
     SupervisedSessionSource<Session, Failure>,
     never,
@@ -179,14 +192,17 @@ const makeTableAtomFamily = <Module extends AnyModuleSpec>(
   return <Key extends PublicPersistentTableKeys<Module>>(
     key: Key,
   ): Atom.Atom<
-    TableRefValue<TableRow<Module["tables"][Key]>, TableRefFailure>
+    TableRefValue<
+      TableRow<MembersByPath<Module, "tables">[Key]>,
+      TableRefFailure
+    >
   > => {
     const cacheKey = canonicalTableKey(session.moduleName, key)
     return family(new AtomFamilyKey("table", key, cacheKey))
   }
 }
 
-export const tableAtomFamily = <Module extends AnyModuleSpec>(
+export const wsTableAtomFamily = <Module extends AnyModuleSpec>(
   session: TableAtomSession<Module>,
 ) => {
   const existing = tableAtomFamilyCache.get(session)
@@ -240,23 +256,25 @@ type RowAtomInput<
   Key extends PublicPersistentTableKeys<Module>,
 > = {
   readonly key: Key
-  readonly primaryKey: SinglePrimaryKeyValue<Module["tables"][Key]>
+  readonly primaryKey: SinglePrimaryKeyValue<
+    MembersByPath<Module, "tables">[Key]
+  >
 }
 
 const makeRowAtomFamily = <Module extends AnyModuleSpec>(
   session: TableAtomSession<Module>,
 ) => {
-  const tableAtoms = tableAtomFamily(session)
+  const tableAtoms = wsTableAtomFamily(session)
   const makeRowAtom = <Key extends PublicPersistentTableKeys<Module>>(
     input: AtomFamilyKey<RowAtomInput<Module, Key>>,
   ): Atom.Atom<
-    RowRefValue<TableRow<Module["tables"][Key]>, TableRefFailure>
+    RowRefValue<TableRow<MembersByPath<Module, "tables">[Key]>, TableRefFailure>
   > => {
     const { key, primaryKey } = input.payload
     const select = rowResultMemo<
-      TableRow<Module["tables"][Key]>,
+      TableRow<MembersByPath<Module, "tables">[Key]>,
       TableRefFailure
-    >((row: TableRow<Module["tables"][Key]>) =>
+    >((row: TableRow<MembersByPath<Module, "tables">[Key]>) =>
       session.rowMatchesPrimaryKey(key, row, primaryKey),
     )
     return Atom.readable((get) => select(get(tableAtoms(key))))
@@ -265,16 +283,16 @@ const makeRowAtomFamily = <Module extends AnyModuleSpec>(
 
   return <Key extends PublicPersistentTableKeys<Module>>(
     key: Key,
-    primaryKey: SinglePrimaryKeyValue<Module["tables"][Key]>,
+    primaryKey: SinglePrimaryKeyValue<MembersByPath<Module, "tables">[Key]>,
   ): Atom.Atom<
-    RowRefValue<TableRow<Module["tables"][Key]>, TableRefFailure>
+    RowRefValue<TableRow<MembersByPath<Module, "tables">[Key]>, TableRefFailure>
   > => {
     const cacheKey = canonicalRowKey(session.moduleName, key, primaryKey)
     return family(new AtomFamilyKey("row", { key, primaryKey }, cacheKey))
   }
 }
 
-export const rowAtomFamily = <Module extends AnyModuleSpec>(
+export const wsRowAtomFamily = <Module extends AnyModuleSpec>(
   session: TableAtomSession<Module>,
 ) => {
   const existing = rowAtomFamilyCache.get(session)
@@ -309,7 +327,7 @@ const makeTableGroupAtomFamily = <Module extends AnyModuleSpec>(
   }
 }
 
-export const tableGroupAtomFamily = <Module extends AnyModuleSpec>(
+export const wsTableGroupAtomFamily = <Module extends AnyModuleSpec>(
   session: TableAtomSession<Module>,
 ) => {
   const existing = tableGroupAtomFamilyCache.get(session)
@@ -320,6 +338,22 @@ export const tableGroupAtomFamily = <Module extends AnyModuleSpec>(
   tableGroupAtomFamilyCache.set(session, created)
   return created
 }
+
+/**
+ * A snapshot and the session its rows came from, which outlives the session
+ * showing them while a replacement has none of its own. Compared by reference,
+ * because a registry compares an atom's values and that would walk the session.
+ */
+type SourcedSnapshot<Session, Snapshot> = {
+  readonly source: Option.Option<Session>
+  readonly snapshot: Snapshot
+}
+
+const sourcedSnapshot = <Session, Snapshot>(
+  source: Option.Option<Session>,
+  snapshot: Snapshot,
+): SourcedSnapshot<Session, Snapshot> =>
+  Equal.byReferenceUnsafe({ source, snapshot })
 
 const makeTableGroupSnapshotAtom = <
   Module extends AnyModuleSpec,
@@ -332,31 +366,86 @@ const makeTableGroupSnapshotAtom = <
   keys: Keys,
 ): Atom.Atom<
   AsyncResult.AsyncResult<TableGroupSnapshot<Module, Keys>, E | TableRefFailure>
-> =>
-  Atom.readable((get) => {
-    const connection = get(connectionAtom)
-    const snapshot = AsyncResult.flatMap(connection, (session) => {
-      const result = get(tableGroupAtomFamily(session)(keys))
-      return connection.waiting ? AsyncResult.waiting(result) : result
-    })
-    if (!AsyncResult.isInitial(snapshot)) {
-      return snapshot
-    }
+> => {
+  type Snapshot = AsyncResult.AsyncResult<
+    TableGroupSnapshot<Module, Keys>,
+    E | TableRefFailure
+  >
+  type Sourced = SourcedSnapshot<TableAtomSession<Module>, Snapshot>
 
-    const previous =
-      get.self<
-        AsyncResult.AsyncResult<
+  // Asking the source alone is not enough: nothing revokes the rows of a
+  // connection atom that moved to another supervisor, or to no session at all, so
+  // they would go on to the next user, or outlive a sign-out.
+  const mayCarry = (
+    previous: Sourced,
+    current: Option.Option<TableAtomSession<Module>>,
+  ) =>
+    previous.snapshot.pipe(AsyncResult.value, Option.isSome) &&
+    Option.exists(
+      previous.source,
+      (source) =>
+        !source.isRevoked() &&
+        Option.exists(
+          current,
+          (session) => session.rowsOwner() === source.rowsOwner(),
+        ),
+    )
+
+  const sourced = Atom.readable((get): Sourced => {
+    const connection = get(connectionAtom)
+    const groupOf = (session: TableAtomSession<Module>) =>
+      get(wsTableGroupAtomFamily(session)(keys))
+    // `AsyncResult.flatMap` would keep a failure's previous value only if the
+    // mapped result were a success, and the group of a session that ended is
+    // itself a failure holding the rows.
+    const snapshot: Snapshot = AsyncResult.isFailure(connection)
+      ? AsyncResult.failureWithPrevious<
           TableGroupSnapshot<Module, Keys>,
           E | TableRefFailure
-        >
-      >()
-    return Option.match(previous, {
-      onNone: () => snapshot,
-      onSome: AsyncResult.waiting,
-    })
+        >(connection.cause, {
+          previous: Option.map(connection.previousSuccess, (retained) =>
+            groupOf(retained.value),
+          ),
+          waiting: connection.waiting,
+        })
+      : AsyncResult.flatMap(connection, (session) => {
+          const result = groupOf(session)
+          return connection.waiting ? AsyncResult.waiting(result) : result
+        })
+    const source = AsyncResult.value(connection)
+    if (snapshot.pipe(AsyncResult.value, Option.isSome)) {
+      return sourcedSnapshot(source, snapshot)
+    }
+
+    // A read can skip the failure that ended the previous session, so the
+    // previous value alone does not say whether its rows may still be shown. A
+    // failure goes over carried rows, and they keep naming the session they came
+    // from, so that a later replacement finds them and a revocation still reaches
+    // them.
+    return Option.match(
+      Option.filter(get.self<Sourced>(), (previous) =>
+        mayCarry(previous, source),
+      ),
+      {
+        onNone: () => sourcedSnapshot(source, snapshot),
+        onSome: (previous) =>
+          sourcedSnapshot(
+            previous.source,
+            AsyncResult.isFailure(snapshot)
+              ? AsyncResult.failureWithPrevious(snapshot.cause, {
+                  previous: Option.some(previous.snapshot),
+                  waiting: snapshot.waiting,
+                })
+              : AsyncResult.waiting(previous.snapshot),
+          ),
+      },
+    )
   })
 
-export const tableGroupSnapshotAtom = <
+  return Atom.map(sourced, ({ snapshot }) => snapshot)
+}
+
+export const wsTableGroupSnapshotAtom = <
   Module extends AnyModuleSpec,
   E,
   const Keys extends ReadonlyArray<PublicPersistentTableKeys<Module>>,
@@ -389,3 +478,156 @@ export const tableGroupSnapshotAtom = <
   cache.set(canonical, created)
   return created
 }
+export {
+  type SessionStreamBufferOptions,
+  TableStreamOverflowError,
+} from "../session-stream.ts"
+export type {
+  RowRef,
+  RowRefValue,
+  TableGroupRef,
+  TableGroupRefValue,
+  TableRef,
+  TableRefFailure,
+  TableRefValue,
+} from "../table-ref.ts"
+export type {
+  TableGroupSnapshot,
+  WsStreamOptions,
+} from "../websocket-contract.ts"
+export {
+  type ConnectionInvalidationKind,
+  type SubscriptionFailure,
+  SubscriptionInvalidatedError,
+  SubscriptionRejectedError,
+  SubscriptionTransportError,
+} from "../ws-subscription.ts"
+export type {
+  ConstraintSpec,
+  UniqueConstraintSpec,
+} from "../../contract/constraint.ts"
+export type {
+  Diagnostic,
+  DiagnosticCode,
+  DiagnosticSeverity,
+} from "../../contract/diagnostic.ts"
+export type {
+  Declaration,
+  Declarations,
+  LiteralDeclaration,
+  LiteralValues,
+  SecretDeclaration,
+  StringDeclaration,
+} from "../../contract/environment.ts"
+export type {
+  AnyErrorDefinition,
+  ProcedureDeclaredErrorType,
+  TaggedErrorClass,
+} from "../../contract/error.ts"
+export type {
+  AnyFieldType,
+  AnyNormalizedFieldOptions,
+  FieldOptions,
+  FieldOptionsOf,
+  FieldType,
+  FieldValue,
+  NormalizedFieldOptions,
+} from "../../contract/field.ts"
+export type {
+  HttpHandlerMethod,
+  HttpHandlerSpec,
+  RawHttpHandlerSpec,
+  TypedHttpHandlerSpec,
+} from "../../contract/http-handler.ts"
+export type {
+  LifecycleName,
+  LifecycleSpec,
+  LifecycleSpecs,
+} from "../../contract/lifecycle.ts"
+export type {
+  AnyModuleSpec,
+  ModuleSpec,
+  ModuleWireNames,
+} from "../../contract/module.ts"
+export type {
+  ModuleMount,
+  MountRecord,
+  MountsOf,
+  NativeMount,
+} from "../../contract/mount.ts"
+export type { ProcedureSpec } from "../../contract/procedure.ts"
+export type { ReducerSpec } from "../../contract/reducer.ts"
+export type {
+  CaseConversionPolicy,
+  ModuleSettings,
+} from "../../contract/settings.ts"
+export type { TableCachePolicy } from "../../contract/table-cache-policy.ts"
+export type {
+  IndexAlgorithm,
+  IndexSpec,
+} from "../../contract/table-index.ts"
+export type {
+  ColumnKey,
+  PrimaryKeyNames,
+  SinglePrimaryKeyName,
+  SinglePrimaryKeyValue,
+  SingleUnionMember,
+} from "../../contract/table-keys.ts"
+export type {
+  AnyTableSpec,
+  TableRow,
+  TableSpec,
+} from "../../contract/table.ts"
+export {
+  type AnyValueType,
+  type Encoded,
+  type EncodedOf,
+  type HostOf,
+  type HostStruct,
+  type HostValue,
+  type MergeTableFieldOptions,
+  type NormalizedStructFieldOptions,
+  StdbValueCodecError,
+  type StringValueType,
+  type StructFieldOptions,
+  type StructFields,
+  type StructFieldType,
+  type StructLikeValueType,
+  type StructValueType,
+  type TableFieldOptionsOfValue,
+  type Type,
+  type TypeKind,
+  type TypeOf,
+  type ValueType,
+} from "../../contract/type/core.ts"
+export type {
+  OptionalKeys,
+  OptionalStructField,
+  RequiredKeys,
+  StructType,
+} from "../../contract/type/shapes.ts"
+export type {
+  AnyViewSpec,
+  BaseViewSpec,
+} from "../../contract/view.ts"
+export {
+  StdbDecodeError,
+  type StdbDecodePhase,
+} from "../../decode-error.ts"
+export type {
+  Entries,
+  MembersByPath,
+  MountedEntries,
+} from "../../member-path.ts"
+export type { PlanSection } from "../../module-plan.ts"
+export type { PublicPersistentTables } from "../../module-projection.ts"
+export type { PublicPersistentTableKeys } from "../../subscription-target.ts"
+export {
+  ConnectionIdentityChangedError,
+  ConnectionLostError,
+} from "../call-errors.ts"
+export {
+  WsConnectError,
+  WsConnectTimeoutError,
+  WsProtocolError,
+} from "../ws-resource-lifecycle.ts"

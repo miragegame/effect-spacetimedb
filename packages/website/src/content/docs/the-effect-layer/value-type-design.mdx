@@ -85,7 +85,9 @@ may be kept as value-type aliases.
 For generic SATS values reused across many fields, keep a value-type alias:
 
 ```ts
-const ShortString = Stdb.string(Schema.String.pipe(Schema.minLength(1)))
+const ShortString = Stdb.string(
+  Schema.String.pipe(Schema.check(Schema.isMinLength(1))),
+)
 ```
 
 Composites and rows are the value types you usually keep. A row's `.schema`

@@ -1,9 +1,11 @@
+import * as Cause from "effect/Cause"
+import * as Exit from "effect/Exit"
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 import {
-  StdbHostCallError,
+  StdbTableOperationDefect,
   StdbUniqueAlreadyExistsError,
 } from "effect-spacetimedb/server"
 import * as StdbTesting from "effect-spacetimedb/testing"
@@ -61,13 +63,10 @@ const harnessEvent = Stdb.table("harnessEvent", {
     kind: Stdb.literal("emitted"),
   },
 })
-const Mutations = Stdb.StdbGroup.make("Mutations", {
+const Mutations = Stdb.Group.make("Mutations", {
   errors: Stdb.errors(ReducerRollbackProbe),
-}).add(
-  Stdb.StdbFn.reducer("insertThenFail", {}),
-  Stdb.StdbFn.reducer("emitEvent", {}),
-)
-const HarnessModuleBuilder = Stdb.StdbModule.make("test_harness")
+}).add(Stdb.Fn.reducer("insertThenFail", {}), Stdb.Fn.reducer("emitEvent", {}))
+const HarnessModuleBuilder = Stdb.Module.make("test_harness")
   .addTables(
     record,
     nativeRangeRecord,
@@ -77,26 +76,22 @@ const HarnessModuleBuilder = Stdb.StdbModule.make("test_harness")
   )
   .add(Mutations)
 const HarnessModule = HarnessModuleBuilder.spec
-const MutationsLive = Stdb.StdbBuilder.group(
-  HarnessModuleBuilder,
-  "Mutations",
-  {
-    insertThenFail: Effect.fn(function* () {
-      const db = yield* HarnessModuleBuilder.Db
-      yield* db.record.insert({
-        id: 0n,
-        code: "rollback",
-        tenant: "alpha",
-        sequence: 1n,
-      })
-      return yield* ReducerRollbackProbe.make({})
-    }),
-    emitEvent: Effect.fn(function* () {
-      const db = yield* HarnessModuleBuilder.Db
-      yield* db.harnessEvent.insert({ id: 0n, kind: "emitted" })
-    }),
-  },
-)
+const MutationsLive = Stdb.Builder.group(HarnessModuleBuilder, "Mutations", {
+  insertThenFail: Effect.fn(function* () {
+    const db = yield* HarnessModuleBuilder.Db
+    yield* db.record.insert({
+      id: 0n,
+      code: "rollback",
+      tenant: "alpha",
+      sequence: 1n,
+    })
+    return yield* ReducerRollbackProbe.make({})
+  }),
+  emitEvent: Effect.fn(function* () {
+    const db = yield* HarnessModuleBuilder.Db
+    yield* db.harnessEvent.insert({ id: 0n, kind: "emitted" })
+  }),
+})
 
 describe("test module harness", () => {
   it.effect(
@@ -186,16 +181,18 @@ describe("test module harness", () => {
         coordinates,
       })
 
-      const failure =
-        yield* harness.effectDb.structuredRangeRecord.byCoordinates
-          .filterToArray({
-            from: { tag: "included", value: coordinates },
-            to: { tag: "included", value: coordinates },
-          } as never)
-          .pipe(Effect.flip)
+      const exit = yield* harness.effectDb.structuredRangeRecord.byCoordinates
+        .filterToArray({
+          from: { tag: "included", value: coordinates },
+          to: { tag: "included", value: coordinates },
+        } as never)
+        .pipe(Effect.exit)
+      const failure = Exit.isFailure(exit)
+        ? exit.cause.reasons.find(Cause.isDieReason)?.defect
+        : undefined
 
-      expect(failure).toBeInstanceOf(StdbHostCallError)
-      if (failure instanceof StdbHostCallError) {
+      expect(failure).toBeInstanceOf(StdbTableOperationDefect)
+      if (failure instanceof StdbTableOperationDefect) {
         expect(failure.cause).toBeInstanceOf(TypeError)
         expect(String(failure.cause)).toContain(
           "cannot order struct range values",
@@ -268,6 +265,36 @@ describe("test module harness", () => {
     }),
   )
 
+  it("generates auto-increment columns that are not keys, like the host", () => {
+    const serialRecord = Stdb.table("serialRecord", {
+      columns: {
+        code: Stdb.string().primaryKey(),
+        serial: Stdb.u64().autoInc(),
+        badge: Stdb.u32().unique().autoInc(),
+      },
+    })
+    const { db } = StdbTesting.makeTestModuleHarness(
+      Stdb.Module.make("serial_record", {}).addTables(serialRecord).spec,
+    )
+
+    const first = db.serialRecord.insert({ code: "a", serial: 0n, badge: 0 })
+    const second = db.serialRecord.insert({ code: "b", serial: 0n, badge: 0 })
+    expect([first.serial, first.badge]).toEqual([1n, 1])
+    expect([second.serial, second.badge]).toEqual([2n, 2])
+    expect(
+      db.serialRecord.insert({ code: "c", serial: 9n, badge: 9 }),
+    ).toMatchObject({ serial: 9n, badge: 9 })
+
+    // The host's update replaces a zero placeholder the same way insert does,
+    // and keeps every other value.
+    expect(db.serialRecord.code.update({ ...first, serial: 0n })).toEqual({
+      code: "a",
+      serial: 3n,
+      badge: 1,
+    })
+    expect(db.serialRecord.code.update({ ...second, badge: 7 }).badge).toBe(7)
+  })
+
   it("snapshots iterators before mutating the table", () => {
     const harness = StdbTesting.makeTestModuleHarness(HarnessModule)
     for (const sequence of [1n, 2n, 3n, 4n]) {
@@ -310,7 +337,7 @@ describe("test module harness", () => {
 
     expect(() =>
       procedure.withTx(() => procedure.withTx(() => undefined)),
-    ).toThrow(StdbTesting.NestedTestTransactionError)
+    ).toThrow(StdbTesting.NestedTestTransactionDefect)
     expect(harness.makeMutationCtx().db).toBe(harness.db)
     expect(harness.makeViewCtx().db).toBe(harness.db)
     expect(harness.makeAnonymousViewCtx().from.record.toSql()).toContain(

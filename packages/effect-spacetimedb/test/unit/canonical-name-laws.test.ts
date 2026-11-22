@@ -1,6 +1,6 @@
 import * as EffectVitest from "@effect/vitest"
 import * as FastCheck from "fast-check"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 
 const { describe, expect, it } = EffectVitest
 
@@ -12,7 +12,7 @@ const {
   isCamelCaseCanonical,
   snakeCaseName,
   splitWords,
-} = StdbTesting.ContractCanonicalName
+} = StdbInternal.ContractCanonicalName
 
 const nameArbitrary = FastCheck.oneof(
   FastCheck.stringMatching(/^[A-Za-z0-9_ -]{0,24}$/),

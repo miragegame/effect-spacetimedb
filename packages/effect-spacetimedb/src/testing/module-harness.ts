@@ -1,11 +1,18 @@
+import type { TestModuleRawDb } from "./raw-db.ts"
+import {
+  quotedIdentifier,
+  readMember,
+  type MembersByPath,
+} from "../member-path.ts"
+import { makeModulePlan } from "../module-plan.ts"
+import { mountedQueries, type MountQueries } from "../server/mount-context.ts"
 import * as Data from "effect/Data"
 import * as Match from "effect/Match"
 import { ConnectionId, deepEqual, Identity, Timestamp, Uuid } from "spacetimedb"
-import { type FieldTypeId, fieldOptions } from "../contract/field.ts"
+import { fieldOptions } from "../contract/field.ts"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import { outboxMetadataOf } from "../contract/outbox-table.ts"
 import type { AnyTableSpec, TableRow } from "../contract/table.ts"
-import type { HostOf, ValueType } from "../contract/type.ts"
 import type { ServerQueryRoot } from "../query/types.ts"
 import { makeDbHandleFactory } from "../server/db-handle.ts"
 import { lookupPlansOf, tableCodecOf } from "../server/db-handle-codec.ts"
@@ -33,8 +40,8 @@ import {
 import { compareRowsByColumns, matchesRange } from "./module-harness-order.ts"
 import { TestHarnessTransaction } from "./transaction.ts"
 
-export class NestedTestTransactionError extends Data.TaggedError(
-  "NestedTestTransactionError",
+export class NestedTestTransactionDefect extends Data.TaggedError(
+  "NestedTestTransactionDefect",
 ) {}
 
 /**
@@ -48,13 +55,13 @@ export const TestHarnessOutboxRemove = Symbol.for(
 
 /** Table keys of the module's outboxes. */
 export type OutboxTableKeys<Module extends AnyModuleSpec> = {
-  readonly [Key in keyof Module["tables"] &
-    string]: Module["tables"][Key] extends {
+  readonly [Key in keyof MembersByPath<Module, "tables"> &
+    string]: MembersByPath<Module, "tables">[Key] extends {
     readonly outbox: object
   }
     ? Key
     : never
-}[keyof Module["tables"] & string]
+}[keyof MembersByPath<Module, "tables"> & string]
 
 type MutableStore = Map<string, Array<Record<string, unknown>>>
 
@@ -74,35 +81,11 @@ const unauthenticatedSenderAuth = (context: {
     : { isInternal: false, hasJWT: false, jwt: null }
 }
 
-type HarnessOverrides<Ctx> = Partial<Omit<Ctx, "db" | "from" | "withTx">>
-type ProcedureHarnessOverrides<Module extends AnyModuleSpec> = HarnessOverrides<
-  ProcedureCtxLike<Module>
-> & {
-  readonly transaction?: HarnessOverrides<BaseReducerCtx<Module>> | undefined
-}
-
-type EncodedTable<Table extends AnyTableSpec> = Omit<Table, "columns"> & {
-  readonly columns: {
-    readonly [Key in keyof Table["columns"]]: ValueType<
-      HostOf<Table["columns"][Key]>,
-      HostOf<Table["columns"][Key]>
-    > &
-      Pick<Table["columns"][Key], typeof FieldTypeId>
+export type HarnessOverrides<Ctx> = Partial<Omit<Ctx, "db" | "from" | "withTx">>
+export type ProcedureHarnessOverrides<Module extends AnyModuleSpec> =
+  HarnessOverrides<ProcedureCtxLike<Module>> & {
+    readonly transaction?: HarnessOverrides<BaseReducerCtx<Module>> | undefined
   }
-}
-
-type EncodedModule<Module extends AnyModuleSpec> = Omit<Module, "tables"> & {
-  readonly tables: {
-    readonly [Key in keyof Module["tables"]]: EncodedTable<
-      Module["tables"][Key]
-    >
-  }
-}
-
-/** The SDK-shaped raw store accepts and returns native host column values (including encoded numeric magnitudes). */
-export type TestModuleRawDb<Module extends AnyModuleSpec> = DbShape<
-  EncodedModule<Module>
->
 
 export type TestModuleHarness<Module extends AnyModuleSpec> = {
   readonly db: TestModuleRawDb<Module>
@@ -115,7 +98,7 @@ export type TestModuleHarness<Module extends AnyModuleSpec> = {
    */
   readonly outboxRows: <Key extends OutboxTableKeys<Module>>(
     key: Key,
-  ) => ReadonlyArray<TableRow<Module["tables"][Key]>>
+  ) => ReadonlyArray<TableRow<MembersByPath<Module, "tables">[Key]>>
   readonly [TestHarnessOutboxRemove]: (key: string, msgId: bigint) => void
   /**
    * The reader every harness context carries as `ctx.env`, with host
@@ -126,7 +109,7 @@ export type TestModuleHarness<Module extends AnyModuleSpec> = {
   readonly environment: ServerEnvironmentReader
   /**
    * Applies an environment-only update, validated atomically: an invalid
-   * result throws `TestModuleEnvironmentError` and leaves the values unchanged.
+   * result throws `TestModuleEnvironmentDefect` and leaves the values unchanged.
    * The next read in any context sees the new values.
    */
   readonly updateEnvironment: (
@@ -260,7 +243,7 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
     /**
      * Values for the module's declared environment, validated like a publish:
      * a missing required key or a literal outside its set throws
-     * `TestModuleEnvironmentError` here.
+     * `TestModuleEnvironmentDefect` here.
      */
     readonly environment?: TestModuleEnvironmentValues<Module> | undefined
     readonly http?: RawProcedureHttp | undefined
@@ -270,6 +253,8 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
      * total, because it runs on every write.
      */
     readonly observeWrite?: ((write: TestModuleRowWrite) => void) | undefined
+    /** Supply stand-ins for native mounts by dotted accessor path. On first access in each handler context, the factory receives its parent context and returns the alias passed to use. */
+    readonly nativeMounts?: Readonly<Record<string, (parent: object) => object>>
     readonly seed?: bigint | undefined
     /**
      * This database's identity. Harnesses linked by an inter-database pump
@@ -296,17 +281,18 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
     }
     notifyWrite(write)
   }
+  const plan = makeModulePlan(module)
   const store: MutableStore = new Map(
-    Object.keys(module.tables).map((key) => [key, []]),
+    Object.keys(plan.tables).map((key) => [key, []]),
   )
   const autoIncrement = new Map<string, bigint>()
-  const eventTableKeys = Object.entries(module.tables)
+  const eventTableKeys = Object.entries(plan.tables)
     .filter(([, table]) => table.event)
     .map(([key]) => key)
   const rawDb: Record<string, unknown> = {}
 
   const outboxRemovers = new Map<string, (msgId: bigint) => void>()
-  for (const [tableKey, table] of Object.entries(module.tables)) {
+  for (const [tableKey, table] of Object.entries(plan.tables)) {
     const rows = store.get(tableKey)!
     const isOutbox = outboxMetadataOf(table) !== undefined
     const uniqueColumns = uniqueColumnsOf(table)
@@ -327,7 +313,9 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
         )
       }
     }
-    const insert = (input: Record<string, unknown>) => {
+    // The host replaces a zero in an auto-increment column with the column's
+    // next value on insert and on update, and keeps any other value.
+    const withGeneratedColumns = (input: Record<string, unknown>) => {
       const row = { ...input }
       for (const [column, field] of Object.entries(table.columns)) {
         if (!fieldOptions(field).autoInc) continue
@@ -343,6 +331,10 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
         autoIncrement.set(key, next)
         row[column] = typeof input[column] === "number" ? Number(next) : next
       }
+      return row
+    }
+    const insert = (input: Record<string, unknown>) => {
+      const row = withGeneratedColumns(input)
       assertUnique(row)
       rows.push(row)
       observeWrite({
@@ -479,10 +471,9 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
                         `${tableKey} row does not exist`,
                       )
                     }
-                    assertUnique(next, current)
-                    const index = rows.indexOf(current)
-                    const replacement = { ...next }
-                    rows[index] = replacement
+                    const replacement = withGeneratedColumns(next)
+                    assertUnique(replacement, current)
+                    rows[rows.indexOf(current)] = replacement
                     observeWrite({
                       kind: "update",
                       next: replacement,
@@ -511,14 +502,24 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
     rawDb[tableKey] = tableHandle
   }
 
-  const db = rawDb as DbShape<Module>
+  const namespaceDb = (spec: AnyModuleSpec, prefix = ""): object => {
+    const namespace: Record<string, unknown> = Object.create(null)
+    for (const key of Object.keys(spec.tables))
+      namespace[key] = rawDb[prefix + key]
+    for (const [key, mount] of Object.entries(spec.mounts ?? {})) {
+      if (mount.kind === "moduleMount")
+        namespace[key] = namespaceDb(mount.module, prefix + key + ".")
+    }
+    return Object.freeze(namespace)
+  }
+  const db = namespaceDb(module) as DbShape<Module>
   const dbHandles = makeDbHandleFactory(module)
   const effectDb = dbHandles.readwrite(db, {
     timestamp: new Timestamp(1_000n),
     databaseIdentity,
   })
   const outboxRows = (key: string): ReadonlyArray<Record<string, unknown>> => {
-    const table = module.tables[key]
+    const table = plan.tables[key]
     if (table === undefined || outboxMetadataOf(table) === undefined) {
       throw new TypeError(`${key} is not an outbox of module ${module.name}`)
     }
@@ -545,7 +546,6 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
     env: environment,
     sender: new Identity(1n),
     databaseIdentity,
-    identity: databaseIdentity,
     timestamp: new Timestamp(1_000n),
     connectionId: new ConnectionId(1n),
     newUuidV4: () => new Uuid(++uuidCounter),
@@ -555,7 +555,7 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
 
   let makeMutationCtx!: TestModuleHarness<Module>["makeMutationCtx"]
   const runTransaction = <A>(body: () => A): A => {
-    if (transactionActive) throw new NestedTestTransactionError()
+    if (transactionActive) throw new NestedTestTransactionDefect()
     const snapshot = new Map([...store].map(([key, rows]) => [key, [...rows]]))
     transactionActive = true
     pendingWrites = []
@@ -589,28 +589,98 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
 
   makeMutationCtx = (overrides = {}) => {
     const context = { ...base(), ...overrides }
-    return {
+    return withAliases({
       db,
       [TestHarnessTransaction]: runTransaction,
       ...context,
       senderAuth: context.senderAuth ?? unauthenticatedSenderAuth(context),
-    }
+    })
   }
-  const queryRoot = Object.fromEntries(
-    [...store].map(([key, rows]) => {
-      const relation = {
-        build: () => relation,
-        where: () => {
-          throw new TypeError(
-            `Test module harness does not evaluate where() predicates for ${key}`,
-          )
+  const queryTree = (spec: AnyModuleSpec, prefix = ""): MountQueries => ({
+    from: Object.fromEntries(
+      Object.keys(spec.tables).map((key) => {
+        const member = plan.members.tables[prefix + key]!
+        const relation = {
+          build: () => relation,
+          where: () => {
+            throw new TypeError(
+              `Test module harness does not evaluate where() predicates for ${prefix}${key}`,
+            )
+          },
+          toSql: () => `SELECT * FROM ${quotedIdentifier(member.wireName)}`,
+          rows: () => store.get(prefix + key)!,
+        }
+        return [key, relation]
+      }),
+    ) as unknown as ServerQueryRoot<AnyModuleSpec>,
+    children: Object.fromEntries(
+      Object.entries(spec.mounts ?? {}).flatMap(([key, mount]) =>
+        mount.kind === "moduleMount"
+          ? [[key, queryTree(mount.module, prefix + key + ".")]]
+          : [],
+      ),
+    ),
+  })
+  const queries = queryTree(module)
+  const queryRoot = queries.from as unknown as ServerQueryRoot<Module>
+
+  // Build aliases lazily, as an unused native mount does not need a stand-in.
+  const withAliases = <C extends object>(
+    ctx: C,
+    spec: AnyModuleSpec = module,
+    prefix = "",
+    tree = queries,
+  ): C => {
+    const aliases: Record<string, unknown> = Object.create(null)
+    for (const [key, mount] of Object.entries(spec.mounts ?? {})) {
+      let cached: object | undefined
+      Object.defineProperty(aliases, key, {
+        enumerable: true,
+        get: () => {
+          if (cached !== undefined) return cached
+          const path = prefix + key
+          if (mount.kind === "nativeMount") {
+            const factory = options?.nativeMounts?.[path]
+            if (factory === undefined)
+              throw new TypeError(
+                `Native mount ${path} needs a nativeMounts stand-in in makeTestModuleHarness`,
+              )
+            return (cached = factory(ctx))
+          }
+          const {
+            env: _env,
+            as: _as,
+            ...parent
+          } = ctx as C & { env?: unknown; as?: unknown }
+          const withTx = Reflect.get(ctx, "withTx")
+          const child = {
+            ...parent,
+            identity: Reflect.get(ctx, "databaseIdentity"),
+            ...("db" in ctx
+              ? { db: readMember(ctx.db, [key]) ?? Object.create(null) }
+              : {}),
+            ...("from" in ctx ? { from: tree.children[key]!.from } : {}),
+            ...(typeof withTx === "function"
+              ? {
+                  withTx: (body: (tx: unknown) => unknown) =>
+                    withTx((tx: object) => body(readMember(tx, ["as", key]))),
+                }
+              : {}),
+          }
+          return (cached = withAliases(
+            child,
+            mount.module,
+            path + ".",
+            tree.children[key]!,
+          ))
         },
-        toSql: () => `SELECT * FROM ${key}`,
-        rows: () => rows,
-      }
-      return [key, relation]
-    }),
-  ) as unknown as ServerQueryRoot<Module>
+      })
+    }
+    return Object.assign(ctx, {
+      as: Object.freeze(aliases),
+      [mountedQueries]: tree,
+    })
+  }
 
   const makeProcedureCtx: TestModuleHarness<Module>["makeProcedureCtx"] = (
     overrides = {},
@@ -621,7 +691,7 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
       http: httpDefault,
       ...contextOverrides,
     }
-    return {
+    return withAliases<ProcedureCtxLike<Module>>({
       ...context,
       [ProcedureClockNow]:
         context[ProcedureClockNow] ??
@@ -631,7 +701,6 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
           env: context.env,
           sender: context.sender,
           databaseIdentity: context.databaseIdentity,
-          identity: context.identity,
           timestamp: context.timestamp,
           connectionId: context.connectionId,
           newUuidV4: context.newUuidV4,
@@ -639,7 +708,7 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
           random: context.random,
           ...transaction,
         }),
-    }
+    })
   }
 
   const reset = () => {
@@ -650,7 +719,7 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
   }
 
   return {
-    db: rawDb as TestModuleRawDb<Module>,
+    db: db as unknown as TestModuleRawDb<Module>,
     effectDb,
     databaseIdentity,
     outboxRows: outboxRows as TestModuleHarness<Module>["outboxRows"],
@@ -666,28 +735,31 @@ export const makeTestModuleHarness = <Module extends AnyModuleSpec>(
     reset,
     makeMutationCtx,
     makeProcedureCtx,
-    makeHttpHandlerCtx: (overrides = {}) => ({
-      env: environment,
-      timestamp: new Timestamp(1_000n),
-      http: httpDefault,
-      databaseIdentity,
-      withTx: (body) => withTx((ctx) => body({ db: ctx.db })),
-      newUuidV4: () => new Uuid(++uuidCounter),
-      newUuidV7: () => new Uuid(++uuidCounter),
-      random,
-      ...overrides,
-    }),
+    makeHttpHandlerCtx: (overrides = {}) =>
+      withAliases<HttpHandlerCtxLike<Module>>({
+        env: environment,
+        timestamp: new Timestamp(1_000n),
+        http: httpDefault,
+        databaseIdentity,
+        withTx: (body) => withTx((ctx) => body(withAliases({ db: ctx.db }))),
+        newUuidV4: () => new Uuid(++uuidCounter),
+        newUuidV7: () => new Uuid(++uuidCounter),
+        random,
+        ...overrides,
+      }),
     makeViewCtx: (overrides = {}) => ({
       env: environment,
       sender: new Identity(1n),
       db,
       from: queryRoot,
+      [mountedQueries]: queries,
       ...overrides,
     }),
     makeAnonymousViewCtx: (overrides = {}) => ({
       env: environment,
       db,
       from: queryRoot,
+      [mountedQueries]: queries,
       ...overrides,
     }),
   }

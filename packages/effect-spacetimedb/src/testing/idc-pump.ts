@@ -1,3 +1,4 @@
+import { makeModulePlan } from "../module-plan.ts"
 import * as Data from "effect/Data"
 import { Identity } from "spacetimedb"
 import type { AnyModuleSpec } from "../contract/module.ts"
@@ -5,7 +6,6 @@ import { OutboxResult } from "../contract/outbox-result.ts"
 import {
   type OutboxMetadata,
   outboxMetadataOf,
-  outboxResultMetadataOf,
 } from "../contract/outbox-table.ts"
 import { snakeCaseName } from "../contract/canonical-name.ts"
 import { structFields } from "../contract/type.ts"
@@ -16,12 +16,12 @@ import {
   type TestModuleHarness,
 } from "./module-harness.ts"
 
-type PumpCallable = {
+export type PumpCallable = {
   readonly invoke: (ctx: unknown, args?: unknown) => unknown
 }
 
 /** The part of a module harness the pump drives. */
-type IdcPumpHarness = Pick<
+export type IdcPumpHarness = Pick<
   TestModuleHarness<AnyModuleSpec>,
   "databaseIdentity" | typeof TestHarnessOutboxRemove
 > & {
@@ -37,7 +37,7 @@ export type IdcPumpDatabase = {
   readonly module: AnyModuleSpec
   readonly harness: IdcPumpHarness
   /** From `bindCallables`, so each call runs in a harness transaction. */
-  readonly callables: Readonly<Record<string, PumpCallable>>
+  readonly callables: Readonly<Partial<Record<string, PumpCallable>>>
 }
 
 /** A call a recording receiver took instead of running a module. */
@@ -103,13 +103,18 @@ export type IdcPump = {
   readonly deliverNext: (outbox: string, target?: Identity) => IdcDelivery
   /**
    * Delivers oldest-first across every outbox until none waits, at most
-   * `deliveriesMax` times. Stops at a refused connection, which would refuse
-   * again. Use `deliverNext` to choose an interleaving.
+   * `deliveriesMax` times (default `deliveriesMaxDefault`), and throws a
+   * `RangeError` if rows still wait at that bound. Stops at a refused
+   * connection, which would refuse again. Use `deliverNext` to choose an
+   * interleaving.
    */
-  readonly drain: (options: {
-    readonly deliveriesMax: number
+  readonly drain: (options?: {
+    readonly deliveriesMax?: number
   }) => ReadonlyArray<IdcDelivery>
 }
+
+/** How many rows `IdcPump.drain` delivers before it stops and throws. */
+export const deliveriesMaxDefault = 1_000
 
 /** The auth the host gives every inter-database delivery and settle. */
 const deliveryAuth: ServerSenderAuth = {
@@ -152,7 +157,9 @@ const routesOf = (
       receivers.set(keyOf(receiverIdentity(receiver), "receiver"), receiver)
     }
 
-    for (const [key, table] of Object.entries(link.sender.module.tables)) {
+    const plan = makeModulePlan(link.sender.module)
+    for (const [key, member] of Object.entries(plan.members.tables)) {
+      const table = member.owner.tables[member.key]!
       const outbox = outboxMetadataOf(table)
       if (outbox === undefined) {
         continue
@@ -162,14 +169,24 @@ const routesOf = (
           `Outbox ${key} belongs to more than one linked sender; give the pump one sender per outbox name`,
         )
       }
-      const settleKey = Object.entries(link.sender.module.reducers).find(
-        ([, reducer]) => outboxResultMetadataOf(reducer)?.table === table,
-      )?.[0]
+      const binding = makeModulePlan(member.owner).outboxResultBindings.find(
+        (candidate) => candidate.tableKey === member.key,
+      )
+      const settlePath = [
+        ...member.accessorPath.slice(0, -1),
+        binding?.settleKey,
+      ].join(".")
+      const settleName =
+        binding === undefined
+          ? undefined
+          : member.accessorPath.length === 1
+            ? binding.settleKey
+            : plan.members.reducers[settlePath]!.wireName
       routes.set(key, {
         key,
         sender: link.sender,
         outbox,
-        settleKey,
+        settleKey: settleName,
         receivers,
       })
     }
@@ -327,12 +344,13 @@ export const makeIdcPump = (options: {
         (left.head.msgId as bigint) < (right.head.msgId as bigint) ? -1 : 1,
       )[0]
 
-  const drain = (drainOptions: { readonly deliveriesMax: number }) => {
+  const drain: IdcPump["drain"] = (drainOptions) => {
+    const deliveriesMax = drainOptions?.deliveriesMax ?? deliveriesMaxDefault
     const deliveries: Array<IdcDelivery> = []
     for (let next = oldestHead(); next !== undefined; next = oldestHead()) {
-      if (deliveries.length >= drainOptions.deliveriesMax) {
+      if (deliveries.length >= deliveriesMax) {
         throw new RangeError(
-          `IdcPump.drain delivered ${drainOptions.deliveriesMax} rows and rows still wait`,
+          `IdcPump.drain delivered ${deliveriesMax} rows and rows still wait`,
         )
       }
       const delivery = deliverNext(next.outbox)

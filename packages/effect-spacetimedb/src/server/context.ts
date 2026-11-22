@@ -1,6 +1,6 @@
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import type { StdbDecodeError } from "../decode-error.ts"
+import type * as Scope from "effect/Scope"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import type { ModuleBrand } from "../identity-brand.ts"
 import type { ServerQueryRoot } from "../query/types.ts"
@@ -14,7 +14,7 @@ import type {
   EffectDbView,
   EffectHttpClient,
   ReadonlyEffectDbView,
-  StdbHostFailure,
+  HostFailure,
 } from "./services.ts"
 import type {
   AnonymousViewCtxLike,
@@ -23,7 +23,6 @@ import type {
   ProcedureCtxLike,
   ServerDatabaseIdentity,
   ServerConnectionId,
-  ServerIdentity,
   ServerRandom,
   ServerSender,
   ServerSenderAuth,
@@ -32,11 +31,9 @@ import type {
   ViewCtxLike,
 } from "./runtime-types.ts"
 
-type AnyReducerCtxService = {
+export type AnyReducerCtxService = {
   readonly sender: ServerSender
   readonly databaseIdentity: ServerDatabaseIdentity
-  /** @deprecated Use `databaseIdentity` instead. */
-  readonly identity: ServerIdentity
   readonly timestamp: ServerTimestamp
   readonly connectionId: ServerConnectionId
   readonly db: Record<string, unknown>
@@ -46,7 +43,7 @@ type AnyReducerCtxService = {
   readonly random: ServerRandom
 }
 
-type AnyProcedureCtxService = Omit<
+export type AnyProcedureCtxService = Omit<
   AnyReducerCtxService,
   "db" | "senderAuth"
 > & {
@@ -54,7 +51,7 @@ type AnyProcedureCtxService = Omit<
   readonly withTx: <A>(body: (ctx: AnyReducerCtxService) => A) => A
 }
 
-type AnyHttpHandlerCtxService = {
+export type AnyHttpHandlerCtxService = {
   readonly timestamp: ServerTimestamp
   readonly http: HttpHandlerCtxLike<AnyModuleSpec>["http"]
   readonly databaseIdentity: ServerDatabaseIdentity
@@ -66,23 +63,23 @@ type AnyHttpHandlerCtxService = {
   readonly random: ServerRandom
 }
 
-type AnyViewCtxService = {
+export type AnyViewCtxService = {
   readonly sender: ServerSender
   readonly db: Record<string, unknown>
   readonly from: unknown
 }
 
-type AnyAnonymousViewCtxService = {
+export type AnyAnonymousViewCtxService = {
   readonly db: Record<string, unknown>
   readonly from: unknown
 }
 
-type AnyQueryRelation = {
+export type AnyQueryRelation = {
   readonly toSql: () => string
   readonly build: () => unknown
 }
 
-type AnyFromService = Record<string, AnyQueryRelation>
+export type AnyFromService = Record<string, AnyQueryRelation>
 
 export type ReducerCtxService<Module extends AnyModuleSpec> =
   BaseReducerCtx<Module>
@@ -230,7 +227,7 @@ export type HttpTxAllowedRequirementsFor<Module extends AnyModuleSpec> =
     HttpTxAllowedRequirements | EnvRequirementFor<Module>
   >
 
-type EffectServicesOf<EffectType> = EffectType extends Effect.Effect<
+export type EffectServicesOf<EffectType> = EffectType extends Effect.Effect<
   infer _A,
   infer _E,
   infer R
@@ -279,13 +276,10 @@ type ForbiddenRequirements<
   Allowed
 >
 
-type ModuleNameOfRequirement<Requirement> = Requirement extends ModuleBrand<
-  infer Name
->
-  ? Name
-  : never
+export type ModuleNameOfRequirement<Requirement> =
+  Requirement extends ModuleBrand<infer Name> ? Name : never
 
-type ContextServiceName<Service> = Service extends {
+export type ContextServiceName<Service> = Service extends {
   readonly key: infer Key extends string
 }
   ? Key extends `effect-spacetimedb/Server/${infer Name}`
@@ -297,10 +291,11 @@ type ForbiddenRequirementDiagnosticKeys<
   Requirement,
   TargetModuleName extends string,
 > = Requirement extends unknown
-  ? ModuleNameOfRequirement<Requirement> extends infer SourceModuleName extends
-      string
-    ? `Effect uses module '${SourceModuleName}' ${ContextServiceName<Requirement>} inside module '${TargetModuleName}'`
-    : `Effect yields the raw ${ContextServiceName<Requirement>} tag; use this module's accessor`
+  ? [ModuleNameOfRequirement<Requirement>] extends [never]
+    ? Requirement extends Http
+      ? `Effect uses Http, which a transaction cannot reach, inside module '${TargetModuleName}'`
+      : `Effect yields the raw ${ContextServiceName<Requirement>} tag; use this module's accessor`
+    : `Effect uses module '${ModuleNameOfRequirement<Requirement>}' ${ContextServiceName<Requirement>} inside module '${TargetModuleName}'`
   : never
 
 export type TxRunnerService<Module extends AnyModuleSpec> = {
@@ -311,8 +306,8 @@ export type TxRunnerService<Module extends AnyModuleSpec> = {
     >,
   ) => Effect.Effect<
     A,
-    E | StdbHostFailure | StdbDecodeError,
-    Exclude<R, TxAllowedRequirementsFor<Module>>
+    E | HostFailure,
+    Exclude<R, TxAllowedRequirementsFor<Module> | Scope.Scope>
   >
 }
 
@@ -324,8 +319,8 @@ export type HttpTxRunnerService<Module extends AnyModuleSpec> = {
     >,
   ) => Effect.Effect<
     A,
-    E | StdbHostFailure | StdbDecodeError,
-    Exclude<R, HttpTxAllowedRequirementsFor<Module>>
+    E | HostFailure,
+    Exclude<R, HttpTxAllowedRequirementsFor<Module> | Scope.Scope>
   >
 }
 
@@ -410,7 +405,6 @@ const moduleScopedContextEffect = <
 ): Effect.Effect<A, never, ModuleScopedRequirement<Module, Requirement>> =>
   // Server context accessor boundary: this narrows a shared runtime tag to the
   // module that requested it; the tag identity itself remains global.
-  // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
   effect as Effect.Effect<
     A,
     never,

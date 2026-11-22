@@ -97,7 +97,7 @@ export const makeExactResultSchema = <
     decode: (encoded) => {
       const envelope = taggedEnvelopeOf(encoded)
       if (envelope === undefined) {
-        return Effect.fail(new ParseResult.Unexpected(encoded))
+        return Effect.fail(ParseResult.invalidValueIssue(encoded))
       }
 
       if (envelope.tag === "ok") {
@@ -107,7 +107,7 @@ export const makeExactResultSchema = <
             allowUnitWireValue: true,
           })
         ) {
-          return Effect.fail(new ParseResult.Unexpected(encoded))
+          return Effect.fail(ParseResult.invalidValueIssue(encoded))
         }
 
         return okIsUnit
@@ -128,7 +128,7 @@ export const makeExactResultSchema = <
             allowUnitWireValue: true,
           })
         ) {
-          return Effect.fail(new ParseResult.Unexpected(encoded))
+          return Effect.fail(ParseResult.invalidValueIssue(encoded))
         }
 
         return errIsUnit
@@ -142,7 +142,7 @@ export const makeExactResultSchema = <
             )
       }
 
-      return Effect.fail(new ParseResult.Unexpected(encoded))
+      return Effect.fail(ParseResult.invalidValueIssue(encoded))
     },
     encode: (value) => {
       if (isOkResult(value)) {
@@ -174,7 +174,7 @@ export const makeExactResultSchema = <
       }
 
       return Effect.fail(
-        new ParseResult.Type(value, "Expected result envelope"),
+        ParseResult.invalidValueIssue(value, "Expected result envelope"),
       )
     },
   }).pipe(
@@ -211,7 +211,7 @@ export const makeExactSumSchema = <Variants extends SumVariants>(
       aliasPrecedence: "last",
     })
     if (variantEntry === undefined) {
-      return Effect.fail(new ParseResult.Unexpected(original))
+      return Effect.fail(ParseResult.invalidValueIssue(original))
     }
     const [authoredTag, variant] = variantEntry
 
@@ -226,7 +226,7 @@ export const makeExactSumSchema = <Variants extends SumVariants>(
         )) ||
       (!wireUnit && !hasValue)
     ) {
-      return Effect.fail(new ParseResult.Unexpected(original))
+      return Effect.fail(ParseResult.invalidValueIssue(original))
     }
 
     return wireUnit
@@ -255,13 +255,13 @@ export const makeExactSumSchema = <Variants extends SumVariants>(
       if (Array.isArray(encoded)) {
         const [tag, value, ...rest] = encoded
         if (rest.length > 0 || typeof tag !== "string") {
-          return Effect.fail(new ParseResult.Unexpected(encoded))
+          return Effect.fail(ParseResult.invalidValueIssue(encoded))
         }
         return decodeVariant(tag, value, encoded.length >= 2, encoded)
       }
 
       if (!isRecord(encoded)) {
-        return Effect.fail(new ParseResult.Unexpected(encoded))
+        return Effect.fail(ParseResult.invalidValueIssue(encoded))
       }
 
       const envelope = taggedEnvelopeOf(encoded)
@@ -270,7 +270,7 @@ export const makeExactSumSchema = <Variants extends SumVariants>(
           aliasPrecedence: "last",
         })
         if (variantEntry === undefined) {
-          return Effect.fail(new ParseResult.Unexpected(encoded))
+          return Effect.fail(ParseResult.invalidValueIssue(encoded))
         }
         const [authoredTag] = variantEntry
 
@@ -281,7 +281,7 @@ export const makeExactSumSchema = <Variants extends SumVariants>(
             allowUnitWireValue: true,
           })
         ) {
-          return Effect.fail(new ParseResult.Unexpected(encoded))
+          return Effect.fail(ParseResult.invalidValueIssue(encoded))
         }
 
         return decodeVariant(
@@ -294,20 +294,22 @@ export const makeExactSumSchema = <Variants extends SumVariants>(
 
       const entry = singleEntryEnvelopeOf(encoded)
       if (entry === undefined) {
-        return Effect.fail(new ParseResult.Unexpected(encoded))
+        return Effect.fail(ParseResult.invalidValueIssue(encoded))
       }
 
       return decodeVariant(entry.tag, entry.value, true, encoded)
     },
     encode: (value) => {
       if (!isRecord(value) || typeof value.tag !== "string") {
-        return Effect.fail(new ParseResult.Type(value, "Expected sum envelope"))
+        return Effect.fail(
+          ParseResult.invalidValueIssue(value, "Expected sum envelope"),
+        )
       }
 
       const tag = value.tag
       const variant = variantByTag.get(tag)
       if (variant === undefined) {
-        return Effect.fail(new ParseResult.Unexpected(value))
+        return Effect.fail(ParseResult.invalidValueIssue(value))
       }
 
       const keys = Object.keys(value)
@@ -319,13 +321,13 @@ export const makeExactSumSchema = <Variants extends SumVariants>(
         (!authoredUnit && (keys.length !== 2 || !hasValue)) ||
         keys.length > 2
       ) {
-        return Effect.fail(new ParseResult.Unexpected(value))
+        return Effect.fail(ParseResult.invalidValueIssue(value))
       }
       if (
         authoredUnit &&
         !(keys.length === 1 || (keys.length === 2 && hasValue))
       ) {
-        return Effect.fail(new ParseResult.Unexpected(value))
+        return Effect.fail(ParseResult.invalidValueIssue(value))
       }
 
       return Schema.encodeEffect(variant.schema)(
@@ -357,7 +359,7 @@ export const makeOptionSchema = <Inner extends AnyValueType>(
         if (optionEntry.tag === "none") {
           return isUnitWireValue(optionEntry.value)
             ? Effect.void
-            : Effect.fail(new ParseResult.Unexpected(encoded))
+            : Effect.fail(ParseResult.invalidValueIssue(encoded))
         }
 
         if (optionEntry.tag === "some") {
@@ -383,7 +385,7 @@ export const makeOptionSchema = <Inner extends AnyValueType>(
 export const structTypeError = (
   value: unknown,
   message: string,
-): ParseResult.ParseIssue => new ParseResult.Type(value, message)
+): ParseResult.ParseIssue => ParseResult.invalidValueIssue(value, message)
 
 export type StructFieldCodecEntry = {
   readonly optional: boolean

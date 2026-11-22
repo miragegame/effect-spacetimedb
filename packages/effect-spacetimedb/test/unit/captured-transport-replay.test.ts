@@ -10,7 +10,7 @@ import * as Schema from "effect/Schema"
 
 const { expect } = EffectVitest
 
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import {
   CapturedTransportModule,
   ThingId,
@@ -34,13 +34,13 @@ const readCapturedTransport = (name: string) =>
 const decodeThingId = Schema.decodeUnknownSync(ThingId)
 const decodeUserId = Schema.decodeUnknownSync(UserId)
 
-const unexpectedSubscriptionBuilder = (): StdbTesting.SubscriptionBuilderLike<
+const unexpectedSubscriptionBuilder = (): StdbInternal.SubscriptionBuilderLike<
   unknown,
-  StdbTesting.ClientQueryRoot<typeof CapturedTransportModule>
+  StdbInternal.ClientQueryRoot<typeof CapturedTransportModule>
 > => {
-  const builder: StdbTesting.SubscriptionBuilderLike<
+  const builder: StdbInternal.SubscriptionBuilderLike<
     unknown,
-    StdbTesting.ClientQueryRoot<typeof CapturedTransportModule>
+    StdbInternal.ClientQueryRoot<typeof CapturedTransportModule>
   > = {
     onApplied: () => builder,
     onError: () => builder,
@@ -52,7 +52,7 @@ const unexpectedSubscriptionBuilder = (): StdbTesting.SubscriptionBuilderLike<
   return builder
 }
 
-const makeExampleWsConnection = (): StdbTesting.WsConnectionLike<
+const makeExampleWsConnection = (): StdbInternal.WsConnectionLike<
   typeof CapturedTransportModule,
   unknown
 > => ({
@@ -63,8 +63,8 @@ const makeExampleWsConnection = (): StdbTesting.WsConnectionLike<
   subscriptionBuilder: unexpectedSubscriptionBuilder,
 })
 
-const makeWsClient = (transport: StdbTesting.WsCallableTransport) =>
-  StdbTesting.ClientWs.make({
+const wsMake = (transport: StdbInternal.WsCallableTransport) =>
+  StdbInternal.ClientWs.make({
     module: CapturedTransportModule,
     connection: makeExampleWsConnection(),
     transport,
@@ -87,7 +87,7 @@ describe("captured transport replay", (it) => {
       )
       const reducerOkEmpty = yield* readCapturedTransport("reducer-ok-empty")
 
-      const declaredErrorClient = makeWsClient({
+      const declaredErrorClient = wsMake({
         callReducerWithParams: () => Promise.reject(reducerErr),
         callProcedureWithParams: noopProcedure,
       })
@@ -102,7 +102,7 @@ describe("captured transport replay", (it) => {
         userId: decodeUserId("capture-missing-user"),
       })
 
-      const internalErrorClient = makeWsClient({
+      const internalErrorClient = wsMake({
         callReducerWithParams: () => Promise.reject(reducerInternalError),
         callProcedureWithParams: noopProcedure,
       })
@@ -113,7 +113,7 @@ describe("captured transport replay", (it) => {
         _tag: "RemoteRejectedError",
       })
 
-      const okEmptyClient = makeWsClient({
+      const okEmptyClient = wsMake({
         callReducerWithParams: () => Promise.resolve(reducerOkEmpty as void),
         callProcedureWithParams: noopProcedure,
       })
@@ -128,7 +128,7 @@ describe("captured transport replay", (it) => {
         const procedureOk = yield* readCapturedTransport("procedure-ok")
         const procedureErr = yield* readCapturedTransport("procedure-err")
 
-        const okClient = makeWsClient({
+        const okClient = wsMake({
           callReducerWithParams: noopReducer,
           callProcedureWithParams: () => Promise.resolve(procedureOk),
         })
@@ -144,7 +144,7 @@ describe("captured transport replay", (it) => {
           },
         })
 
-        const errClient = makeWsClient({
+        const errClient = wsMake({
           callReducerWithParams: noopReducer,
           callProcedureWithParams: () => Promise.resolve(procedureErr),
         })

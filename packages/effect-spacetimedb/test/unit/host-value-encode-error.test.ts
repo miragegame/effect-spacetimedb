@@ -1,5 +1,5 @@
 import * as EffectVitest from "@effect/vitest"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { TestLayer } from "../helpers/test-layer"
 import { testArrayLength } from "../helpers/array-bounds"
 
@@ -7,18 +7,18 @@ const { expect } = EffectVitest
 const describe = EffectVitest.layer(TestLayer)
 
 type HostEncodeReason = InstanceType<
-  typeof StdbTesting.StdbHostEncodeError
+  typeof StdbInternal.StdbHostEncodeError
 >["reason"]
 
 const captureHostEncodeError = (
   evaluate: () => unknown,
-): StdbTesting.StdbHostEncodeError => {
+): StdbInternal.StdbHostEncodeError => {
   try {
     evaluate()
   } catch (error) {
     expect(error).toBeInstanceOf(Error)
-    expect(error).toBeInstanceOf(StdbTesting.StdbHostEncodeError)
-    if (error instanceof StdbTesting.StdbHostEncodeError) {
+    expect(error).toBeInstanceOf(StdbInternal.StdbHostEncodeError)
+    if (error instanceof StdbInternal.StdbHostEncodeError) {
       return error
     }
   }
@@ -44,69 +44,69 @@ const expectHostEncodeError = (
 
 describe("effect-spacetimedb host value encode errors", (it) => {
   it("throws structured errors for host shape mismatches", () => {
-    const String = StdbTesting.ContractType.string()
-    const StringArray = StdbTesting.ContractType.array(String, testArrayLength)
-    const User = StdbTesting.ContractType.struct({
+    const String = StdbInternal.ContractType.string()
+    const StringArray = StdbInternal.ContractType.array(String, testArrayLength)
+    const User = StdbInternal.ContractType.struct({
       id: String,
       displayName: String,
     })
-    const Result = StdbTesting.ContractType.result(String, String)
-    const Status = StdbTesting.ContractType.sum({
+    const Result = StdbInternal.ContractType.result(String, String)
+    const Status = StdbInternal.ContractType.sum({
       Active: String,
-      Deleted: StdbTesting.ContractType.unit(),
+      Deleted: StdbInternal.ContractType.unit(),
     })
 
     expectHostEncodeError(
-      () => StdbTesting.encodeHostValue(StringArray, "Ada"),
+      () => StdbInternal.encodeHostValue(StringArray, "Ada"),
       {
         reason: "ExpectedArray",
         message: "Expected array host value",
       },
     )
-    expectHostEncodeError(() => StdbTesting.encodeHostValue(User, null), {
+    expectHostEncodeError(() => StdbInternal.encodeHostValue(User, null), {
       reason: "ExpectedStruct",
       message: "Expected struct host value",
     })
     expectHostEncodeError(
-      () => StdbTesting.encodeHostValue(User, { id: "user-1" }),
+      () => StdbInternal.encodeHostValue(User, { id: "user-1" }),
       {
         reason: "MissingStructField",
         field: "displayName",
         message: "Missing required host struct field displayName",
       },
     )
-    expectHostEncodeError(() => StdbTesting.encodeHostValue(Result, null), {
+    expectHostEncodeError(() => StdbInternal.encodeHostValue(Result, null), {
       reason: "ExpectedResult",
       message: "Expected result host value",
     })
     expectHostEncodeError(
-      () => StdbTesting.encodeHostValue(Result, { tag: "ok" }),
+      () => StdbInternal.encodeHostValue(Result, { tag: "ok" }),
       {
         reason: "MissingResultOkValue",
         message: "Missing result host ok value",
       },
     )
     expectHostEncodeError(
-      () => StdbTesting.encodeHostValue(Result, { tag: "err" }),
+      () => StdbInternal.encodeHostValue(Result, { tag: "err" }),
       {
         reason: "MissingResultErrValue",
         message: "Missing result host err value",
       },
     )
     expectHostEncodeError(
-      () => StdbTesting.encodeHostValue(Result, { tag: "pending" }),
+      () => StdbInternal.encodeHostValue(Result, { tag: "pending" }),
       {
         reason: "ExpectedResultEnvelope",
         message: "Expected result host envelope",
       },
     )
-    expectHostEncodeError(() => StdbTesting.encodeHostValue(Status, {}), {
+    expectHostEncodeError(() => StdbInternal.encodeHostValue(Status, {}), {
       reason: "ExpectedSumEnvelope",
       message: "Expected sum host envelope",
     })
     expectHostEncodeError(
       () =>
-        StdbTesting.encodeHostValue(Status, {
+        StdbInternal.encodeHostValue(Status, {
           tag: "Archived",
           value: "off",
         }),
@@ -117,7 +117,7 @@ describe("effect-spacetimedb host value encode errors", (it) => {
       },
     )
     expectHostEncodeError(
-      () => StdbTesting.encodeHostValue(Status, { tag: "Active" }),
+      () => StdbInternal.encodeHostValue(Status, { tag: "Active" }),
       {
         reason: "MissingSumValue",
         variant: "Active",

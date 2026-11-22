@@ -5,8 +5,8 @@ import {
 } from "../contract/error.ts"
 import type { HttpHandlerSpec } from "../contract/http-handler.ts"
 import {
-  StdbDiagnostic,
-  StdbValidationError,
+  Diagnostic,
+  StdbValidationDefect,
 } from "../contract/module-validation.ts"
 import type { ProcedureSpec } from "../contract/procedure.ts"
 import type { ReducerSpec } from "../contract/reducer.ts"
@@ -37,9 +37,9 @@ export const withGroupDefaultErrors = <
   )
   if (conflictingClass !== undefined) {
     const tag = tagOf(conflictingClass)
-    throw new StdbValidationError({
+    throw new StdbValidationDefect({
       diagnostics: [
-        new StdbDiagnostic({
+        new Diagnostic({
           code: "DuplicateDeclaredErrorTag",
           path: [...path, "errors", tag],
           message: `Declared error tag ${tag} is backed by different classes in the group default and endpoint declaration`,

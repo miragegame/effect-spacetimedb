@@ -11,16 +11,17 @@ import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
+import { identityEquals } from "effect-spacetimedb"
 import {
   CallNotSentError,
   ConnectionIdentityChangedError,
   ConnectionLostError,
-  type TableChange,
   WsConnectError,
   type WsSessionSupervisorHandle,
+  wsSupervisor,
+  type TableChange,
   type WsSessionSupervisorPhase,
   type WsToken,
-  wsSupervisor,
 } from "effect-spacetimedb/client"
 import {
   decodeUserId,
@@ -45,12 +46,12 @@ import {
 const { describe, expect, live } = EffectVitest
 
 /** The SDK's minimum backoff: 500 ms before the first attempt, 1 s cap. */
-const automaticReconnect = { delayMillisMin: 500, delayMillisMax: 1_000 }
+const automaticReconnect = { delayMin: 500, delayMax: 1_000 }
 
 /** A supervisor that replaces a lost session without a noticeable wait. */
 const supervisorPolicy = {
-  reconnectDelayMillisFirst: 50,
-  reconnectDelayMillisMax: 50,
+  reconnectDelayFirst: 50,
+  reconnectDelayMax: 50,
   reconnectJitter: false,
 }
 
@@ -119,6 +120,16 @@ const liveSession = <Session, Failure>(
         ? Effect.succeed(result.value)
         : Effect.die("the supervisor published no session"),
     ),
+  )
+
+const awaitRows = <A, E>(
+  ref: SubscriptionRef.SubscriptionRef<AsyncResult.AsyncResult<A, E>>,
+  predicate: (rows: Option.Option<A>) => boolean,
+) =>
+  SubscriptionRef.changes(ref).pipe(
+    Stream.filter((value) => predicate(AsyncResult.value(value))),
+    Stream.runHead,
+    Effect.map(Option.getOrThrow),
   )
 
 const runId = () => globalThis.crypto.randomUUID().slice(0, 8)
@@ -483,6 +494,97 @@ describe("effect-spacetimedb live ws automatic reconnect", () => {
             userId: decodeUserId(`${runId()}-replaced`),
             name: decodeUserName("Replaced"),
           })
+        }),
+      ),
+    { timeout: LIVE_TEST_TIMEOUT_MS },
+  )
+
+  live(
+    "takes the rows when a client with no token comes back as someone new, and carries on",
+    () =>
+      provideLiveTest(
+        Effect.gen(function* () {
+          const live = yield* liveHarness
+          const sockets = yield* makeDroppableSockets
+          const supervisor = yield* wsSupervisor({
+            module: LiveModule,
+            config: { ...reconnectingConfig(live, sockets), token: undefined },
+            policy: supervisorPolicy,
+          })
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "live" && phase.attempt === 1,
+          )
+          const first = yield* liveSession(supervisor)
+          const firstRows = yield* first.subscribeTableRef("user")
+          yield* awaitRows(firstRows, Option.isSome)
+
+          yield* sockets.closeCurrentWithProtocolError
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "live" && phase.attempt === 2,
+          )
+          const second = yield* liveSession(supervisor)
+
+          expect(identityEquals(first.identity, second.identity)).toBe(false)
+          yield* awaitRows(firstRows, Option.isNone)
+          expect(first.isRevoked()).toBe(true)
+          expect(second.isRevoked()).toBe(false)
+          const secondRows = yield* second.subscribeTableRef("user")
+          yield* awaitRows(secondRows, Option.isSome)
+        }),
+      ),
+    { timeout: LIVE_TEST_TIMEOUT_MS },
+  )
+
+  live(
+    "keeps the rows of a session whose replacement presents the token the server issued",
+    () =>
+      provideLiveTest(
+        Effect.gen(function* () {
+          const live = yield* liveHarness
+          const issuerSockets = yield* makeDroppableSockets
+          const issuer = yield* wsSupervisor({
+            module: LiveModule,
+            config: {
+              ...reconnectingConfig(live, issuerSockets),
+              token: undefined,
+            },
+            policy: supervisorPolicy,
+          })
+          yield* awaitPhase(issuer.phase, (phase) => phase.status === "live")
+          const issued = yield* liveSession(issuer)
+
+          const sockets = yield* makeDroppableSockets
+          const { token } = scriptedToken([issued.token])
+          const supervisor = yield* wsSupervisor({
+            module: LiveModule,
+            config: reconnectingConfig(live, sockets, token),
+            policy: supervisorPolicy,
+          })
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "live" && phase.attempt === 1,
+          )
+          const first = yield* liveSession(supervisor)
+          const firstRows = yield* first.subscribeTableRef("user")
+          yield* awaitRows(firstRows, Option.isSome)
+
+          yield* sockets.closeCurrentWithProtocolError
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "live" && phase.attempt === 2,
+          )
+          const second = yield* liveSession(supervisor)
+
+          expect(identityEquals(issued.identity, first.identity)).toBe(true)
+          expect(identityEquals(first.identity, second.identity)).toBe(true)
+          expect(first.isRevoked()).toBe(false)
+          expect(
+            Option.isSome(
+              AsyncResult.value(SubscriptionRef.getUnsafe(firstRows)),
+            ),
+          ).toBe(true)
         }),
       ),
     { timeout: LIVE_TEST_TIMEOUT_MS },

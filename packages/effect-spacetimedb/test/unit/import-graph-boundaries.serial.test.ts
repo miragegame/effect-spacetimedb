@@ -19,6 +19,7 @@ const describe = EffectVitest.describe
 
 const srcDir = fileURLToPath(new URL("../../src/", import.meta.url))
 const packageRoot = Path.dirname(srcDir)
+const examplesDir = Path.join(packageRoot, "examples")
 const serverDir = Path.join(srcDir, "server")
 const clientDir = Path.join(srcDir, "client")
 const contractDir = Path.join(srcDir, "contract")
@@ -26,6 +27,7 @@ const rootEntrypoint = Path.join(srcDir, "index.ts")
 const serverEntrypoint = Path.join(serverDir, "index.ts")
 const serverCompilerEntrypoint = Path.join(srcDir, "server-compiler.ts")
 const testingEntrypoint = Path.join(srcDir, "testing.ts")
+const internalTestingEntrypoint = Path.join(srcDir, "testing", "internal.ts")
 const declarationEmitTimeoutMs = 60_000
 
 const declarationSurfaceOutDir = Path.join(
@@ -67,6 +69,17 @@ const collectFilesWithExtension = (
 
 const collectTsFiles = (dir: string): ReadonlyArray<string> =>
   collectFilesWithExtension(dir, ".ts")
+
+// A module's `node_modules` links back above itself, so a recursive listing
+// that followed it would never end. An example ships nothing from there.
+const collectExampleSources = (dir: string): ReadonlyArray<string> =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = Path.join(dir, entry.name)
+    if (entry.isDirectory() && entry.name !== "node_modules") {
+      return collectExampleSources(path)
+    }
+    return entry.isFile() && entry.name.endsWith(".ts") ? [path] : []
+  })
 
 const readFileString = (filePath: string): string => {
   if (!existsSync(filePath)) {
@@ -426,7 +439,33 @@ describe("import graph boundaries", () => {
         const violations = [
           ...hostOnlyValueImportsReachableFrom(serverEntrypoint),
           ...hostOnlyValueImportsReachableFrom(testingEntrypoint),
+          ...hostOnlyValueImportsReachableFrom(internalTestingEntrypoint),
         ].map(formatHostOnlyValueImport)
+
+        expect(violations).toEqual([])
+      }),
+    { timeout: 20_000 },
+  )
+
+  // `./testing/internal` is in `exports` for this repository's tests and absent
+  // from `publishConfig.exports`, so an import of it from anything that ships
+  // fails to resolve for a consumer. Type-only edges count: they are in the
+  // published declarations.
+  it.effect(
+    "keeps shipped sources off the unpublished testing entrypoint",
+    () =>
+      Effect.gen(function* () {
+        const shipped = [
+          ...collectTsFiles(srcDir),
+          ...collectExampleSources(examplesDir),
+        ].filter((filePath) => filePath !== internalTestingEntrypoint)
+        const violations = shipped
+          .filter((filePath) =>
+            /["'](?:effect-spacetimedb\/testing|[./]+(?:testing)?)\/internal(?:\.ts)?["']/u.test(
+              readFileString(filePath),
+            ),
+          )
+          .map(relativePackagePath)
 
         expect(violations).toEqual([])
       }),

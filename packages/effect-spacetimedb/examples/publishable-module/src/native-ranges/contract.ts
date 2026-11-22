@@ -1,55 +1,55 @@
 import * as Stdb from "effect-spacetimedb"
-import { ResultRowsLength, String255, U64 } from "../schema"
+import { U64 } from "../schema"
 
-export const NativeRangeFunctions = Stdb.StdbGroup.make("NativeRanges")
+export const NativeRangeFunctions = Stdb.Group.make("NativeRanges")
   .add(
-    Stdb.StdbFn.reducer("nativeRangeClear", {
+    Stdb.Fn.reducer("nativeRangeClear", {
       params: Stdb.struct({}),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("nativeRangeInsert", {
+    Stdb.Fn.reducer("nativeRangeInsert", {
       params: Stdb.struct({
         owner: Stdb.identity(),
         happenedAt: Stdb.timestamp(),
-        label: String255,
+        label: Stdb.string(),
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("nativeRangeByOwner", {
+    Stdb.Fn.procedure("nativeRangeByOwner", {
       params: Stdb.struct({
         lo: Stdb.identity(),
         hi: Stdb.identity(),
       }),
-      returns: Stdb.array(String255, ResultRowsLength),
+      returns: Stdb.array(Stdb.string()),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("nativeRangeByTimestamp", {
+    Stdb.Fn.procedure("nativeRangeByTimestamp", {
       params: Stdb.struct({
         lo: Stdb.timestamp(),
         hi: Stdb.timestamp(),
       }),
-      returns: Stdb.array(String255, ResultRowsLength),
+      returns: Stdb.array(Stdb.string()),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("optionalRangeClear", {
+    Stdb.Fn.reducer("optionalRangeClear", {
       params: Stdb.struct({}),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("optionalRangeInsert", {
+    Stdb.Fn.reducer("optionalRangeInsert", {
       params: Stdb.struct({
         rank: Stdb.option(U64),
-        label: String255,
+        label: Stdb.string(),
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("optionalRangeAfterUnset", {
+    Stdb.Fn.procedure("optionalRangeAfterUnset", {
       params: Stdb.struct({}),
-      returns: Stdb.array(String255, ResultRowsLength),
+      returns: Stdb.array(Stdb.string()),
     }),
   )

@@ -6,11 +6,11 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as FastCheck from "fast-check"
 import {
+  HandlerAsyncNotAllowedDefect,
+  HandlerGlobalRandomNotAllowedDefect,
+  HandlerWallClockNotAllowedDefect,
   type ConstrainedServerRuntimeMode,
   provideConstrainedServerSupport,
-  ReducerAsyncNotAllowedError,
-  ReducerGlobalRandomNotAllowedError,
-  ReducerWallClockNotAllowedError,
 } from "effect-spacetimedb/server"
 import { Timestamp } from "spacetimedb"
 import {
@@ -121,12 +121,21 @@ describe("server determinism", () => {
       ),
   )
 
-  it.effect("server clock forbids sleeping", () =>
+  it.effect("server clock dies on a real sleep and passes a zero one", () =>
     Effect.gen(function* () {
       const clock = makeServerClock({ timestamp: new Timestamp(0n) })
-      const error = yield* Effect.flip(clock.sleep(Duration.millis(1)))
+      const exit = yield* Effect.exit(clock.sleep(Duration.millis(1)))
 
-      expect(ReducerAsyncNotAllowedError.is(error)).toBe(true)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        expect(
+          exit.cause.reasons
+            .filter(Cause.isDieReason)
+            .map((reason) => reason.defect)
+            .some(HandlerAsyncNotAllowedDefect.is),
+        ).toBe(true)
+      }
+      yield* clock.sleep(Duration.zero)
     }),
   )
 
@@ -148,7 +157,7 @@ describe("server determinism", () => {
             expect(Exit.isFailure(exit)).toBe(true)
             if (Exit.isFailure(exit)) {
               expect(Cause.squash(exit.cause)).toBeInstanceOf(
-                ReducerWallClockNotAllowedError,
+                HandlerWallClockNotAllowedDefect,
               )
             }
           }),
@@ -172,21 +181,23 @@ describe("server determinism", () => {
             callProperty(globalThis, "setTimeout", () => {}, 0),
           ),
         )
-        expect(ReducerAsyncNotAllowedError.is(setTimeoutError.cause)).toBe(true)
+        expect(HandlerAsyncNotAllowedDefect.is(setTimeoutError.cause)).toBe(
+          true,
+        )
 
         const setIntervalError = yield* Effect.flip(
           callGuarded("dev-guarded", () =>
             callProperty(globalThis, "setInterval", () => {}, 0),
           ),
         )
-        expect(ReducerAsyncNotAllowedError.is(setIntervalError.cause)).toBe(
+        expect(HandlerAsyncNotAllowedDefect.is(setIntervalError.cause)).toBe(
           true,
         )
 
         const queueMicrotaskError = yield* Effect.flip(
           callGuarded("dev-guarded", () => globalThis.queueMicrotask(() => {})),
         )
-        expect(ReducerAsyncNotAllowedError.is(queueMicrotaskError.cause)).toBe(
+        expect(HandlerAsyncNotAllowedDefect.is(queueMicrotaskError.cause)).toBe(
           true,
         )
 
@@ -194,21 +205,21 @@ describe("server determinism", () => {
           callGuarded("dev-guarded", () => Math.random()),
         )
         expect(mathRandomError.cause).toBeInstanceOf(
-          ReducerGlobalRandomNotAllowedError,
+          HandlerGlobalRandomNotAllowedDefect,
         )
 
         const dateConstructorError = yield* Effect.flip(
           callGuarded("dev-guarded", () => new Date()),
         )
         expect(dateConstructorError.cause).toBeInstanceOf(
-          ReducerWallClockNotAllowedError,
+          HandlerWallClockNotAllowedDefect,
         )
 
         const dateNowError = yield* Effect.flip(
           callGuarded("dev-guarded", () => Date.now()),
         )
         expect(dateNowError.cause).toBeInstanceOf(
-          ReducerWallClockNotAllowedError,
+          HandlerWallClockNotAllowedDefect,
         )
 
         const runtimeRandomExit = yield* Effect.exit(

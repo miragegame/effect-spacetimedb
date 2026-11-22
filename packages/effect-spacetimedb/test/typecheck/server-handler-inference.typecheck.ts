@@ -1,18 +1,13 @@
-import { make as makeServer } from "../../src/server/bind.ts"
 import * as Effect from "effect/Effect"
-import { CallableOnlyModule } from "../fixtures/callable-only-module"
+import * as Stdb from "effect-spacetimedb"
+import { CallableOnlyBuilder } from "../fixtures/callable-only-module"
 import type { Assert, ErrorOf, Expand, IsEqual } from "./helpers"
 
-const server = makeServer({ module: CallableOnlyModule })
-
-const inferredHandlers = server.handlers({
-  reducers: {
-    ping: (args) => {
-      type _PingArgs = Assert<IsEqual<Expand<typeof args>, {}>>
-      return Effect.void
-    },
-  },
-  procedures: {
+const inferredHandlers = Stdb.Builder.group(
+  CallableOnlyBuilder,
+  "CallableOnly",
+  {
+    ping: () => Effect.void,
     echo: (args) => {
       type _EchoArgs = Assert<
         IsEqual<Expand<typeof args>, { readonly value: string }>
@@ -20,15 +15,17 @@ const inferredHandlers = server.handlers({
       return Effect.succeed("ok")
     },
   },
-})
+)
 
 type _ReducerCtxNever = Assert<
-  IsEqual<ErrorOf<typeof server.reducerCtx>, never>
+  IsEqual<ErrorOf<typeof CallableOnlyBuilder.ReducerCtx>, never>
 >
 type _ProcedureCtxNever = Assert<
-  IsEqual<ErrorOf<typeof server.procedureCtx>, never>
+  IsEqual<ErrorOf<typeof CallableOnlyBuilder.ProcedureCtx>, never>
 >
-type _DbNever = Assert<IsEqual<ErrorOf<typeof server.db>, never>>
-type _TxCtxNever = Assert<IsEqual<ErrorOf<typeof server.txCtx>, never>>
+type _DbNever = Assert<IsEqual<ErrorOf<typeof CallableOnlyBuilder.Db>, never>>
+type _TxCtxNever = Assert<
+  IsEqual<ErrorOf<typeof CallableOnlyBuilder.TxCtx>, never>
+>
 
 void inferredHandlers

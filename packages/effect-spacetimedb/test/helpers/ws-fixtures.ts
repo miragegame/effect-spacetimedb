@@ -1,22 +1,23 @@
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { FullModule } from "../fixtures/full-module"
 
 export type FullModuleWsConnection<RelationContext = unknown> =
-  StdbTesting.WsConnectionLike<typeof FullModule, unknown, RelationContext>
+  StdbInternal.WsConnectionLike<typeof FullModule, unknown, RelationContext>
 
 export type FullModuleWsDb<RelationContext = unknown> =
   FullModuleWsConnection<RelationContext>["db"]
 
-export type FullModuleSubscriptionBuilder = StdbTesting.SubscriptionBuilderLike<
-  unknown,
-  StdbTesting.ClientQueryRoot<typeof FullModule>
->
+export type FullModuleSubscriptionBuilder =
+  StdbInternal.SubscriptionBuilderLike<
+    unknown,
+    StdbInternal.ClientQueryRoot<typeof FullModule>
+  >
 
-type FullUserRow = StdbTesting.WsTableRow<typeof FullModule.tables.user>
-type FullPresenceEventRow = StdbTesting.WsTableRow<
+type FullUserRow = StdbInternal.WsTableRow<typeof FullModule.tables.user>
+type FullPresenceEventRow = StdbInternal.WsTableRow<
   typeof FullModule.tables.presenceEvent
 >
-type FullAllUsersRow = StdbTesting.WsTableRow<typeof FullModule.tables.user>
+type FullAllUsersRow = StdbInternal.WsTableRow<typeof FullModule.tables.user>
 
 const unexpected = (path: string): never => {
   throw new Error(`unexpected ${path}`)
@@ -24,7 +25,7 @@ const unexpected = (path: string): never => {
 
 export const makeStaticRelationHandle = <Row, Ctx = unknown>(
   rows: ReadonlyArray<Row> = [],
-): StdbTesting.RelationHandle<Row, Ctx> => ({
+): StdbInternal.RelationHandle<Row, Ctx> => ({
   onInsert: () => undefined,
   removeOnInsert: () => undefined,
   onDelete: () => undefined,
@@ -82,4 +83,4 @@ export const makeFullModuleWsConnection: <RelationContext = unknown>(options?: {
     options.subscriptionBuilder ?? (() => makeUnexpectedSubscriptionBuilder()),
 })
 
-export type SubscriptionHandleLike = StdbTesting.SubscriptionHandleLike
+export type SubscriptionHandleLike = StdbInternal.SubscriptionHandleLike

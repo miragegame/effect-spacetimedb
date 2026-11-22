@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect"
 
 const { describe, expect, live } = EffectVitest
 
-import type { NativeSubscriptionHandleLike } from "effect-spacetimedb/testing"
+import type { NativeSubscriptionHandleLike } from "effect-spacetimedb/testing/internal"
 import {
   decodeThingId,
   decodeUserId,

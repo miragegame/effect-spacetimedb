@@ -4,7 +4,7 @@ import * as Schema from "effect/Schema"
 import * as SpacetimeDB from "spacetimedb"
 const { expect } = EffectVitest
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { TestLayer } from "../helpers/test-layer"
 import { builderTypeName, typeBuilder } from "../helpers/type-builder"
 import { testArrayLength } from "../helpers/array-bounds"
@@ -58,9 +58,9 @@ describe("uniform optional lowering", (it) => {
         })
 
         expect(
-          StdbTesting.ContractType.satsTypeFingerprint(userTable.row),
+          StdbInternal.ContractType.satsTypeFingerprint(userTable.row),
         ).toBe(
-          StdbTesting.ContractType.satsTypeFingerprint(equivalentRowStruct),
+          StdbInternal.ContractType.satsTypeFingerprint(equivalentRowStruct),
         )
       }),
   )
@@ -156,7 +156,7 @@ describe("uniform optional lowering", (it) => {
     () =>
       Effect.gen(function* () {
         const decode = (body: string) =>
-          StdbTesting.ClientHttpJson.decodeHttpOutput<{
+          StdbInternal.ClientHttpJson.decodeHttpOutput<{
             readonly x?: string | undefined
             readonly y: string
           }>(OptionalStruct, body)
@@ -188,14 +188,14 @@ describe("uniform optional lowering", (it) => {
           },
         })
 
-        const decoded = yield* StdbTesting.ClientHttpJson.decodeHttpOutput<{
+        const decoded = yield* StdbInternal.ClientHttpJson.decodeHttpOutput<{
           readonly id: string
           readonly nickname?: string | undefined
         }>(userTable.row, '{"id":"u1","nickname":[1,{}]}')
 
         expect(decoded).toEqual({ id: "u1" })
 
-        const present = yield* StdbTesting.ClientHttpJson.decodeHttpOutput<{
+        const present = yield* StdbInternal.ClientHttpJson.decodeHttpOutput<{
           readonly id: string
           readonly nickname?: string | undefined
         }>(userTable.row, '{"id":"u1","nickname":[0,"nick"]}')

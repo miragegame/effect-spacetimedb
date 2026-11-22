@@ -44,9 +44,9 @@ const schemaNativeUser = Stdb.table("schema_native_user", {
   },
 })
 
-const MatrixFunctions = Stdb.StdbGroup.make("SchemaNative")
+const MatrixFunctions = Stdb.Group.make("SchemaNative")
   .add(
-    Stdb.StdbFn.reducer("upsert_user", {
+    Stdb.Fn.reducer("upsert_user", {
       params: Stdb.struct({
         id: UserId,
         name: UserName,
@@ -54,7 +54,7 @@ const MatrixFunctions = Stdb.StdbGroup.make("SchemaNative")
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("get_user", {
+    Stdb.Fn.procedure("get_user", {
       params: Stdb.struct({
         id: UserId,
       }),
@@ -62,7 +62,7 @@ const MatrixFunctions = Stdb.StdbGroup.make("SchemaNative")
     }),
   )
   .add(
-    Stdb.StdbFn.view("self_user", {
+    Stdb.Fn.view("self_user", {
       returns: Stdb.option(schemaNativeUser.row),
     }),
   )
@@ -141,27 +141,27 @@ void Stdb.table("bad_schema_column", {
   },
 })
 
-void Stdb.StdbFn.reducer("bad_reducer", {
+void Stdb.Fn.reducer("bad_reducer", {
   params: Stdb.struct({
     // @ts-expect-error raw reducer params must be Stdb value-types
     raw: Schema.String,
   }),
 })
 
-void Stdb.StdbFn.procedure("bad_procedure_return", {
+void Stdb.Fn.procedure("bad_procedure_return", {
   params: Stdb.struct({}),
   // @ts-expect-error raw procedure returns must be Stdb value-types
   returns: Schema.String,
 })
 
-void Stdb.StdbFn.view("bad_view_return", {
+void Stdb.Fn.view("bad_view_return", {
   // @ts-expect-error raw view returns must be Stdb value-types
   returns: Schema.String,
 })
 
 const RawErrorUserId = Schema.String.pipe(Schema.brand("SchemaNative/ErrorId"))
 
-void Stdb.StdbHttp.post("raw_http", "/raw-http", {
+void Stdb.Http.post("raw_http", "/raw-http", {
   request: Schema.Struct({ userId: UserId.schema }),
   response: Schema.Struct({ ok: Schema.Boolean }),
 })

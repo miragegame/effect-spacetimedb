@@ -1,3 +1,4 @@
+import type { MembersByPath } from "../member-path.ts"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Match from "effect/Match"
@@ -10,7 +11,7 @@ import type {
   WsViewRowOf,
 } from "../module-projection.ts"
 import type {
-  ProjectedSubscriptionTargets,
+  FlatSubscriptionTargets,
   SubscriptionTarget,
   ViewSubscriptionTarget,
 } from "../subscription-target.ts"
@@ -46,11 +47,14 @@ export const makeWsViewReads = <
   RelationContext,
 >(options: {
   readonly connectionState: WsConnectionState
-  readonly targets: ProjectedSubscriptionTargets<Module>["views"]
+  readonly targets: FlatSubscriptionTargets<Module>["views"]
   readonly views: PublicViewCache<Module>
   readonly viewRelation: <Key extends PublicViewKeys<Module>>(
     key: Key,
-  ) => RelationHandle<WsViewRowOf<Module["views"][Key]>, RelationContext>
+  ) => RelationHandle<
+    WsViewRowOf<MembersByPath<Module, "views">[Key]>,
+    RelationContext
+  >
   readonly subscribe: (
     target: SubscriptionTarget<Module>,
     onAppliedError?: (failure: SubscriptionFailure) => void,
@@ -89,7 +93,7 @@ export const makeWsViewReads = <
     key: Key,
     ...[rowsOptions]: ViewRowsOptionsParam<Module, Key>
   ): Stream.Stream<
-    ReadonlyArray<ViewRowOf<Module["views"][Key]>>,
+    ReadonlyArray<ViewRowOf<MembersByPath<Module, "views">[Key]>>,
     SubscriptionFailure | StdbDecodeError,
     Scope.Scope
   > {
@@ -184,10 +188,10 @@ export const makeWsViewReads = <
    */
   function waitUntilView<Key extends PublicViewKeys<Module>>(
     key: Key,
-    predicate: (row: ViewRowOf<Module["views"][Key]>) => boolean,
+    predicate: (row: ViewRowOf<MembersByPath<Module, "views">[Key]>) => boolean,
     ...[waitOptions]: WaitUntilViewOptionsParam<Module, Key>
   ): Effect.Effect<
-    ReadonlyArray<ViewRowOf<Module["views"][Key]>>,
+    ReadonlyArray<ViewRowOf<MembersByPath<Module, "views">[Key]>>,
     SubscriptionFailure | StdbDecodeError | WaitUntilTimeoutError,
     Scope.Scope
   > {

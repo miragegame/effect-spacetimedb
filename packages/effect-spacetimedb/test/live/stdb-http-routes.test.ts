@@ -16,7 +16,7 @@ import { fixtureCallDurationMax } from "../helpers/transport-bounds"
 
 const { describe, expect, live } = EffectVitest
 
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import {
   decodeThingId,
   decodeUserId,
@@ -194,8 +194,10 @@ describe("effect-spacetimedb live HTTP routes", () => {
             if (isUserMissingError(failure)) {
               expect(failure).toMatchObject({ userId: missingUserId })
             } else {
-              expect(failure).toBeInstanceOf(StdbTesting.RemoteRejectedBody)
-              if (failure instanceof StdbTesting.RemoteRejectedBody) {
+              expect(failure).toBeInstanceOf(
+                StdbInternal.RemoteRejectedBodyError,
+              )
+              if (failure instanceof StdbInternal.RemoteRejectedBodyError) {
                 expect(failure.raw).toBe(rawMissing.body)
               }
             }

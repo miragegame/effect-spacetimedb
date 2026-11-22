@@ -24,19 +24,22 @@ Full documentation, guides, and the API reference are at
 - `effect-spacetimedb/dev-server` starts a temporary local SpaceTimeDB runtime
   and publishes a prebuilt bundle for tests and tools.
 - `effect-spacetimedb/testing` and `effect-spacetimedb/testing/spacetime-sys`
-  contain regression-test helpers and the off-host `spacetime:sys` stub.
+  contain the off-host test harness and the `spacetime:sys` stub.
 
 See `packages/effect-spacetimedb/README.md` for library usage details.
+
+## Development
+
+Run `bun install --frozen-lockfile` at the repository root. The test suites
+that start a database require the SpacetimeDB 2.16.1 CLI and standalone binary.
 
 ## Contributions and Releases
 
 Issues, bug reports, and suggestions are welcome and credited when they lead to
-fixes or improvements. Fixes are written in the repository this package is
-developed in and reach this one with the next release, so a pull request opened
-here is usually closed in favour of the ported change — the credit is the same.
+fixes or improvements. Maintainers incorporate fixes into release pull requests
+and typically close external pull requests with credit to the contributor.
 
-Releases arrive here as pull requests synced from that repository. Each one
-carries the release notes as its description and must pass CI before it is
+Each release pull request carries the release notes as its description and must pass CI before it is
 squash-merged. Every release is tagged `v<version>`, and its notes are published
 under [GitHub Releases](https://github.com/miragegame/effect-spacetimedb/releases);
 their source is `.github/release-notes/<version>.md`.

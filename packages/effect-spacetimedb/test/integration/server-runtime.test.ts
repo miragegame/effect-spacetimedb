@@ -1,4 +1,4 @@
-import { make as makeServer } from "../../src/server/bind.ts"
+import { makeServer } from "../helpers/module-server"
 import * as EffectVitest from "@effect/vitest"
 import * as Cause from "effect/Cause"
 import * as Console from "effect/Console"
@@ -28,16 +28,18 @@ const { expect } = EffectVitest
 import * as Stdb from "effect-spacetimedb"
 import type * as Server from "effect-spacetimedb/server"
 import {
+  HandlerAsyncNotAllowedDefect,
+  HandlerGlobalRandomNotAllowedDefect,
+  StdbDecodeError,
+  StdbUniqueAlreadyExistsError,
   type ConstrainedServerRuntimeMode,
   provideConstrainedServerRuntime,
   provideConstrainedServerSupport,
-  ReducerAsyncNotAllowedError,
-  ReducerGlobalRandomNotAllowedError,
-  StdbDecodeError,
-  StdbDbSchemaMismatchError,
-  StdbUniqueAlreadyExistsError,
+  StdbDbSchemaMismatchDefect,
+  StdbTableOperationDefect,
 } from "effect-spacetimedb/server"
 import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { makeServerRandom } from "../../src/server/runtime-layer.ts"
 import {
   ExampleErrors,
@@ -65,11 +67,11 @@ import {
 
 const describe = EffectVitest.layer(TestLayer)
 
-type UserRow = StdbTesting.TableRow<typeof FullModule.tables.user>
-type PresenceEventRow = StdbTesting.TableRow<
+type UserRow = StdbInternal.TableRow<typeof FullModule.tables.user>
+type PresenceEventRow = StdbInternal.TableRow<
   typeof FullModule.tables.presenceEvent
 >
-type ReminderRow = StdbTesting.TableRow<typeof FullModule.tables.reminder>
+type ReminderRow = StdbInternal.TableRow<typeof FullModule.tables.reminder>
 
 const reminderFireArgs = (id: bigint) => ({
   data: {
@@ -95,6 +97,17 @@ class CombinedRuntimeDefect extends Data.TaggedError("CombinedRuntimeDefect")<{
 }> {
   override readonly message = combinedRuntimeDefectMessage(this.kind)
 }
+
+const expectProcedureFailed = (reply: unknown) => {
+  const carrier = (reply as { readonly err?: unknown }).err
+  expect(typeof carrier).toBe("string")
+  expect(
+    StdbInternal.ContractError.peekUndeclaredFailure(carrier as string)?.reason,
+  ).toBe("Failed")
+}
+
+const defectsOf = (cause: Cause.Cause<unknown>): ReadonlyArray<unknown> =>
+  cause.reasons.filter(Cause.isDieReason).map((reason) => reason.defect)
 
 const decodeUserId = Schema.decodeUnknownSync(UserId)
 const decodeUserName = Schema.decodeUnknownSync(UserName)
@@ -345,7 +358,6 @@ const makeProcedureCtx = (db: ReturnType<typeof makeFakeDb>) =>
   harnessOf(db).makeProcedureCtx({
     sender: "sender" as never,
     databaseIdentity: "database" as never,
-    identity: "sender" as never,
     timestamp: { microsSinceUnixEpoch: 1000n } as never,
     connectionId: "connection-1" as never,
     newUuidV4: () => "uuid-v4" as never,
@@ -360,7 +372,6 @@ const makeReducerCtx = (db: ReturnType<typeof makeFakeDb>) =>
   harnessOf(db).makeMutationCtx({
     sender: "sender" as never,
     databaseIdentity: "database" as never,
-    identity: "sender" as never,
     timestamp: { microsSinceUnixEpoch: 1000n } as never,
     connectionId: "connection-1" as never,
     newUuidV4: () => "uuid-v4" as never,
@@ -374,7 +385,6 @@ const makeNativeProcedureCtx = (
   harnessOf(db).makeProcedureCtx({
     sender: new Identity(1n),
     databaseIdentity: new Identity(2n),
-    identity: new Identity(1n),
     timestamp: new Timestamp(1000n),
     connectionId: new ConnectionId(3n),
     newUuidV4: () => new Uuid(4n),
@@ -402,11 +412,9 @@ describe("server runtime", (it) => {
         runtime: TestSyncRunner,
       })
       const reducers = server.reducers({
-        userUpsert: server.reducer(
-          Effect.fn(function* () {
-            handlerEntered = true
-          }),
-        ) as never,
+        userUpsert: Effect.fn(function* () {
+          handlerEntered = true
+        }) as never,
       })
 
       expect(() =>
@@ -414,7 +422,7 @@ describe("server runtime", (it) => {
           { ...makeReducerCtx(makeFakeDb([])), db: malformedDb } as never,
           { userId: "user-1" as never, name: "Ada" as never },
         ),
-      ).toThrow(StdbDbSchemaMismatchError)
+      ).toThrow(StdbDbSchemaMismatchDefect)
       expect(handlerEntered).toBe(false)
       expect(rawTableTouched).toBe(0)
     }),
@@ -424,14 +432,14 @@ describe("server runtime", (it) => {
     "encodes unit declared procedure successes with an ok result envelope",
     () =>
       Effect.gen(function* () {
-        const UnitProcedures = Stdb.StdbGroup.make("UnitProcedures").add(
-          Stdb.StdbFn.procedure("declaredDone", {
+        const UnitProcedures = Stdb.Group.make("UnitProcedures").add(
+          Stdb.Fn.procedure("declaredDone", {
             params: Stdb.struct({}),
             returns: Stdb.unit(),
             errors: ExampleErrors,
           }),
         )
-        const UnitModule = Stdb.StdbModule.make("unit_declared", {}).add(
+        const UnitModule = Stdb.Module.make("unit_declared", {}).add(
           UnitProcedures,
         ).spec
         const server = makeServer({
@@ -439,11 +447,9 @@ describe("server runtime", (it) => {
           runtime: TestSyncRunner,
         })
         const boundProcedures = server.procedures({
-          declaredDone: server.procedure(
-            Effect.fn(function* (_input: Record<string, never>) {
-              return undefined
-            }),
-          ) as never,
+          declaredDone: Effect.fn(function* (_input: Record<string, never>) {
+            return undefined
+          }) as never,
         })
 
         const procedure = boundProcedures.declaredDone!
@@ -455,16 +461,16 @@ describe("server runtime", (it) => {
           ok: undefined,
         })
 
-        const Envelope = StdbTesting.procedureEnvelope(
+        const Envelope = StdbInternal.procedureEnvelope(
           UnitModule.procedures.declaredDone.returns,
           UnitModule.procedures.declaredDone.errors,
         )
-        const host = StdbTesting.encodeHostValue(Envelope, result)
+        const host = StdbInternal.encodeHostValue(Envelope, result)
         expect(host).toEqual({
           ok: {},
         })
         expect(
-          yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+          yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
             Envelope,
             encodeJson(host),
           ),
@@ -485,22 +491,24 @@ describe("server runtime", (it) => {
         })
 
         const boundProcedures = server.procedures({
-          userGet: server.procedure(
-            Effect.fn(function* ({ userId }: { readonly userId: string }) {
-              const user = yield* server.withTx(
-                Effect.gen(function* () {
-                  const db = yield* server.db
-                  return yield* db.user.id.find(userId as never)
-                }),
-              )
+          userGet: Effect.fn(function* ({
+            userId,
+          }: {
+            readonly userId: string
+          }) {
+            const user = yield* server.withTx(
+              Effect.gen(function* () {
+                const db = yield* server.Db
+                return yield* db.user.id.find(userId as never)
+              }),
+            )
 
-              if (user == null) {
-                return yield* UserMissing.make({ userId: userId as never })
-              }
+            if (user == null) {
+              return yield* UserMissing.make({ userId: userId as never })
+            }
 
-              return user
-            }),
-          ) as never,
+            return user
+          }) as never,
         })
 
         const db = makeFakeDb([makeUserRow("user-1", "Ada")])
@@ -517,13 +525,13 @@ describe("server runtime", (it) => {
           },
         })
 
-        const http = StdbTesting.ClientHttp.make({
+        const http = StdbInternal.ClientHttp.make({
           module: FullModule,
           uri: "http://stdb.test",
           databaseName: "full",
           callDurationMax: fixtureCallDurationMax,
         })
-        const UserGetEnvelope = StdbTesting.procedureEnvelope(
+        const UserGetEnvelope = StdbInternal.procedureEnvelope(
           FullModule.procedures.userGet.returns,
           FullModule.procedures.userGet.errors!,
         )
@@ -538,7 +546,7 @@ describe("server runtime", (it) => {
                 Effect.try({
                   try: () => ({
                     body: encodeJson(
-                      StdbTesting.encodeHostValue(
+                      StdbInternal.encodeHostValue(
                         UserGetEnvelope,
                         procedure.invoke(makeProcedureCtx(db) as never, {
                           userId: (
@@ -567,7 +575,7 @@ describe("server runtime", (it) => {
                 Effect.try({
                   try: () => ({
                     body: encodeJson(
-                      StdbTesting.encodeHostValue(
+                      StdbInternal.encodeHostValue(
                         UserGetEnvelope,
                         procedure.invoke(makeProcedureCtx(db) as never, {
                           userId: (
@@ -597,18 +605,16 @@ describe("server runtime", (it) => {
       })
 
       const boundProcedures = server.procedures({
-        userGet: server.procedure(
-          Effect.fn(function* ({ userId }: { readonly userId: string }) {
-            return yield* server.withTx(
-              UserMissing.make({ userId: userId as never }),
-            )
-          }),
-        ) as never,
+        userGet: Effect.fn(function* ({ userId }: { readonly userId: string }) {
+          return yield* server.withTx(
+            UserMissing.make({ userId: userId as never }),
+          )
+        }) as never,
       })
 
       const db = makeFakeDb([])
       const procedure = boundProcedures.userGet!
-      const encodedMissing = yield* StdbTesting.ContractError.encodeString(
+      const encodedMissing = yield* StdbInternal.ContractError.encodeString(
         FullModule.procedures.userGet.errors!,
         UserMissing.make({ userId: "missing" as never }),
       )
@@ -621,13 +627,13 @@ describe("server runtime", (it) => {
         err: encodedMissing,
       })
 
-      const http = StdbTesting.ClientHttp.make({
+      const http = StdbInternal.ClientHttp.make({
         module: FullModule,
         uri: "http://stdb.test",
         databaseName: "full",
         callDurationMax: fixtureCallDurationMax,
       })
-      const UserGetEnvelope = StdbTesting.procedureEnvelope(
+      const UserGetEnvelope = StdbInternal.procedureEnvelope(
         FullModule.procedures.userGet.returns,
         FullModule.procedures.userGet.errors!,
       )
@@ -639,7 +645,7 @@ describe("server runtime", (it) => {
               Effect.try({
                 try: () => ({
                   body: encodeJson(
-                    StdbTesting.encodeHostValue(
+                    StdbInternal.encodeHostValue(
                       UserGetEnvelope,
                       procedure.invoke(makeProcedureCtx(db) as never, {
                         userId: (
@@ -674,17 +680,19 @@ describe("server runtime", (it) => {
         })
 
         const procedures = server.procedures({
-          userGet: server.procedure(
-            Effect.fn(function* ({ userId }: { readonly userId: UserId }) {
-              return yield* FullStdbModule.withTx(
-                Effect.gen(function* () {
-                  const db = yield* FullStdbModule.Db
-                  yield* db.user.insert(makeUserRow(userId, "Ada"))
-                  return yield* db.user.id.find(userId)
-                }),
-              )
-            }),
-          ),
+          userGet: Effect.fn(function* ({
+            userId,
+          }: {
+            readonly userId: UserId
+          }) {
+            return yield* FullStdbModule.withTx(
+              Effect.gen(function* () {
+                const db = yield* FullStdbModule.Db
+                yield* db.user.insert(makeUserRow(userId, "Ada"))
+                return yield* db.user.id.find(userId)
+              }),
+            )
+          }),
         })
 
         const db = makeFakeDb([])
@@ -711,22 +719,20 @@ describe("server runtime", (it) => {
       })
 
       const procedures = server.procedures({
-        userGet: server.procedure(
-          Effect.fn(function* ({ userId }: { readonly userId: UserId }) {
-            return yield* FullStdbModule.withTx(
-              Effect.gen(function* () {
-                const db = yield* FullStdbModule.Db
-                yield* db.user.insert(makeUserRow(userId, "Ada"))
-                return yield* UserMissing.make({ userId })
-              }),
-            )
-          }),
-        ),
+        userGet: Effect.fn(function* ({ userId }: { readonly userId: UserId }) {
+          return yield* FullStdbModule.withTx(
+            Effect.gen(function* () {
+              const db = yield* FullStdbModule.Db
+              yield* db.user.insert(makeUserRow(userId, "Ada"))
+              return yield* UserMissing.make({ userId })
+            }),
+          )
+        }),
       })
 
       const db = makeFakeDb([])
       const userId = decodeUserId("missing")
-      const encodedMissing = yield* StdbTesting.ContractError.encodeString(
+      const encodedMissing = yield* StdbInternal.ContractError.encodeString(
         FullModule.procedures.userGet.errors!,
         UserMissing.make({ userId }),
       )
@@ -754,30 +760,28 @@ describe("server runtime", (it) => {
         const db = makeFakeDb([])
 
         const reducers = server.reducers({
-          userUpsert: server.reducer(
-            Effect.fn(function* () {
-              seen.reducerSender = yield* server.ctx.reducer.sender
-              seen.reducerSenderAuth = yield* server.ctx.reducer.senderAuth
-              seen.reducerUuid = yield* server.ctx.reducer.newUuidV4
-              const random = yield* server.ctx.reducer.random
-              seen.reducerRandom = random()
-            }),
-          ) as never,
+          userUpsert: Effect.fn(function* () {
+            const ctx = yield* server.ReducerCtx
+            seen.reducerSender = ctx.sender
+            seen.reducerSenderAuth = ctx.senderAuth
+            seen.reducerUuid = ctx.newUuidV4()
+            seen.reducerRandom = ctx.random()
+          }) as never,
         })
         const procedures = server.procedures({
-          reminderFire: server.procedure(
-            Effect.fn(function* () {
-              seen.procedureSender = yield* server.ctx.procedure.sender
-              seen.procedureUuid = yield* server.ctx.procedure.newUuidV7
-              const txSender = yield* server.withTx(
-                Effect.gen(function* () {
-                  seen.txSenderAuth = yield* server.ctx.tx.senderAuth
-                  return yield* server.ctx.tx.sender
-                }),
-              )
-              seen.txSender = txSender
-            }),
-          ) as never,
+          reminderFire: Effect.fn(function* () {
+            const ctx = yield* server.ProcedureCtx
+            seen.procedureSender = ctx.sender
+            seen.procedureUuid = ctx.newUuidV7()
+            const txSender = yield* server.withTx(
+              Effect.gen(function* () {
+                const txCtx = yield* server.TxCtx
+                seen.txSenderAuth = txCtx.senderAuth
+                return txCtx.sender
+              }),
+            )
+            seen.txSender = txSender
+          }) as never,
         })
 
         reducers.userUpsert!.invoke(makeReducerCtx(db) as never, {
@@ -820,11 +824,9 @@ describe("server runtime", (it) => {
         })
         const records: Array<CapturedLog> = []
         const reducers = server.reducers({
-          userUpsert: server.reducer(
-            Effect.fn(function* () {
-              yield* logWithCapturedLogger(records, "reducer log")
-            }),
-          ) as never,
+          userUpsert: Effect.fn(function* () {
+            yield* logWithCapturedLogger(records, "reducer log")
+          }) as never,
         })
 
         reducers.userUpsert!.invoke(makeReducerCtx(makeFakeDb([])) as never, {
@@ -842,50 +844,6 @@ describe("server runtime", (it) => {
       }),
   )
 
-  it.effect(
-    "maps callable host failures before handler boundary marshalling",
-    () =>
-      Effect.gen(function* () {
-        const server = makeServer({
-          module: FullModule,
-          runtime: TestSyncRunner,
-        })
-        const cause = hostCause("UniqueAlreadyExists")
-        let seen: unknown
-
-        const reducers = server.reducers({
-          userUpsert: server.reducer(
-            Effect.fn(function* () {
-              seen = yield* server.ctx.reducer.newUuidV4.pipe(
-                Effect.catchTag("StdbUniqueAlreadyExistsError", (error) =>
-                  Effect.succeed(error),
-                ),
-              )
-            }),
-          ) as never,
-        })
-
-        reducers.userUpsert!.invoke(
-          {
-            ...makeReducerCtx(makeFakeDb([])),
-            newUuidV4: () => {
-              throw cause
-            },
-          } as never,
-          {
-            userId: "user-1" as never,
-            name: "Ada" as never,
-          },
-        )
-
-        expect(seen).toBeInstanceOf(StdbUniqueAlreadyExistsError)
-        expect((seen as StdbUniqueAlreadyExistsError).op).toBe(
-          "reducerCtx.newUuidV4",
-        )
-        expect((seen as StdbUniqueAlreadyExistsError).cause).toBe(cause)
-      }),
-  )
-
   it.effect("formats widened reducer host failures at the host boundary", () =>
     Effect.gen(function* () {
       const server = makeServer({
@@ -894,14 +852,12 @@ describe("server runtime", (it) => {
       })
       const cause = hostCause("UniqueAlreadyExists")
       const reducers = server.reducers({
-        userUpsert: server.reducer(
-          Effect.fn(function* () {
-            return yield* new StdbUniqueAlreadyExistsError({
-              op: "db.user.insert",
-              cause,
-            })
-          }),
-        ) as never,
+        userUpsert: Effect.fn(function* () {
+          return yield* new StdbUniqueAlreadyExistsError({
+            op: "db.user.insert",
+            cause,
+          })
+        }) as never,
       })
 
       const failure = yield* Effect.flip(
@@ -929,45 +885,36 @@ describe("server runtime", (it) => {
   )
 
   it.effect(
-    "formats widened procedure host failures at the host boundary",
+    "answers a widened procedure host failure with the fixed err and reports it",
     () =>
       Effect.gen(function* () {
+        const observed: Array<Cause.Cause<unknown>> = []
         const server = makeServer({
           module: FullModule,
+          onDefect: (failure) => {
+            observed.push(failure)
+          },
           runtime: TestSyncRunner,
         })
         const cause = hostCause("UniqueAlreadyExists")
         const procedures = server.procedures({
-          userGet: server.procedure(
-            Effect.fn(function* () {
-              return yield* new StdbUniqueAlreadyExistsError({
-                op: "db.user.insert",
-                cause,
-              })
-            }),
-          ) as never,
+          userGet: Effect.fn(function* () {
+            return yield* new StdbUniqueAlreadyExistsError({
+              op: "db.user.insert",
+              cause,
+            })
+          }) as never,
         })
 
-        const failure = yield* Effect.flip(
-          Effect.try({
-            try: () =>
-              procedures.userGet!.invoke(
-                makeProcedureCtx(makeFakeDb([])) as never,
-                {
-                  userId: "missing" as never,
-                },
-              ),
-            catch: testEffectCallbackError(
-              "effect-spacetimedb/integration/server-runtime",
-            ),
-          }),
+        expectProcedureFailed(
+          procedures.userGet!.invoke(
+            makeProcedureCtx(makeFakeDb([])) as never,
+            {
+              userId: "missing" as never,
+            },
+          ),
         )
-
-        assertHostBoundaryThrow(
-          unwrapTestEffectCallbackError(failure),
-          "db.user.insert",
-          cause,
-        )
+        expect(observed.length).toBe(1)
       }),
   )
 
@@ -981,12 +928,12 @@ describe("server runtime", (it) => {
           },
         },
       )
-      const compilerGuardGroup = Stdb.StdbGroup.make("CompilerGuard").add(
-        Stdb.StdbFn.scheduledProcedure("compilerGuardFire", {
+      const compilerGuardGroup = Stdb.Group.make("CompilerGuard").add(
+        Stdb.Fn.scheduledProcedure("compilerGuardFire", {
           table: compilerGuardSchedule,
         }),
       )
-      const compilerGuardModule = Stdb.StdbModule.make("compiler_guard", {})
+      const compilerGuardModule = Stdb.Module.make("compiler_guard", {})
         .addTables(compilerGuardSchedule)
         .add(compilerGuardGroup).spec
       const server = makeServer({
@@ -996,12 +943,10 @@ describe("server runtime", (it) => {
       let invoked = false
       const handlers = server.handlers({
         procedures: {
-          compilerGuardFire: server.procedure(
-            Effect.fn(function* ({ data }) {
-              invoked = true
-              void data.id
-            }),
-          ),
+          compilerGuardFire: Effect.fn(function* ({ data }) {
+            invoked = true
+            void data.id
+          }),
         },
       })
       const compiled = compileModule({
@@ -1012,7 +957,6 @@ describe("server runtime", (it) => {
         ...makeNativeProcedureCtx(makeFakeDb([])),
         sender: new Identity(2n),
         databaseIdentity: new Identity(1n),
-        identity: new Identity(1n),
       }
       const rawArgs = {
         data: {
@@ -1026,14 +970,12 @@ describe("server runtime", (it) => {
       expect(compilerGuardExport).toBeDefined()
       expect(compiled.exports.compilerGuardFire).toBeUndefined()
 
-      expect(() =>
-        SpacetimeServerStub.invokeModuleExport(
-          compilerGuardExport,
-          externalCtx,
-          rawArgs,
-        ),
-      ).toThrow(
-        "Scheduled target compilerGuardFire is only invocable by the scheduler",
+      // A scheduled procedure must return unit, so it cannot answer the
+      // refusal, and an exception would cost the module its isolate.
+      SpacetimeServerStub.invokeModuleExport(
+        compilerGuardExport,
+        externalCtx,
+        rawArgs,
       )
       expect(invoked).toBe(false)
 
@@ -1043,14 +985,10 @@ describe("server runtime", (it) => {
         databaseIdentity: { value: 1n },
       }
 
-      expect(() =>
-        SpacetimeServerStub.invokeModuleExport(
-          compilerGuardExport,
-          unrecognizedIdentityCtx as never,
-          rawArgs,
-        ),
-      ).toThrow(
-        "Scheduled target compilerGuardFire is only invocable by the scheduler",
+      SpacetimeServerStub.invokeModuleExport(
+        compilerGuardExport,
+        unrecognizedIdentityCtx as never,
+        rawArgs,
       )
       expect(invoked).toBe(false)
 
@@ -1058,18 +996,13 @@ describe("server runtime", (it) => {
         ...makeNativeProcedureCtx(makeFakeDb([])),
         sender: new Identity(2n),
         databaseIdentity: new Identity(1n),
-        identity: new Identity(1n),
         connectionId: null,
       }
 
-      expect(() =>
-        SpacetimeServerStub.invokeModuleExport(
-          compilerGuardExport,
-          schedulerCtx as never,
-          rawArgs,
-        ),
-      ).toThrow(
-        "Scheduled target compilerGuardFire is only invocable by the scheduler",
+      SpacetimeServerStub.invokeModuleExport(
+        compilerGuardExport,
+        schedulerCtx as never,
+        rawArgs,
       )
       expect(invoked).toBe(false)
 
@@ -1121,14 +1054,10 @@ describe("server runtime", (it) => {
         ...serverRuntimeSchedulerCtx,
         sender: { __identity__: 3n },
       }
-      expect(() =>
-        SpacetimeServerStub.invokeModuleExport(
-          compilerGuardExport,
-          serverRuntimeExternalCtx as never,
-          rawArgs,
-        ),
-      ).toThrow(
-        "Scheduled target compilerGuardFire is only invocable by the scheduler",
+      SpacetimeServerStub.invokeModuleExport(
+        compilerGuardExport,
+        serverRuntimeExternalCtx as never,
+        rawArgs,
       )
       expect(invoked).toBe(false)
 
@@ -1144,10 +1073,10 @@ describe("server runtime", (it) => {
     }),
   )
 
-  it.effect("adds callable context to compiled procedure decode failures", () =>
+  it.effect("answers compiled procedure decode failures in the err arm", () =>
     Effect.gen(function* () {
-      const ProcedureGroup = Stdb.StdbGroup.make("CompilerDecode").add(
-        Stdb.StdbFn.procedure("decodeProcedure", {
+      const ProcedureGroup = Stdb.Group.make("CompilerDecode").add(
+        Stdb.Fn.procedure("decodeProcedure", {
           params: Stdb.struct({
             id: Stdb.string(UserId),
           }),
@@ -1156,78 +1085,66 @@ describe("server runtime", (it) => {
           }),
         }),
       )
-      const ProcedureModule = Stdb.StdbModule.make("compiler_decode", {}).add(
+      const ProcedureModule = Stdb.Module.make("compiler_decode", {}).add(
         ProcedureGroup,
       ).spec
+      const observed: Array<Cause.Cause<unknown>> = []
       const server = makeServer({
         module: ProcedureModule,
+        onDefect: (failure) => {
+          observed.push(failure)
+        },
         runtime: TestSyncRunner,
       })
 
       const validHandlers = server.handlers({
         procedures: {
-          decodeProcedure: server.procedure(
-            Effect.fn(function* (_input: { readonly id: string }) {
-              return { ok: true }
-            }),
-          ),
+          decodeProcedure: Effect.fn(function* (_input: {
+            readonly id: string
+          }) {
+            return { ok: true }
+          }),
         },
       })
       const compiledValid = compileModule({
         server,
         handlers: validHandlers,
       })
-      const argsFailure = yield* Effect.flip(
-        Effect.try({
-          try: (): void => {
-            SpacetimeServerStub.invokeModuleExport(
-              compiledValid.exports.decode_procedure,
-              makeNativeProcedureCtx(makeFakeDb([])),
-              { id: 1 },
-            )
-          },
-          catch: testEffectCallbackError(
-            "effect-spacetimedb/integration/server-runtime",
-          ),
-        }),
+      const argsReply = SpacetimeServerStub.invokeModuleExport(
+        compiledValid.exports.decode_procedure,
+        makeNativeProcedureCtx(makeFakeDb([])),
+        { id: 1 },
+      ) as { readonly err: string }
+      const argsFailure = StdbInternal.ContractError.peekUndeclaredFailure(
+        argsReply.err,
       )
-      const argsCause = unwrapTestEffectCallbackError(argsFailure)
 
-      expect(argsCause).toBeInstanceOf(StdbDecodeError)
-      if (argsCause instanceof StdbDecodeError) {
-        expect(argsCause.phase).toBe("args")
-        expect(argsCause.callable).toBe("decodeProcedure")
-        expect(argsCause.op).toBe("procedures.decodeProcedure.params")
-      }
+      expect(argsFailure?.reason).toBe("BadArguments")
+      expect(argsFailure?.message).toContain("decodeProcedure")
+      expect(argsFailure?.message).not.toContain("    at ")
 
       const invalidResultHandlers = server.handlers({
         procedures: {
-          decodeProcedure: server.procedure(
-            Effect.fn(function* (_input: { readonly id: string }) {
-              return { ok: "not-bool" } as never
-            }),
-          ),
+          decodeProcedure: Effect.fn(function* (_input: {
+            readonly id: string
+          }) {
+            return { ok: "not-bool" } as never
+          }),
         },
       })
       const compiledInvalidResult = compileModule({
         server,
         handlers: invalidResultHandlers,
       })
-      const resultFailure = yield* Effect.flip(
-        Effect.try({
-          try: (): void => {
-            SpacetimeServerStub.invokeModuleExport(
-              compiledInvalidResult.exports.decode_procedure,
-              makeNativeProcedureCtx(makeFakeDb([])),
-              { id: "user-1" },
-            )
-          },
-          catch: testEffectCallbackError(
-            "effect-spacetimedb/integration/server-runtime",
-          ),
-        }),
+      expectProcedureFailed(
+        SpacetimeServerStub.invokeModuleExport(
+          compiledInvalidResult.exports.decode_procedure,
+          makeNativeProcedureCtx(makeFakeDb([])),
+          { id: "user-1" },
+        ),
       )
-      const resultCause = unwrapTestEffectCallbackError(resultFailure)
+      expect(observed.length).toBe(1)
+      const resultCause = defectsOf(observed[0]!)[0]
 
       expect(resultCause).toBeInstanceOf(StdbDecodeError)
       if (resultCause instanceof StdbDecodeError) {
@@ -1405,11 +1322,9 @@ describe("server runtime", (it) => {
         runtime: TestSyncRunner,
       })
       const reducers = server.reducers({
-        userUpsert: server.reducer(
-          Effect.fn(function* () {
-            Math.random()
-          }),
-        ) as never,
+        userUpsert: Effect.fn(function* () {
+          Math.random()
+        }) as never,
       })
 
       expect(() =>
@@ -1417,7 +1332,7 @@ describe("server runtime", (it) => {
           userId: decodeUserId("user-1"),
           name: decodeUserName("Ada"),
         }),
-      ).toThrow(ReducerGlobalRandomNotAllowedError)
+      ).toThrow(HandlerGlobalRandomNotAllowedDefect)
 
       const restoredValue = Math.random()
       expect(restoredValue).toBeGreaterThanOrEqual(0)
@@ -1496,7 +1411,7 @@ describe("server runtime", (it) => {
           Effect.try({
             try: () => Math.random(),
             catch: (cause) =>
-              cause instanceof ReducerGlobalRandomNotAllowedError
+              cause instanceof HandlerGlobalRandomNotAllowedDefect
                 ? cause
                 : testEffectCallbackError(
                     "effect-spacetimedb/integration/server-runtime",
@@ -1511,7 +1426,7 @@ describe("server runtime", (it) => {
             Cause.findErrorOption,
             Option.getOrUndefined,
           )
-          expect(failure).toBeInstanceOf(ReducerGlobalRandomNotAllowedError)
+          expect(failure).toBeInstanceOf(HandlerGlobalRandomNotAllowedDefect)
         }
       }),
   )
@@ -1534,36 +1449,40 @@ describe("server runtime", (it) => {
     }),
   )
 
-  it.effect("preserves declared procedure defects as defects", () =>
+  it.effect("treats a die carrying a declared error as a defect", () =>
     Effect.gen(function* () {
+      const observed: Array<Cause.Cause<unknown>> = []
       const server = makeServer({
         module: FullModule,
+        onDefect: (cause) => {
+          observed.push(cause)
+        },
         runtime: TestSyncRunner,
       })
 
       const boundProcedures = server.procedures({
-        userGet: server.procedure(
-          Effect.fn(function* ({ userId }: { readonly userId: string }) {
-            return yield* Effect.die(
-              UserMissing.make({ userId: userId as never }),
-            )
-          }),
-        ) as never,
+        userGet: Effect.fn(function* ({ userId }: { readonly userId: string }) {
+          return yield* Effect.die(
+            UserMissing.make({ userId: userId as never }),
+          )
+        }) as never,
       })
 
       const procedure = boundProcedures.userGet!
-      expect(() =>
+      expectProcedureFailed(
         procedure.invoke(makeProcedureCtx(makeFakeDb([])) as never, {
           userId: "missing" as never,
         }),
-      ).toThrow(UserMissing)
+      )
+      expect(defectsOf(observed[0]!)[0]).toBeInstanceOf(UserMissing)
     }),
   )
 
   it.effect(
-    "preserves defects when a declared procedure failure is combined with a defect",
+    "treats a declared procedure failure combined with a defect as a defect",
     () =>
       Effect.gen(function* () {
+        const observed: Array<Cause.Cause<unknown>> = []
         const combinedCause = Cause.combine(
           Cause.fail(UserMissing.make({ userId: decodeUserId("missing") })),
           Cause.die(
@@ -1574,63 +1493,70 @@ describe("server runtime", (it) => {
         )
         const server = makeServer({
           module: FullModule,
+          onDefect: (cause) => {
+            observed.push(cause)
+          },
           runtime: TestSyncRunner,
         })
 
         const boundProcedures = server.procedures({
-          userGet: server.procedure(
-            Effect.fn(function* (_args: { readonly userId: string }) {
-              return yield* Effect.failCause(combinedCause)
-            }),
-          ) as never,
+          userGet: Effect.fn(function* (_args: { readonly userId: string }) {
+            return yield* Effect.failCause(combinedCause)
+          }) as never,
         })
 
-        expect(() =>
+        expectProcedureFailed(
           boundProcedures.userGet!.invoke(
             makeProcedureCtx(makeFakeDb([])) as never,
             {
               userId: "missing" as never,
             },
           ),
-        ).toThrow("combined declared defect")
+        )
+        expect(defectsOf(observed[0]!)[0]).toBeInstanceOf(CombinedRuntimeDefect)
       }),
   )
 
-  it.effect("preserves transaction body defects as defects", () =>
+  it.effect("reports a transaction body defect once as a defect", () =>
     Effect.gen(function* () {
+      const observed: Array<Cause.Cause<unknown>> = []
       const server = makeServer({
         module: FullModule,
+        onDefect: (cause) => {
+          observed.push(cause)
+        },
         runtime: TestSyncRunner,
       })
 
       const procedures = server.procedures({
-        reminderFire: server.procedure(
-          Effect.fn(function* () {
-            const txBody = Effect.die(
-              UserMissing.make({ userId: "tx-defect" as never }),
-            ) as Effect.Effect<void, Server.StdbHostCallError>
-            return yield* server.withTx(
-              txBody.pipe(
-                Effect.catchTag("StdbHostCallError", () => Effect.void),
-              ),
-            )
-          }),
-        ) as never,
+        reminderFire: Effect.fn(function* () {
+          const txBody = Effect.die(
+            UserMissing.make({ userId: "tx-defect" as never }),
+          ) as Effect.Effect<void, Server.StdbHostCallError>
+          return yield* server.withTx(
+            txBody.pipe(
+              Effect.catchTag("StdbHostCallError", () => Effect.void),
+            ),
+          )
+        }) as never,
       })
 
-      expect(() =>
+      expect(
         procedures.reminderFire!.invoke(
           makeProcedureCtx(makeFakeDb([])) as never,
           reminderFireArgs(1n) as never,
         ),
-      ).toThrow(UserMissing)
+      ).toBeUndefined()
+      expect(observed.length).toBe(1)
+      expect(defectsOf(observed[0]!)[0]).toBeInstanceOf(UserMissing)
     }),
   )
 
   it.effect(
-    "preserves transaction body defects when combined with declared failures",
+    "treats a transaction body failure combined with a defect as a defect",
     () =>
       Effect.gen(function* () {
+        const observed: Array<Cause.Cause<unknown>> = []
         const combinedCause = Cause.combine(
           Cause.fail(UserMissing.make({ userId: decodeUserId("tx-missing") })),
           Cause.die(
@@ -1641,32 +1567,38 @@ describe("server runtime", (it) => {
         )
         const server = makeServer({
           module: FullModule,
+          onDefect: (cause) => {
+            observed.push(cause)
+          },
           runtime: TestSyncRunner,
         })
 
         const procedures = server.procedures({
-          reminderFire: server.procedure(
-            Effect.fn(function* () {
-              return yield* server.withTx(Effect.failCause(combinedCause))
-            }),
-          ) as never,
+          reminderFire: Effect.fn(function* () {
+            return yield* server.withTx(Effect.failCause(combinedCause))
+          }) as never,
         })
 
-        expect(() =>
+        expect(
           procedures.reminderFire!.invoke(
             makeProcedureCtx(makeFakeDb([])) as never,
             reminderFireArgs(1n) as never,
           ),
-        ).toThrow("combined tx defect")
+        ).toBeUndefined()
+        expect(defectsOf(observed[0]!)[0]).toBeInstanceOf(CombinedRuntimeDefect)
       }),
   )
 
   it.effect(
-    "preserves malformed declared procedure failures instead of replacing them with StdbDecodeError",
+    "reports a malformed declared procedure failure rather than a decode error",
     () =>
       Effect.gen(function* () {
+        const observed: Array<Cause.Cause<unknown>> = []
         const server = makeServer({
           module: FullModule,
+          onDefect: (cause) => {
+            observed.push(cause)
+          },
           runtime: TestSyncRunner,
         })
         const malformedMissing = Object.assign(
@@ -1677,45 +1609,31 @@ describe("server runtime", (it) => {
           },
         )
         const procedures = server.procedures({
-          userGet: server.procedure(((_args: { readonly userId: string }) =>
-            Effect.fail(malformedMissing)) as never) as never,
+          userGet: ((_args: { readonly userId: string }) =>
+            Effect.fail(malformedMissing)) as never as never,
         })
 
-        const invoke = () =>
+        expectProcedureFailed(
           procedures.userGet!.invoke(
             makeProcedureCtx(makeFakeDb([])) as never,
             {
               userId: "missing" as never,
             },
-          )
-
-        expect(invoke).toThrow(Error)
-
-        const thrownExit = yield* Effect.exit(
-          Effect.try({
-            try: invoke,
-            catch: testEffectCallbackError(
-              "effect-spacetimedb/integration/server-runtime",
-            ),
-          }),
+          ),
         )
 
-        expect(Exit.isFailure(thrownExit)).toBe(true)
-        if (Exit.isFailure(thrownExit)) {
-          const failure = thrownExit.cause.pipe(
-            Cause.findErrorOption,
-            Option.getOrUndefined,
-            unwrapTestEffectCallbackError,
-          )
-          expect(failure).not.toBeInstanceOf(StdbDecodeError)
-          expect(failure).toEqual(
-            expect.objectContaining({
-              message: malformedMissing.message,
-              _tag: "UserMissing",
-              userId: 123,
-            }),
-          )
-        }
+        const failure = observed[0]!.pipe(
+          Cause.findErrorOption,
+          Option.getOrUndefined,
+        )
+        expect(failure).not.toBeInstanceOf(StdbDecodeError)
+        expect(failure).toEqual(
+          expect.objectContaining({
+            message: malformedMissing.message,
+            _tag: "UserMissing",
+            userId: 123,
+          }),
+        )
       }),
   )
 
@@ -1728,11 +1646,9 @@ describe("server runtime", (it) => {
           runtime: TestSyncRunner,
         })
         const reducers = server.reducers({
-          userRequire: server.reducer(
-            Effect.fn(function* ({ userId }) {
-              return yield* UserMissing.make({ userId })
-            }),
-          ),
+          userRequire: Effect.fn(function* ({ userId }) {
+            return yield* UserMissing.make({ userId })
+          }),
         })
 
         const invokeUserRequire = () =>
@@ -1768,7 +1684,7 @@ describe("server runtime", (it) => {
           )
 
           const senderError = error as Error
-          const decoded = yield* StdbTesting.ContractError.decodeString(
+          const decoded = yield* StdbInternal.ContractError.decodeString(
             FullModule.reducers.userRequire.errors!,
             senderError.message,
           )
@@ -1788,11 +1704,9 @@ describe("server runtime", (it) => {
         runtime: TestSyncRunner,
       })
       const reducers = server.reducers({
-        userRequire: server.reducer(
-          Effect.fn(function* ({ userId }) {
-            return yield* Effect.die(UserMissing.make({ userId }))
-          }),
-        ),
+        userRequire: Effect.fn(function* ({ userId }) {
+          return yield* Effect.die(UserMissing.make({ userId }))
+        }),
       })
 
       const invokeUserRequire = () =>
@@ -1843,8 +1757,8 @@ describe("server runtime", (it) => {
           },
         )
         const reducers = server.reducers({
-          userRequire: server.reducer(((_args: { readonly userId: string }) =>
-            Effect.fail(malformedMissing)) as never),
+          userRequire: ((_args: { readonly userId: string }) =>
+            Effect.fail(malformedMissing)) as never,
         })
 
         const invoke = () =>
@@ -1886,25 +1800,31 @@ describe("server runtime", (it) => {
   )
 
   it.effect(
-    "surfaces row decode failures from withTx iterators as StdbDecodeError",
+    "reports row decode failures from withTx iterators as table defects",
     () =>
       Effect.gen(function* () {
+        const observed: Array<Cause.Cause<unknown>> = []
         const server = makeServer({
           module: FullModule,
+          onDefect: (cause) => {
+            observed.push(cause)
+          },
           runtime: TestSyncRunner,
         })
         const procedures = server.procedures({
-          userGet: server.procedure(
-            Effect.fn(function* ({ userId }: { readonly userId: string }) {
-              return yield* server.withTx(
-                Effect.gen(function* () {
-                  const db = yield* server.db
-                  yield* db.user.toArray()
-                  return yield* db.user.id.find(userId as never)
-                }),
-              )
-            }),
-          ) as never,
+          userGet: Effect.fn(function* ({
+            userId,
+          }: {
+            readonly userId: string
+          }) {
+            return yield* server.withTx(
+              Effect.gen(function* () {
+                const db = yield* server.Db
+                yield* db.user.toArray()
+                return yield* db.user.id.find(userId as never)
+              }),
+            )
+          }) as never,
         })
         const db = makeFakeDb([]) as ReturnType<typeof makeFakeDb> & {
           readonly user: {
@@ -1921,29 +1841,18 @@ describe("server runtime", (it) => {
             ].values(),
         })
 
-        const invoke = () =>
+        expectProcedureFailed(
           procedures.userGet!.invoke(makeProcedureCtx(db) as never, {
             userId: "user-1" as never,
-          })
-
-        const failure = yield* Effect.flip(
-          Effect.try({
-            try: invoke,
-            catch: testEffectCallbackError(
-              "effect-spacetimedb/integration/server-runtime",
-            ),
           }),
         )
-        const cause = unwrapTestEffectCallbackError(failure)
-
-        expect(cause).toBeInstanceOf(StdbDecodeError)
-        if (cause instanceof StdbDecodeError) {
-          expect(cause.phase).toBe("row")
-          expect(cause.table).toBe("user")
-          expect(cause.op).toBe("db.user.iter")
-          expect(cause.message).toContain("table=user")
-          expect(cause.message).toContain("op=db.user.iter")
-        }
+        const cause = defectsOf(observed[0]!)[0]
+        expect(cause).toBeInstanceOf(StdbTableOperationDefect)
+        expect(cause).toMatchObject({
+          table: "user",
+          op: "db.user.iter.next",
+          cause: expect.anything(),
+        })
       }),
   )
 
@@ -1954,11 +1863,9 @@ describe("server runtime", (it) => {
         runtime: TestSyncRunner,
       })
       const reducers = server.reducers({
-        userUpsert: server.reducer(
-          Effect.fn(function* () {
-            return yield* UserMissing.make({ userId: "user-2" as never })
-          }),
-        ) as never,
+        userUpsert: Effect.fn(function* () {
+          return yield* UserMissing.make({ userId: "user-2" as never })
+        }) as never,
       })
 
       expect(() =>
@@ -1970,27 +1877,34 @@ describe("server runtime", (it) => {
     }),
   )
 
-  it.effect("rejects Effect.sleep inside constrained procedures", () =>
-    Effect.gen(function* () {
-      const server = makeServer({
-        module: FullModule,
-        runtime: TestSyncRunner,
-      })
-      const procedures = server.procedures({
-        reminderFire: server.procedure(
-          Effect.fn(function* () {
+  it.effect(
+    "reports Effect.sleep inside constrained procedures as a defect",
+    () =>
+      Effect.gen(function* () {
+        const observed: Array<Cause.Cause<unknown>> = []
+        const server = makeServer({
+          module: FullModule,
+          onDefect: (cause) => {
+            observed.push(cause)
+          },
+          runtime: TestSyncRunner,
+        })
+        const procedures = server.procedures({
+          reminderFire: Effect.fn(function* () {
             yield* Effect.sleep(Duration.millis(1))
-          }),
-        ) as never,
-      })
+          }) as never,
+        })
 
-      expect(() =>
-        procedures.reminderFire!.invoke(
-          makeProcedureCtx(makeFakeDb([])) as never,
-          reminderFireArgs(1n) as never,
-        ),
-      ).toThrow(ReducerAsyncNotAllowedError)
-    }),
+        expect(
+          procedures.reminderFire!.invoke(
+            makeProcedureCtx(makeFakeDb([])) as never,
+            reminderFireArgs(1n) as never,
+          ),
+        ).toBeUndefined()
+        expect(
+          HandlerAsyncNotAllowedDefect.is(defectsOf(observed[0]!)[0]),
+        ).toBe(true)
+      }),
   )
 
   it.effect("rejects promise suspension inside constrained reducers", () =>
@@ -2000,11 +1914,9 @@ describe("server runtime", (it) => {
         runtime: TestSyncRunner,
       })
       const reducers = server.reducers({
-        userUpsert: server.reducer(
-          Effect.fn(function* () {
-            yield* Effect.promise(() => Promise.resolve(1))
-          }),
-        ) as never,
+        userUpsert: Effect.fn(function* () {
+          yield* Effect.promise(() => Promise.resolve(1))
+        }) as never,
       })
 
       expect(() =>
@@ -2012,7 +1924,7 @@ describe("server runtime", (it) => {
           userId: "user-1" as never,
           name: "Ada" as never,
         }),
-      ).toThrow(ReducerAsyncNotAllowedError)
+      ).toThrow(HandlerAsyncNotAllowedDefect)
     }),
   )
 
@@ -2025,21 +1937,19 @@ describe("server runtime", (it) => {
       let interrupted = false
       const reducerInterrupted = Deferred.makeUnsafe<void>()
       const reducers = server.reducers({
-        userUpsert: server.reducer(
-          Effect.fn(function* () {
-            return yield* Effect.callback<never>(() =>
-              Effect.try({
-                try: () => {
-                  interrupted = true
-                  Deferred.doneUnsafe(reducerInterrupted, Effect.void)
-                },
-                catch: testEffectCallbackError(
-                  "effect-spacetimedb/integration/server-runtime",
-                ),
-              }).pipe(Effect.orDie),
-            )
-          }),
-        ) as never,
+        userUpsert: Effect.fn(function* () {
+          return yield* Effect.callback<never>(() =>
+            Effect.try({
+              try: () => {
+                interrupted = true
+                Deferred.doneUnsafe(reducerInterrupted, Effect.void)
+              },
+              catch: testEffectCallbackError(
+                "effect-spacetimedb/integration/server-runtime",
+              ),
+            }).pipe(Effect.orDie),
+          )
+        }) as never,
       })
 
       expect(() =>
@@ -2047,7 +1957,7 @@ describe("server runtime", (it) => {
           userId: "user-1" as never,
           name: "Ada" as never,
         }),
-      ).toThrow(ReducerAsyncNotAllowedError)
+      ).toThrow(HandlerAsyncNotAllowedDefect)
 
       yield* Deferred.await(reducerInterrupted)
       expect(interrupted).toBe(true)
@@ -2062,18 +1972,16 @@ describe("server runtime", (it) => {
         runtime: makeRecordingSyncRunner(calls),
       })
       const reducers = server.reducers({
-        userUpsert: server.reducer(
-          Effect.fn(function* () {
-            yield* Effect.gen(function* () {
-              yield* Effect.log("hello")
-              yield* Effect.logFatal("fatal")
-              yield* Effect.logError("boom")
-              yield* Effect.logWarning("careful")
-              yield* Effect.logDebug("inspect")
-              yield* Effect.logTrace("trace")
-            }).pipe(Effect.provideService(References.MinimumLogLevel, "Trace"))
-          }),
-        ) as never,
+        userUpsert: Effect.fn(function* () {
+          yield* Effect.gen(function* () {
+            yield* Effect.log("hello")
+            yield* Effect.logFatal("fatal")
+            yield* Effect.logError("boom")
+            yield* Effect.logWarning("careful")
+            yield* Effect.logDebug("inspect")
+            yield* Effect.logTrace("trace")
+          }).pipe(Effect.provideService(References.MinimumLogLevel, "Trace"))
+        }) as never,
       })
 
       reducers.userUpsert!.invoke(makeReducerCtx(makeFakeDb([])) as never, {
@@ -2098,11 +2006,9 @@ describe("server runtime", (it) => {
         runtime: makeRecordingSyncRunner(calls),
       })
       const reducers = server.reducers({
-        userUpsert: server.reducer(
-          Effect.fn(function* () {
-            yield* Effect.log("late-console")
-          }),
-        ) as never,
+        userUpsert: Effect.fn(function* () {
+          yield* Effect.log("late-console")
+        }) as never,
       })
 
       reducers.userUpsert!.invoke(makeReducerCtx(makeFakeDb([])) as never, {
@@ -2142,7 +2048,7 @@ describe("server runtime", (it) => {
         }),
       }
 
-      const session = StdbTesting.ClientWs.make({
+      const session = StdbInternal.ClientWs.make({
         module: FullModule,
         connection: {
           db: makeFullModuleWsDb({

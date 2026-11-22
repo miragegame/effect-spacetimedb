@@ -6,16 +6,24 @@ import type {
   ProjectedHttpClientTag,
 } from "./client/http.ts"
 import {
+  groupFromModulePlan as httpGroupFromModulePlan,
   layerFromModulePlan as httpLayerFromModulePlan,
+  makeFromModulePlan as httpMakeFromModulePlan,
   tagFromModulePlan as makeHttpTagFromModulePlan,
 } from "./client/http.ts"
 import * as Client from "./client/index.ts"
-import type {
-  GeneratedConnectionClassLike,
-  MismatchedGeneratedModuleDiagnostic,
-  WsBuilderConfig,
-  WsGeneratedConfig,
+import {
+  type GeneratedConnectionClassLike,
+  makeScopedFromModulePlan,
+  makeScopedGeneratedFromModulePlan,
+  type MismatchedGeneratedModuleDiagnostic,
+  type WsBuilderConfig,
+  type WsGeneratedConfig,
 } from "./client/ws-resource.ts"
+import {
+  layerFromModulePlan as wsLayerFromModulePlan,
+  layerGeneratedFromModulePlan as wsLayerGeneratedFromModulePlan,
+} from "./client/ws-session-layer.ts"
 import type { WsSessionTag } from "./client/ws-session-tag.ts"
 import type { AnyModuleSpec } from "./contract/module.ts"
 import {
@@ -26,11 +34,11 @@ import {
 import { makeModulePlan } from "./module-plan.ts"
 import type { ProjectedSubscriptionTargets } from "./subscription-target.ts"
 
-type WsLayerOptions = {
+export type WsLayerOptions = {
   readonly name?: string | undefined
 }
 
-type ProjectedHttpClientAccess<Module extends AnyModuleSpec> = {
+export type ProjectedHttpClientAccess<Module extends AnyModuleSpec> = {
   readonly Tag: ProjectedHttpClientTag<Module>
   readonly make: (
     config: Omit<HttpClientOptions<Module>, "module">,
@@ -44,7 +52,7 @@ type ProjectedHttpClientAccess<Module extends AnyModuleSpec> = {
   ) => ReturnType<typeof httpLayerFromModulePlan<Module>>
 }
 
-type ProjectedWsClientAccess<Module extends AnyModuleSpec> = {
+export type ProjectedWsClientAccess<Module extends AnyModuleSpec> = {
   readonly scoped: <ErrorContext, RelationContext = unknown>(
     config: WsBuilderConfig<Module, ErrorContext, RelationContext>,
   ) => ReturnType<typeof Client.wsScoped<Module, ErrorContext, RelationContext>>
@@ -77,58 +85,62 @@ type ProjectedWsClientAccess<Module extends AnyModuleSpec> = {
   readonly Session: WsSessionTag<Module, unknown, unknown>
 }
 
-type ProjectedClient<Module extends AnyModuleSpec> = {
+export type ProjectedClient<Module extends AnyModuleSpec> = {
   readonly http: ProjectedHttpClientAccess<Module>
   readonly ws: ProjectedWsClientAccess<Module>
 }
 
-export type ModuleProject<Input extends ModuleSpecInput> = {
-  readonly module: SpecOf<Input>
-  readonly tables: SpecOf<Input>["tables"]
-  readonly views: SpecOf<Input>["views"]
-  readonly reducers: SpecOf<Input>["reducers"]
-  readonly procedures: SpecOf<Input>["procedures"]
-  readonly httpHandlers: SpecOf<Input>["httpHandlers"]
-  readonly lifecycle: SpecOf<Input>["lifecycle"]
-  readonly targets: ProjectedSubscriptionTargets<SpecOf<Input>>
-  readonly client: ProjectedClient<SpecOf<Input>>
+export type ModuleProject<Input extends ModuleSpecInput> = ProjectedModule<
+  SpecOf<Input>
+>
+
+export type ProjectedModule<Module extends AnyModuleSpec> = {
+  readonly module: Module
+  readonly tables: Module["tables"]
+  readonly views: Module["views"]
+  readonly reducers: Module["reducers"]
+  readonly procedures: Module["procedures"]
+  readonly httpHandlers: Module["httpHandlers"]
+  readonly lifecycle: Module["lifecycle"]
+  readonly targets: ProjectedSubscriptionTargets<Module>
+  readonly client: ProjectedClient<Module>
 }
 
 export const project = <const Input extends ModuleSpecInput>(
   input: Input,
-): ModuleProject<Input> => {
-  const module = moduleSpecOf(input)
+): ModuleProject<Input> => projectModule(moduleSpecOf(input))
+
+const projectModule = <Module extends AnyModuleSpec>(
+  module: Module,
+): ProjectedModule<Module> => {
   const plan = makeModulePlan(module)
   const httpTag = makeHttpTagFromModulePlan(plan)
   const wsTag = <ErrorContext, RelationContext = unknown>(
     name?: string,
-  ): WsSessionTag<SpecOf<Input>, ErrorContext, RelationContext> =>
-    Client.sessionTag<SpecOf<Input>, ErrorContext, RelationContext>(
-      module,
-      name,
-    )
+  ): WsSessionTag<Module, ErrorContext, RelationContext> =>
+    Client.wsSessionTag<Module, ErrorContext, RelationContext>(module, name)
   const client = {
     http: {
       Tag: httpTag,
       make: (
-        config: Omit<HttpClientOptions<SpecOf<Input>>, "module">,
-      ): ProjectedHttpClient<SpecOf<Input>> =>
-        Client.httpMake({
-          module,
-          ...config,
+        config: Omit<HttpClientOptions<Module>, "module">,
+      ): ProjectedHttpClient<Module> =>
+        httpMakeFromModulePlan({
+          plan,
+          config,
         }),
-      group: <Group extends GroupIdsOf<SpecOf<Input>>>(
+      group: <Group extends GroupIdsOf<Module>>(
         group: Group,
-        config: Omit<HttpClientOptions<SpecOf<Input>>, "module">,
-      ): ProjectedHttpGroupClient<SpecOf<Input>, Group> =>
-        Client.httpGroupFromModulePlan({
+        config: Omit<HttpClientOptions<Module>, "module">,
+      ): ProjectedHttpGroupClient<Module, Group> =>
+        httpGroupFromModulePlan({
           plan,
           group,
           config,
         }),
       layer: (
-        config: Omit<HttpClientOptions<SpecOf<Input>>, "module">,
-      ): ReturnType<typeof httpLayerFromModulePlan<SpecOf<Input>>> =>
+        config: Omit<HttpClientOptions<Module>, "module">,
+      ): ReturnType<typeof httpLayerFromModulePlan<Module>> =>
         httpLayerFromModulePlan({
           plan,
           config,
@@ -136,43 +148,43 @@ export const project = <const Input extends ModuleSpecInput>(
     },
     ws: {
       scoped: <ErrorContext, RelationContext = unknown>(
-        config: WsBuilderConfig<SpecOf<Input>, ErrorContext, RelationContext>,
+        config: WsBuilderConfig<Module, ErrorContext, RelationContext>,
       ): ReturnType<
-        typeof Client.wsScoped<SpecOf<Input>, ErrorContext, RelationContext>
+        typeof Client.wsScoped<Module, ErrorContext, RelationContext>
       > =>
-        Client.wsScoped({
-          module,
+        makeScopedFromModulePlan<Module, ErrorContext, RelationContext>({
+          plan,
           config,
         }),
       scopedGenerated: <
         ConnectionClass extends GeneratedConnectionClassLike,
         RelationContext = unknown,
       >(
-        config: WsGeneratedConfig<
-          SpecOf<Input>,
-          ConnectionClass,
-          RelationContext
-        > &
-          MismatchedGeneratedModuleDiagnostic<SpecOf<Input>, ConnectionClass>,
+        config: WsGeneratedConfig<Module, ConnectionClass, RelationContext> &
+          MismatchedGeneratedModuleDiagnostic<Module, ConnectionClass>,
       ): ReturnType<
         typeof Client.wsScopedGenerated<
-          SpecOf<Input>,
+          Module,
           ConnectionClass,
           RelationContext
         >
       > =>
-        Client.wsScopedGenerated({
-          module,
+        makeScopedGeneratedFromModulePlan<
+          Module,
+          ConnectionClass,
+          RelationContext
+        >({
+          plan,
           config,
         }),
       layer: <ErrorContext, RelationContext = unknown>(
-        config: WsBuilderConfig<SpecOf<Input>, ErrorContext, RelationContext>,
+        config: WsBuilderConfig<Module, ErrorContext, RelationContext>,
         options?: WsLayerOptions,
       ): ReturnType<
-        typeof Client.wsLayer<SpecOf<Input>, ErrorContext, RelationContext>
+        typeof Client.wsLayer<Module, ErrorContext, RelationContext>
       > =>
-        Client.wsLayer({
-          module,
+        wsLayerFromModulePlan({
+          plan,
           config,
           name: options?.name,
         }),
@@ -180,30 +192,22 @@ export const project = <const Input extends ModuleSpecInput>(
         ConnectionClass extends GeneratedConnectionClassLike,
         RelationContext = unknown,
       >(
-        config: WsGeneratedConfig<
-          SpecOf<Input>,
-          ConnectionClass,
-          RelationContext
-        > &
-          MismatchedGeneratedModuleDiagnostic<SpecOf<Input>, ConnectionClass>,
+        config: WsGeneratedConfig<Module, ConnectionClass, RelationContext> &
+          MismatchedGeneratedModuleDiagnostic<Module, ConnectionClass>,
         options?: WsLayerOptions,
       ): ReturnType<
-        typeof Client.wsLayerGenerated<
-          SpecOf<Input>,
-          ConnectionClass,
-          RelationContext
-        >
+        typeof Client.wsLayerGenerated<Module, ConnectionClass, RelationContext>
       > =>
-        Client.wsLayerGenerated({
-          module,
+        wsLayerGeneratedFromModulePlan({
+          plan,
           config,
           name: options?.name,
         }),
       tag: <ErrorContext, RelationContext = unknown>(
         name?: string,
-      ): WsSessionTag<SpecOf<Input>, ErrorContext, RelationContext> =>
+      ): WsSessionTag<Module, ErrorContext, RelationContext> =>
         wsTag<ErrorContext, RelationContext>(name),
-      Session: wsTag<unknown, unknown>(),
+      Session: Client.wsSessionTag<Module, unknown, unknown>(module),
     },
   }
 

@@ -14,19 +14,20 @@ import type { ReducerSpec } from "../contract/reducer.ts"
 import type { AnyValueType } from "../contract/type.ts"
 import {
   type CallFailure,
-  type CallNotSentError,
   classifyRawCallFailure,
-  type ConnectionIdentityChangedError,
-  type ConnectionLostError,
   DomainCallError,
   isConnectionCallFailure,
   type RawCallFailure,
-  RemoteRejectedBody,
+  type RawWsCallFailure,
+  RemoteRejectedBodyError,
   RemoteRejectedError,
   remoteFailureMessageFromUnknown,
   remoteRejectedFromRaw,
+  remoteRejectedFromUndeclared,
   StdbDecodeError,
   TransportError,
+  type WsCallFailure,
+  type WsConnectionFailure,
 } from "./call-errors.ts"
 import type {
   DeclaredErrorsOf,
@@ -66,6 +67,19 @@ type ProcedureCallRuntime<Prepared, InvokeError, R> = {
 }
 
 type DomainErrorMode = "direct" | "raw"
+
+/**
+ * The connection failures a runtime can raise, read off its `invoke`. These
+ * helpers classify every failure the same way at run time, so the type is what
+ * tells an HTTP call from a WebSocket one.
+ */
+type ConnectionFailureOf<InvokeError> = Extract<
+  InvokeError,
+  WsConnectionFailure
+>
+
+/** Every failure classification can produce, on either mode and transport. */
+type ClassifiedFailure<E> = WsCallFailure<E> | RawWsCallFailure<E>
 
 type ReducerCallOptions<
   Spec extends ReducerSpec,
@@ -110,9 +124,7 @@ type ProcedureEnvelopeRuntime =
 const isTransportCallFailure = (
   cause: unknown,
 ): cause is
-  | ConnectionLostError
-  | CallNotSentError
-  | ConnectionIdentityChangedError
+  | WsConnectionFailure
   | StdbDecodeError
   | RemoteRejectedError
   | TransportError =>
@@ -121,7 +133,7 @@ const isTransportCallFailure = (
   RemoteRejectedError.is(cause) ||
   TransportError.is(cause)
 
-const isRawCallFailure = <E>(cause: unknown): cause is RawCallFailure<E> =>
+const isRawCallFailure = <E>(cause: unknown): cause is RawWsCallFailure<E> =>
   isTransportCallFailure(cause) || DomainCallError.is(cause)
 
 const failDeclaredDomain = <E>(
@@ -146,10 +158,7 @@ const classifyCallFailure = <Spec extends ReducerSpec | ProcedureSpec>(
   spec: Spec,
   cause: unknown,
   mode: DomainErrorMode,
-): Effect.Effect<
-  never,
-  CallFailure<DeclaredErrorsOf<Spec>> | RawCallFailure<DeclaredErrorsOf<Spec>>
-> => {
+): Effect.Effect<never, ClassifiedFailure<DeclaredErrorsOf<Spec>>> => {
   if (mode === "raw" && isRawCallFailure<DeclaredErrorsOf<Spec>>(cause)) {
     return Effect.fail(cause)
   }
@@ -169,8 +178,7 @@ const classifyCallFailure = <Spec extends ReducerSpec | ProcedureSpec>(
               mode,
             ) as Effect.Effect<
               never,
-              | CallFailure<DeclaredErrorsOf<Spec>>
-              | RawCallFailure<DeclaredErrorsOf<Spec>>
+              ClassifiedFailure<DeclaredErrorsOf<Spec>>
             >,
         }),
       ),
@@ -184,10 +192,7 @@ const classifyRemoteFailure = <Spec extends ReducerSpec | ProcedureSpec>(
   spec: Spec,
   cause: unknown,
   mode: DomainErrorMode,
-): Effect.Effect<
-  never,
-  CallFailure<DeclaredErrorsOf<Spec>> | RawCallFailure<DeclaredErrorsOf<Spec>>
-> => {
+): Effect.Effect<never, ClassifiedFailure<DeclaredErrorsOf<Spec>>> => {
   if (mode === "raw" && isRawCallFailure<DeclaredErrorsOf<Spec>>(cause)) {
     return Effect.fail(cause)
   }
@@ -198,11 +203,13 @@ const classifyRemoteFailure = <Spec extends ReducerSpec | ProcedureSpec>(
 
   const remoteFailure = remoteFailureMessageFromUnknown(cause)
   if (remoteFailure !== undefined) {
-    const remoteStatus = RemoteRejectedBody.is(cause) ? cause.status : undefined
+    const remoteStatus = RemoteRejectedBodyError.is(cause)
+      ? cause.status
+      : undefined
     if (spec.errors == null) {
       return Effect.fail(
         classifyRawCallFailure<DeclaredErrorsOf<Spec>>(
-          RemoteRejectedBody.is(cause) ? cause : remoteFailure,
+          RemoteRejectedBodyError.is(cause) ? cause : remoteFailure,
         ),
       )
     }
@@ -214,11 +221,7 @@ const classifyRemoteFailure = <Spec extends ReducerSpec | ProcedureSpec>(
             error as DeclaredErrorsOf<Spec>,
             mode,
             remoteRejectedFromRaw(remoteFailure, remoteStatus),
-          ) as Effect.Effect<
-            never,
-            | CallFailure<DeclaredErrorsOf<Spec>>
-            | RawCallFailure<DeclaredErrorsOf<Spec>>
-          >,
+          ) as Effect.Effect<never, ClassifiedFailure<DeclaredErrorsOf<Spec>>>,
       ),
     )
   }
@@ -264,7 +267,11 @@ function callReducerWithMode<
   R,
 >(
   options: ReducerCallOptions<Spec, Prepared, InvokeError, R, "direct">,
-): Effect.Effect<void, CallFailure<DeclaredErrorsOf<Spec>>, R>
+): Effect.Effect<
+  void,
+  CallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailureOf<InvokeError>,
+  R
+>
 function callReducerWithMode<
   Spec extends ReducerSpec,
   Prepared,
@@ -272,7 +279,11 @@ function callReducerWithMode<
   R,
 >(
   options: ReducerCallOptions<Spec, Prepared, InvokeError, R, "raw">,
-): Effect.Effect<void, RawCallFailure<DeclaredErrorsOf<Spec>>, R>
+): Effect.Effect<
+  void,
+  RawCallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailureOf<InvokeError>,
+  R
+>
 function callReducerWithMode<
   Spec extends ReducerSpec,
   Prepared,
@@ -280,11 +291,7 @@ function callReducerWithMode<
   R,
 >(
   options: ReducerCallOptions<Spec, Prepared, InvokeError, R>,
-): Effect.Effect<
-  void,
-  CallFailure<DeclaredErrorsOf<Spec>> | RawCallFailure<DeclaredErrorsOf<Spec>>,
-  R
-> {
+): Effect.Effect<void, ClassifiedFailure<DeclaredErrorsOf<Spec>>, R> {
   return Effect.suspend(() => {
     const callable = options.callable
     return options.runtime.prepareArgs(callable.spec, options.payload).pipe(
@@ -313,12 +320,7 @@ function callReducerWithMode<
         },
       }),
     )
-  }) as Effect.Effect<
-    void,
-    | CallFailure<DeclaredErrorsOf<Spec>>
-    | RawCallFailure<DeclaredErrorsOf<Spec>>,
-    R
-  >
+  }) as Effect.Effect<void, ClassifiedFailure<DeclaredErrorsOf<Spec>>, R>
 }
 
 export const callReducer = <Spec extends ReducerSpec, Prepared, InvokeError, R>(
@@ -326,7 +328,11 @@ export const callReducer = <Spec extends ReducerSpec, Prepared, InvokeError, R>(
     ReducerCallOptions<Spec, Prepared, InvokeError, R>,
     "domainErrorMode"
   >,
-): Effect.Effect<void, CallFailure<DeclaredErrorsOf<Spec>>, R> =>
+): Effect.Effect<
+  void,
+  CallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailureOf<InvokeError>,
+  R
+> =>
   callReducerWithMode({
     ...options,
     domainErrorMode: "direct",
@@ -342,7 +348,11 @@ export const callReducerRaw = <
     ReducerCallOptions<Spec, Prepared, InvokeError, R>,
     "domainErrorMode"
   >,
-): Effect.Effect<void, RawCallFailure<DeclaredErrorsOf<Spec>>, R> =>
+): Effect.Effect<
+  void,
+  RawCallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailureOf<InvokeError>,
+  R
+> =>
   callReducerWithMode({
     ...options,
     domainErrorMode: "raw",
@@ -355,7 +365,11 @@ function callProcedureWithMode<
   R,
 >(
   options: ProcedureCallOptions<Spec, Prepared, InvokeError, R, "direct">,
-): Effect.Effect<ReturnsOf<Spec>, CallFailure<DeclaredErrorsOf<Spec>>, R>
+): Effect.Effect<
+  ReturnsOf<Spec>,
+  CallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailureOf<InvokeError>,
+  R
+>
 function callProcedureWithMode<
   Spec extends ProcedureSpec,
   Prepared,
@@ -363,7 +377,11 @@ function callProcedureWithMode<
   R,
 >(
   options: ProcedureCallOptions<Spec, Prepared, InvokeError, R, "raw">,
-): Effect.Effect<ReturnsOf<Spec>, RawCallFailure<DeclaredErrorsOf<Spec>>, R>
+): Effect.Effect<
+  ReturnsOf<Spec>,
+  RawCallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailureOf<InvokeError>,
+  R
+>
 function callProcedureWithMode<
   Spec extends ProcedureSpec,
   Prepared,
@@ -373,7 +391,7 @@ function callProcedureWithMode<
   options: ProcedureCallOptions<Spec, Prepared, InvokeError, R>,
 ): Effect.Effect<
   ReturnsOf<Spec>,
-  CallFailure<DeclaredErrorsOf<Spec>> | RawCallFailure<DeclaredErrorsOf<Spec>>,
+  ClassifiedFailure<DeclaredErrorsOf<Spec>>,
   R
 > {
   return Effect.suspend(() => {
@@ -388,15 +406,8 @@ function callProcedureWithMode<
       Effect.flatMap((prepared) =>
         options.runtime.invoke(callable.name, callable.spec, prepared),
       ),
-      Effect.flatMap((response) => {
-        if (Predicate.isUndefined(callable.errors)) {
-          return options.runtime.decodeValue<ReturnsOf<Spec>>(
-            callable.returns,
-            response,
-          )
-        }
-
-        return options.runtime
+      Effect.flatMap((response) =>
+        options.runtime
           .decodeValue<ProcedureEnvelopeOf<Spec>>(
             procedureResponseType(callable.spec),
             response,
@@ -406,6 +417,17 @@ function callProcedureWithMode<
               Match.value(decoded as ProcedureEnvelopeRuntime).pipe(
                 Match.discriminatorsExhaustive("tag")({
                   err: (failure) => {
+                    const undeclared = ErrorCodec.peekUndeclaredFailure(
+                      failure.value,
+                    )
+                    if (undeclared !== undefined) {
+                      return Effect.fail(
+                        remoteRejectedFromUndeclared(undeclared) as CallFailure<
+                          DeclaredErrorsOf<Spec>
+                        >,
+                      )
+                    }
+
                     const errors = callable.errors
                     if (Predicate.isUndefined(errors)) {
                       return Effect.fail(
@@ -434,8 +456,8 @@ function callProcedureWithMode<
                 }),
               ),
             ),
-          )
-      }),
+          ),
+      ),
       Effect.matchEffect({
         onSuccess: Effect.succeed,
         onFailure: (cause) =>
@@ -453,8 +475,7 @@ function callProcedureWithMode<
     )
   }) as Effect.Effect<
     ReturnsOf<Spec>,
-    | CallFailure<DeclaredErrorsOf<Spec>>
-    | RawCallFailure<DeclaredErrorsOf<Spec>>,
+    ClassifiedFailure<DeclaredErrorsOf<Spec>>,
     R
   >
 }
@@ -469,7 +490,11 @@ export const callProcedure = <
     ProcedureCallOptions<Spec, Prepared, InvokeError, R>,
     "domainErrorMode"
   >,
-): Effect.Effect<ReturnsOf<Spec>, CallFailure<DeclaredErrorsOf<Spec>>, R> =>
+): Effect.Effect<
+  ReturnsOf<Spec>,
+  CallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailureOf<InvokeError>,
+  R
+> =>
   callProcedureWithMode({
     ...options,
     domainErrorMode: "direct",
@@ -485,7 +510,11 @@ export const callProcedureRaw = <
     ProcedureCallOptions<Spec, Prepared, InvokeError, R>,
     "domainErrorMode"
   >,
-): Effect.Effect<ReturnsOf<Spec>, RawCallFailure<DeclaredErrorsOf<Spec>>, R> =>
+): Effect.Effect<
+  ReturnsOf<Spec>,
+  RawCallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailureOf<InvokeError>,
+  R
+> =>
   callProcedureWithMode({
     ...options,
     domainErrorMode: "raw",

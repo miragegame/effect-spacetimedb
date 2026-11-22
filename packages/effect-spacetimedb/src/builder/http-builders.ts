@@ -1,3 +1,10 @@
+import type {
+  AddMount,
+  MountOptions,
+  MountRecord,
+  ModuleMount,
+  NativeMount,
+} from "../contract/mount.ts"
 import type * as Schema from "effect/Schema"
 import * as Option from "effect/Option"
 import {
@@ -61,7 +68,7 @@ import {
   scheduledReducerEndpoint,
 } from "./runtime-impl.ts"
 
-export type StdbGroup<
+export type Group<
   Id extends string,
   Endpoints extends AnyCallableDecl = never,
   Errors extends AnyErrorDefinition | undefined = undefined,
@@ -94,7 +101,7 @@ export type StdbGroup<
   // record on every add regresses the 50-link chain guard with TS2589.
   readonly add: <const Added extends NonEmptyReadonlyArray<AnyCallableDecl>>(
     ...endpoints: Added
-  ) => StdbGroup<
+  ) => Group<
     Id,
     Endpoints | Added[number],
     Errors,
@@ -114,7 +121,7 @@ export type StdbGroup<
   readonly [GroupLifecycleTypeId]: Lifecycle
 }
 
-export type StdbHttpGroup<
+export type HttpGroup<
   Id extends string,
   Endpoints extends AnyHttpRouteDecl = never,
   Errors extends AnyErrorDefinition | undefined = undefined,
@@ -131,7 +138,7 @@ export type StdbHttpGroup<
   readonly endpoints: ReadonlyArray<AnyHttpRouteDecl>
   readonly add: <const Added extends NonEmptyReadonlyArray<AnyHttpRouteDecl>>(
     ...endpoints: Added
-  ) => StdbHttpGroup<
+  ) => HttpGroup<
     Id,
     Endpoints | Added[number],
     Errors,
@@ -140,10 +147,10 @@ export type StdbHttpGroup<
   >
   readonly prefix: <const Prefix extends string>(
     prefix: Prefix,
-  ) => StdbHttpGroup<Id, Endpoints, Errors, HttpHandlers>
+  ) => HttpGroup<Id, Endpoints, Errors, HttpHandlers>
   readonly nest: <
     const Prefix extends string,
-    Other extends StdbHttpGroup<
+    Other extends HttpGroup<
       string,
       AnyHttpRouteDecl,
       AnyErrorDefinition | undefined,
@@ -152,7 +159,7 @@ export type StdbHttpGroup<
   >(
     prefix: Prefix,
     other: Other,
-  ) => StdbHttpGroup<
+  ) => HttpGroup<
     Id,
     Endpoints | EndpointsOfGroup<Other>,
     MergeErrorDefinitions<Errors, ErrorsOfGroup<Other>>,
@@ -162,7 +169,7 @@ export type StdbHttpGroup<
     >
   >
   readonly merge: <
-    Other extends StdbHttpGroup<
+    Other extends HttpGroup<
       string,
       AnyHttpRouteDecl,
       AnyErrorDefinition | undefined,
@@ -170,7 +177,7 @@ export type StdbHttpGroup<
     >,
   >(
     other: Other,
-  ) => StdbHttpGroup<
+  ) => HttpGroup<
     Id,
     Endpoints | EndpointsOfGroup<Other>,
     MergeErrorDefinitions<Errors, ErrorsOfGroup<Other>>,
@@ -229,7 +236,13 @@ const normalizeOptionalErrors = <const Input extends ErrorsInput | undefined>(
     Option.getOrUndefined,
   ) as DefinitionOfInputOrUndefined<Input>
 
-export type StdbModule<
+/** A module spec with the named mount declarations accumulated by its builder. */
+export type SpecWithMounts<
+  Spec extends AnyModuleSpec,
+  Mounts extends MountRecord,
+> = [keyof Mounts] extends [never] ? Spec : Spec & { readonly mounts: Mounts }
+
+export type Module<
   Id extends string,
   Tables extends Record<string, AnyTableSpec>,
   Groups extends AnyGroup = never,
@@ -252,12 +265,57 @@ export type StdbModule<
   // Last so existing positional instantiations (including an explicit Spec)
   // keep meaning what they meant; a module without an environment is `{}`.
   Environment extends EnvironmentDeclarations = {},
+  Mounts extends MountRecord = {},
 > = RuntimeModuleState &
-  ModuleAccessors<SpecWithEnvironment<Spec, Environment>> & {
-    readonly spec: SpecWithEnvironment<Spec, Environment>
+  ModuleAccessors<
+    SpecWithMounts<SpecWithEnvironment<Spec, Environment>, Mounts>
+  > & {
+    readonly spec: SpecWithMounts<
+      SpecWithEnvironment<Spec, Environment>,
+      Mounts
+    >
+    /** Embed a reusable Effect module under this accessor. Its tables and functions share the parent's database and transaction. */
+    readonly mount: <const Name extends string, Child extends AnyModuleSpec>(
+      namespace: Name,
+      child: { readonly spec: Child },
+      options?: MountOptions,
+    ) => Module<
+      Id,
+      Tables,
+      Groups,
+      GroupNameUnion,
+      TableNameUnion,
+      Lifecycle,
+      HttpGroupPairs,
+      ScheduledTableNameUnion,
+      SchedulePairs,
+      GroupEndpointPairs,
+      Spec,
+      Environment,
+      AddMount<Mounts, Name, ModuleMount<Child>>
+    >
+    /** Reserve a namespace for a native SDK module. Supply its type in the first call so TypeScript can infer the literal accessor in the second call without importing server code. */
+    readonly mountNative: <Library>() => <const Name extends string>(
+      namespace: Name,
+      options?: MountOptions,
+    ) => Module<
+      Id,
+      Tables,
+      Groups,
+      GroupNameUnion,
+      TableNameUnion,
+      Lifecycle,
+      HttpGroupPairs,
+      ScheduledTableNameUnion,
+      SchedulePairs,
+      GroupEndpointPairs,
+      Spec,
+      Environment,
+      AddMount<Mounts, Name, NativeMount<Library>>
+    >
     readonly addTables: <const Added extends ReadonlyArray<AnyTableSpec>>(
       ...tables: Added
-    ) => StdbModule<
+    ) => Module<
       Id,
       Tables & TablesFromTuple<Added>,
       Groups,
@@ -275,11 +333,12 @@ export type StdbModule<
         Lifecycle,
         HttpGroupPairs
       >,
-      Environment
+      Environment,
+      Mounts
     >
     readonly add: <const Added extends NonEmptyReadonlyArray<AnyGroup>>(
       ...groups: Added
-    ) => StdbModule<
+    ) => Module<
       Id,
       Tables,
       Groups | Added[number],
@@ -297,7 +356,8 @@ export type StdbModule<
         Lifecycle,
         HttpGroupPairs | HttpGroupPairsOf<Added[number]>
       >,
-      Environment
+      Environment,
+      Mounts
     >
     readonly [GroupTypeId]: Groups
     readonly [GroupNamesTypeId]: GroupNameUnion
@@ -306,7 +366,10 @@ export type StdbModule<
     readonly [SchedulePairsTypeId]: SchedulePairs
     readonly [GroupEndpointPairsTypeId]: GroupEndpointPairs
     readonly [HttpGroupPairsTypeId]: HttpGroupPairs
-    readonly [ModuleSpecTypeId]: SpecWithEnvironment<Spec, Environment>
+    readonly [ModuleSpecTypeId]: SpecWithMounts<
+      SpecWithEnvironment<Spec, Environment>,
+      Mounts
+    >
   }
 
 /**
@@ -336,7 +399,7 @@ export type SpecWithEnvironment<
     ? Spec
     : Spec & { readonly environment: Environment }
 
-type SpecDeclaresEnvironment<Spec, Environment> = [Spec] extends [
+export type SpecDeclaresEnvironment<Spec, Environment> = [Spec] extends [
   { readonly environment: infer Declared },
 ]
   ? [Declared, Environment] extends [Environment, Declared]
@@ -344,7 +407,7 @@ type SpecDeclaresEnvironment<Spec, Environment> = [Spec] extends [
     : false
   : false
 
-export const StdbFn = {
+export const Fn = {
   reducer: reducerEndpoint,
   procedure: procedureEndpoint,
   scheduledReducer: scheduledReducerEndpoint,
@@ -360,23 +423,20 @@ export const StdbFn = {
   view: <
     const Name extends string,
     const Returns extends AnyValueType,
-    const Public extends boolean = true,
     const Params extends StructLikeValueType = EmptyViewParamsType,
   >(
     name: Name,
     spec: {
       readonly returns: Returns
-      readonly public?: Public
       readonly params?: Params
     },
-  ): SenderViewDecl<Name, Returns, Public, Params> => ({
+  ): SenderViewDecl<Name, Returns, Params> => ({
     declKind: "view",
     name,
     spec: defineSenderView({
-      public: spec.public ?? true,
       params: spec.params ?? EmptyViewParams,
       returns: spec.returns,
-    }) as SenderViewDecl<Name, Returns, Public, Params>["spec"],
+    }) as SenderViewDecl<Name, Returns, Params>["spec"],
   }),
   /**
    * A view answering every caller alike (`AnonymousViewCtx`), computed once
@@ -386,23 +446,20 @@ export const StdbFn = {
   anonymousView: <
     const Name extends string,
     const Returns extends AnyValueType,
-    const Public extends boolean = true,
     const Params extends StructLikeValueType = EmptyViewParamsType,
   >(
     name: Name,
     spec: {
       readonly returns: Returns
-      readonly public?: Public
       readonly params?: Params
     },
-  ): AnonymousViewDecl<Name, Returns, Public, Params> => ({
+  ): AnonymousViewDecl<Name, Returns, Params> => ({
     declKind: "view",
     name,
     spec: defineAnonymousView({
-      public: spec.public ?? true,
       params: spec.params ?? EmptyViewParams,
       returns: spec.returns,
-    }) as AnonymousViewDecl<Name, Returns, Public, Params>["spec"],
+    }) as AnonymousViewDecl<Name, Returns, Params>["spec"],
   }),
   init: (): LifecycleDecl<"init"> => ({
     declKind: "lifecycle",
@@ -421,14 +478,14 @@ export const StdbFn = {
   }),
 }
 
-type RawHttpOptions = {
+export type RawHttpOptions = {
   readonly successStatus?: number
   readonly request?: undefined
   readonly response?: undefined
   readonly errors?: undefined
 }
 
-type TypedHttpOptions<
+export type TypedHttpOptions<
   Req extends Schema.Top,
   Res extends Schema.Top,
   Errors extends ErrorsInput | undefined,
@@ -439,7 +496,7 @@ type TypedHttpOptions<
   readonly successStatus?: number
 }
 
-type HttpMethodBuilder<Method extends HttpHandlerMethod> = {
+export type HttpMethodBuilder<Method extends HttpHandlerMethod> = {
   <const Name extends string>(
     name: Name,
     path: string,
@@ -488,7 +545,7 @@ const httpMethod = <const Method extends HttpHandlerMethod>(
     }
   }) as HttpMethodBuilder<Method>
 
-export const StdbHttp = {
+export const Http = {
   get: httpMethod("get"),
   post: httpMethod("post"),
   put: httpMethod("put"),
@@ -499,14 +556,14 @@ export const StdbHttp = {
   any: httpMethod("any"),
 }
 
-export const StdbGroup = {
+export const Group = {
   make: <
     const Id extends string,
     const Errors extends ErrorsInput | undefined = undefined,
   >(
     id: Id,
     options?: { readonly errors?: Errors },
-  ): StdbGroup<Id, never, DefinitionOfInputOrUndefined<Errors>> => {
+  ): Group<Id, never, DefinitionOfInputOrUndefined<Errors>> => {
     const errors = normalizeOptionalErrors(options?.errors)
     return makeCallableGroup<Id, never, DefinitionOfInputOrUndefined<Errors>>(
       id,
@@ -516,14 +573,14 @@ export const StdbGroup = {
   },
 }
 
-export const StdbHttpGroup = {
+export const HttpGroup = {
   make: <
     const Id extends string,
     const Errors extends ErrorsInput | undefined = undefined,
   >(
     id: Id,
     options?: { readonly errors?: Errors },
-  ): StdbHttpGroup<Id, never, DefinitionOfInputOrUndefined<Errors>> => {
+  ): HttpGroup<Id, never, DefinitionOfInputOrUndefined<Errors>> => {
     const errors = normalizeOptionalErrors(options?.errors)
     return makeHttpGroup<Id, never, DefinitionOfInputOrUndefined<Errors>>(
       id,
@@ -553,10 +610,10 @@ const normalizeLifecycleConfig = (
         ]),
       )
 
-type EnvironmentOfConfig<Environment> =
+export type EnvironmentOfConfig<Environment> =
   Environment extends EnvironmentDeclarations ? Environment : {}
 
-export const StdbModule = {
+export const Module = {
   make: <
     const Id extends string,
     const Lifecycle extends LifecycleConfig | undefined = undefined,
@@ -573,7 +630,7 @@ export const StdbModule = {
        */
       readonly environment?: Environment
     },
-  ): StdbModule<
+  ): Module<
     Id,
     {},
     never,

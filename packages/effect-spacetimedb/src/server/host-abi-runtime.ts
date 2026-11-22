@@ -62,6 +62,18 @@ export const identityKey = (value: unknown): string | undefined => {
     : Result.getOrUndefined(normalizeIdentity(hostIdentity))
 }
 
+/**
+ * Whether the database made this call itself, as its scheduler does. An
+ * identity that cannot be read is never taken for the database's.
+ */
+export const isDatabaseSender = (ctx: {
+  readonly sender: unknown
+  readonly databaseIdentity: unknown
+}): boolean => {
+  const sender = identityKey(ctx.sender)
+  return sender !== undefined && sender === identityKey(ctx.databaseIdentity)
+}
+
 export const isHostRecord = (
   value: unknown,
 ): value is Record<string, unknown> =>

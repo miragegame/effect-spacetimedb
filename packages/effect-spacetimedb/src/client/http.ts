@@ -1,3 +1,11 @@
+import {
+  lazyGroups,
+  groupMembers,
+  type GroupIdsOf,
+  type ReducerKeysInGroup,
+  type ProcedureKeysInGroup,
+  type HttpHandlerKeysInGroup,
+} from "./group-clients.ts"
 // Sanctioned SpacetimeDB protocol-client layer: generated/typed SDK calls
 // assemble STDB REST URLs here so downstream consumers do not build them.
 
@@ -28,7 +36,7 @@ import { makeModulePlan } from "../module-plan.ts"
 import { prefixId } from "../utils.ts"
 import {
   encodeArgsArray,
-  RemoteRejectedBody,
+  RemoteRejectedBodyError,
   StdbDecodeError,
   TransportError,
 } from "./call-errors.ts"
@@ -43,8 +51,6 @@ import type {
   HttpHandlerCallOptions,
   HttpHandlerConcreteMethod,
   HttpHandlerRequestOf,
-  PublicProcedureKeys,
-  PublicReducerKeys,
 } from "./rpc.ts"
 import { make as makeRpc, type ParamsOf } from "./rpc.ts"
 import { executeHttpHandlerCall } from "./http-handler-call.ts"
@@ -59,7 +65,8 @@ import {
 import * as ValueCodec from "./value-codec.ts"
 
 export {
-  HttpCallDurationExceeded,
+  callDurationMaxDefault,
+  HttpCallDurationExceededError,
   type HttpClientConfig,
   normalizeBaseUri,
 } from "./http-transport.ts"
@@ -70,51 +77,29 @@ export type HttpClientOptions<Module extends AnyModuleSpec> = {
 
 type Simplify<Value> = { readonly [Key in keyof Value]: Value[Key] } & {}
 
-type FlatHttpClient<Module extends AnyModuleSpec> = ReturnType<
-  typeof makeRpc<Module, HttpClient.HttpClient>
+export type FlatHttpClient<Module extends AnyModuleSpec> = ReturnType<
+  typeof makeRpc<Module, HttpClient.HttpClient, never>
 >
 
-export type GroupIdsOf<Module extends AnyModuleSpec> =
-  | Module["reducerGroups"][keyof Module["reducerGroups"] & string]
-  | Module["procedureGroups"][keyof Module["procedureGroups"] & string]
-  | Module["httpGroups"][keyof Module["httpGroups"] & string]
+export type {
+  GroupIdsOf,
+  ReducerKeysInGroup,
+  ProcedureKeysInGroup,
+  HttpHandlerKeysInGroup,
+} from "./group-clients.ts"
 
-export type ReducerKeysInGroup<
-  Module extends AnyModuleSpec,
-  Group extends string,
-> = {
-  readonly [Key in keyof Module["reducerGroups"] &
-    string]: Module["reducerGroups"][Key] extends Group ? Key : never
-}[keyof Module["reducerGroups"] & string]
-
-export type ProcedureKeysInGroup<
-  Module extends AnyModuleSpec,
-  Group extends string,
-> = {
-  readonly [Key in keyof Module["procedureGroups"] &
-    string]: Module["procedureGroups"][Key] extends Group ? Key : never
-}[keyof Module["procedureGroups"] & string]
-
-export type HttpHandlerKeysInGroup<
-  Module extends AnyModuleSpec,
-  Group extends string,
-> = {
-  readonly [Key in keyof Module["httpGroups"] &
-    string]: Module["httpGroups"][Key] extends Group ? Key : never
-}[keyof Module["httpGroups"] & string]
-
-type ProjectedHttpGroupClientFromFlat<
+export type ProjectedHttpGroupClientFromFlat<
   Module extends AnyModuleSpec,
   Group extends GroupIdsOf<Module>,
   Flat extends FlatHttpClient<Module>,
 > = {
   readonly reducers: Pick<
     Flat["reducers"],
-    ReducerKeysInGroup<Module, Group> & PublicReducerKeys<Module>
+    ReducerKeysInGroup<Module, Group> & keyof Flat["reducers"]
   >
   readonly procedures: Pick<
     Flat["procedures"],
-    ProcedureKeysInGroup<Module, Group> & PublicProcedureKeys<Module>
+    ProcedureKeysInGroup<Module, Group> & keyof Flat["procedures"]
   >
   readonly httpHandlers: Pick<
     Flat["httpHandlers"],
@@ -127,7 +112,7 @@ export type ProjectedHttpGroupClient<
   Group extends GroupIdsOf<Module>,
 > = ProjectedHttpGroupClientFromFlat<Module, Group, FlatHttpClient<Module>>
 
-type HttpGroupClients<
+export type HttpGroupClients<
   Module extends AnyModuleSpec,
   Flat extends FlatHttpClient<Module>,
 > = {
@@ -140,7 +125,7 @@ type HttpGroupClients<
 
 export type ProjectedHttpClient<Module extends AnyModuleSpec> =
   FlatHttpClient<Module> extends infer Flat extends FlatHttpClient<Module>
-    ? Simplify<Flat & HttpGroupClients<Module, Flat>>
+    ? Simplify<Flat & { readonly groups: HttpGroupClients<Module, Flat> }>
     : never
 
 export declare const ProjectedHttpClientTagTypeId: unique symbol
@@ -249,12 +234,12 @@ const readProcedureBody = (response: {
 const failRemoteRejection = (response: {
   readonly status: number
   readonly text: Effect.Effect<string, unknown>
-}): Effect.Effect<never, RemoteRejectedBody | TransportError> =>
+}): Effect.Effect<never, RemoteRejectedBodyError | TransportError> =>
   readResponseText(response).pipe(
     Effect.flatMap(
-      (body): Effect.Effect<never, RemoteRejectedBody | TransportError> =>
+      (body): Effect.Effect<never, RemoteRejectedBodyError | TransportError> =>
         Effect.fail(
-          new RemoteRejectedBody({ raw: body, status: response.status }),
+          new RemoteRejectedBodyError({ raw: body, status: response.status }),
         ),
     ),
   )
@@ -265,12 +250,14 @@ const executeReducerCall = (
   args: ReadonlyArray<unknown>,
 ): Effect.Effect<
   void,
-  RemoteRejectedBody | TransportError,
+  RemoteRejectedBodyError | TransportError,
   HttpClient.HttpClient
 > =>
   executeStdbCall(config, name, args).pipe(
     Effect.flatMap(
-      (response): Effect.Effect<void, RemoteRejectedBody | TransportError> =>
+      (
+        response,
+      ): Effect.Effect<void, RemoteRejectedBodyError | TransportError> =>
         response.status >= 200 && response.status < 300
           ? Effect.void
           : failRemoteRejection(response),
@@ -284,7 +271,7 @@ const executeProcedureCall = (
   args: ReadonlyArray<unknown>,
 ): Effect.Effect<
   string | undefined,
-  RemoteRejectedBody | TransportError,
+  RemoteRejectedBodyError | TransportError,
   HttpClient.HttpClient
 > =>
   executeStdbCall(config, name, args).pipe(
@@ -293,7 +280,7 @@ const executeProcedureCall = (
         response,
       ): Effect.Effect<
         string | undefined,
-        RemoteRejectedBody | TransportError
+        RemoteRejectedBodyError | TransportError
       > =>
         response.status >= 200 && response.status < 300
           ? readProcedureBody(response)
@@ -310,86 +297,12 @@ const httpTagForModule = <Module extends AnyModuleSpec>(
     ProjectedHttpClient<Module>
   >(prefixId(`Client/Http/${module.name}`))
 
-type RuntimeRpcClient = {
-  readonly reducers: Record<string, unknown>
-  readonly procedures: Record<string, unknown>
-  readonly httpHandlers: Record<string, unknown>
-}
-
-const projectGroupMembers = (
-  members: Record<string, unknown>,
-  groups: Record<string, string>,
-  groupId: string,
-): Record<string, unknown> => {
-  const projected = Object.fromEntries(
-    Object.entries(members).filter(([name]) => groups[name] === groupId),
-  )
-  Object.setPrototypeOf(projected, null)
-  return projected
-}
-
-function withHttpGroupClients<Module extends AnyModuleSpec>(
-  module: Module,
-  flat: FlatHttpClient<Module>,
-): ProjectedHttpClient<Module>
-// The runtime assembly is intentionally unparameterized at this seam. The
-// module's group records are its source of truth; identity and partition tests
-// pin this implementation to the projected overload above.
-function withHttpGroupClients(
-  module: AnyModuleSpec,
-  flat: RuntimeRpcClient,
-): RuntimeRpcClient
-function withHttpGroupClients(
-  module: AnyModuleSpec,
-  flat: RuntimeRpcClient,
-): RuntimeRpcClient {
-  Object.setPrototypeOf(flat, null)
-  const groupIds = new Set([
-    ...Object.values(module.reducerGroups),
-    ...Object.values(module.procedureGroups),
-    ...Object.values(module.httpGroups),
-  ])
-
-  for (const groupId of groupIds) {
-    let memoized: RuntimeRpcClient | undefined
-    Object.defineProperty(flat, groupId, {
-      configurable: false,
-      enumerable: true,
-      get: () => {
-        if (memoized == null) {
-          memoized = {
-            reducers: projectGroupMembers(
-              flat.reducers,
-              module.reducerGroups,
-              groupId,
-            ),
-            procedures: projectGroupMembers(
-              flat.procedures,
-              module.procedureGroups,
-              groupId,
-            ),
-            httpHandlers: projectGroupMembers(
-              flat.httpHandlers,
-              module.httpGroups,
-              groupId,
-            ),
-          }
-          Object.setPrototypeOf(memoized, null)
-        }
-        return memoized
-      },
-    })
-  }
-
-  return flat
-}
-
 export const makeFromModulePlan = <Module extends AnyModuleSpec>(options: {
   readonly plan: ModulePlan<Module>
   readonly config: HttpClientConfig
 }): ProjectedHttpClient<Module> => {
   assertCallDurationMaxBounded(options.config)
-  const flat = makeRpc({
+  const flat = makeRpc<Module, HttpClient.HttpClient, never>({
     reducers: options.plan.publicReducers,
     procedures: options.plan.publicProcedures,
     httpHandlers: options.plan.projectedHttpHandlers,
@@ -473,7 +386,24 @@ export const makeFromModulePlan = <Module extends AnyModuleSpec>(options: {
       ),
   })
 
-  return withHttpGroupClients(options.plan.module, flat)
+  const module = options.plan.module
+  const groups = lazyGroups(
+    [
+      ...Object.values(module.reducerGroups),
+      ...Object.values(module.procedureGroups),
+      ...Object.values(module.httpGroups),
+    ],
+    (id) => ({
+      __proto__: null,
+      reducers: groupMembers(flat.reducers, module.reducerGroups, id),
+      procedures: groupMembers(flat.procedures, module.procedureGroups, id),
+      httpHandlers: groupMembers(flat.httpHandlers, module.httpGroups, id),
+    }),
+  )
+  Object.setPrototypeOf(flat, null)
+  return Object.assign(flat, {
+    groups,
+  }) as unknown as ProjectedHttpClient<Module>
 }
 
 export const groupFromModulePlan = <
@@ -484,24 +414,7 @@ export const groupFromModulePlan = <
   readonly group: Group
   readonly config: HttpClientConfig
 }): ProjectedHttpGroupClient<Module, Group> =>
-  getHttpGroupClient(
-    makeFromModulePlan({ plan: options.plan, config: options.config }),
-    options.group,
-  )
-
-function getHttpGroupClient<
-  Module extends AnyModuleSpec,
-  Group extends GroupIdsOf<Module>,
->(
-  client: ProjectedHttpClient<Module>,
-  group: Group,
-): ProjectedHttpGroupClient<Module, Group>
-// `withHttpGroupClients` defines every GroupIdsOf<Module> property. Keep the
-// runtime lookup narrow here and let the public overload preserve that proof.
-function getHttpGroupClient(client: object, group: string): unknown
-function getHttpGroupClient(client: object, group: string): unknown {
-  return Reflect.get(client, group)
-}
+  makeFromModulePlan(options).groups[options.group]
 
 export const make = <Module extends AnyModuleSpec>(
   options: HttpClientOptions<Module>,

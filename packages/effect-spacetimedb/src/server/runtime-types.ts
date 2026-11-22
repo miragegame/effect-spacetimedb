@@ -15,7 +15,7 @@ import type {
   TableRow,
 } from "../table-index-typing.ts"
 import type { ServerEnvironmentReader } from "./environment.ts"
-import type { ProcedureHttpRequestOptions } from "./services.ts"
+import type { NativeProcedureHttpRequestOptions } from "./services.ts"
 
 export type { ServerEnvironmentReader } from "./environment.ts"
 
@@ -29,7 +29,7 @@ export type TableSpecOf<
   Key extends TableKey<Module>,
 > = Module["tables"][Key]
 
-type UniqueAccessorFromColumns<
+export type UniqueAccessorFromColumns<
   Table extends AnyTableSpec,
   Columns extends readonly ColumnKey<Table>[],
 > = {
@@ -39,21 +39,21 @@ type UniqueAccessorFromColumns<
   readonly delete: (value: IndexPoint<Table, Columns, false>) => boolean
 }
 
-type PrimaryKeyAccessorFromColumns<
+export type PrimaryKeyAccessorFromColumns<
   Table extends AnyTableSpec,
   Columns extends readonly ColumnKey<Table>[],
 > = UniqueAccessorFromColumns<Table, Columns> & {
   readonly update: (row: TableRow<Table>) => TableRow<Table>
 }
 
-type ImplicitPrimaryKeyAccessor<
+export type ImplicitPrimaryKeyAccessor<
   Table extends AnyTableSpec,
   Name extends PrimaryKeyNames<Table>,
 > = Name extends SinglePrimaryKeyName<Table>
   ? PrimaryKeyAccessorFromColumns<Table, readonly [Name]>
   : UniqueAccessorFromColumns<Table, readonly [Name]>
 
-type RangeAccessorFromColumns<
+export type RangeAccessorFromColumns<
   Table extends AnyTableSpec,
   Columns extends readonly ColumnKey<Table>[],
 > = {
@@ -65,7 +65,7 @@ type RangeAccessorFromColumns<
   ) => number
 }
 
-type PointAccessorFromColumns<
+export type PointAccessorFromColumns<
   Table extends AnyTableSpec,
   Columns extends readonly ColumnKey<Table>[],
 > = {
@@ -75,7 +75,7 @@ type PointAccessorFromColumns<
   readonly delete: (value: IndexPoint<Table, Columns, false>) => number
 }
 
-type ExplicitIndexAccessor<
+export type ExplicitIndexAccessor<
   Table extends AnyTableSpec,
   Index extends ExplicitIndexSpec<Table>,
 > = Index extends {
@@ -91,7 +91,7 @@ type ExplicitIndexAccessor<
       : RangeAccessorFromColumns<Table, Columns>
   : never
 
-type TableHandle<Table extends AnyTableSpec> = {
+export type TableHandle<Table extends AnyTableSpec> = {
   readonly count: () => bigint
   readonly iter: () => Iterable<TableRow<Table>>
   readonly insert: (row: TableRow<Table>) => TableRow<Table>
@@ -118,7 +118,7 @@ export type ServerConnectionId = ConnectionId | null
 export interface ServerDatabaseIdentity extends Identity {}
 export interface ServerUuid extends Uuid {}
 
-type ServerJsonValue =
+export type ServerJsonValue =
   | string
   | number
   | boolean
@@ -159,7 +159,7 @@ export type ServerSenderAuth =
       readonly jwt: null
     }
 
-type IntArray =
+export type IntArray =
   | Int8Array
   | Uint8Array
   | Uint8ClampedArray
@@ -186,12 +186,10 @@ export const ProcedureClockNow = Symbol.for(
   "effect-spacetimedb/ProcedureClockNow",
 )
 
-type BaseCallableCtx = {
+export type BaseCallableCtx = {
   readonly env: ServerEnvironmentReader
   readonly sender: ServerSender
   readonly databaseIdentity: ServerDatabaseIdentity
-  /** @deprecated Use `databaseIdentity` instead. */
-  readonly identity: ServerIdentity
   readonly timestamp: ServerTimestamp
   readonly connectionId: ServerConnectionId
   readonly newUuidV4: () => ServerUuid
@@ -204,10 +202,10 @@ export type BaseReducerCtx<Module extends AnyModuleSpec> = BaseCallableCtx & {
   readonly senderAuth: ServerSenderAuth
 }
 
-type NativeProcedureHttp = {
+export type NativeProcedureHttp = {
   readonly fetch: (
     url: string,
-    init?: ProcedureHttpRequestOptions,
+    init?: NativeProcedureHttpRequestOptions,
   ) => {
     readonly status: number
     readonly text: () => string

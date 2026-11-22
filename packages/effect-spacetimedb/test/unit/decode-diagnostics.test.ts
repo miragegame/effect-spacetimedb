@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as EffectVitest from "@effect/vitest"
 import * as Schema from "effect/Schema"
 const { expect } = EffectVitest
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { ExampleErrors } from "../fixtures/full-module"
 import { TestLayer } from "../helpers/test-layer"
 
@@ -23,8 +23,8 @@ const expectDiagnostic = <A, E, R>(
 describe("decode diagnostics", (it) => {
   it.effect("surfaces struct decode shape messages", () =>
     Effect.gen(function* () {
-      const User = StdbTesting.ContractType.struct({
-        id: StdbTesting.ContractType.string(),
+      const User = StdbInternal.ContractType.struct({
+        id: StdbInternal.ContractType.string(),
       })
 
       yield* expectDiagnostic(
@@ -40,9 +40,9 @@ describe("decode diagnostics", (it) => {
 
   it.effect("surfaces procedure envelope decode shape messages", () =>
     Effect.gen(function* () {
-      const Envelope = StdbTesting.procedureEnvelope(
-        StdbTesting.ContractType.struct({
-          id: StdbTesting.ContractType.string(),
+      const Envelope = StdbInternal.procedureEnvelope(
+        StdbInternal.ContractType.struct({
+          id: StdbInternal.ContractType.string(),
         }),
         ExampleErrors,
       )
@@ -60,14 +60,14 @@ describe("decode diagnostics", (it) => {
 
   it.effect("surfaces result and sum encode envelope messages", () =>
     Effect.gen(function* () {
-      const ResultType = StdbTesting.ContractType.result(
-        StdbTesting.ContractType.string(),
-        StdbTesting.ContractType.string(),
+      const ResultType = StdbInternal.ContractType.result(
+        StdbInternal.ContractType.string(),
+        StdbInternal.ContractType.string(),
       )
-      const SumType = StdbTesting.ContractType.sum({
-        pending: StdbTesting.ContractType.unit(),
-        named: StdbTesting.ContractType.struct({
-          name: StdbTesting.ContractType.string(),
+      const SumType = StdbInternal.ContractType.sum({
+        pending: StdbInternal.ContractType.unit(),
+        named: StdbInternal.ContractType.struct({
+          name: StdbInternal.ContractType.string(),
         }),
       })
 
@@ -86,8 +86,8 @@ describe("decode diagnostics", (it) => {
 
   it.effect("preserves HTTP JSON normalization failure messages", () =>
     expectDiagnostic(
-      StdbTesting.ClientValueCodec.httpJson.decodeOutput<bigint>(
-        StdbTesting.ContractType.u64(),
+      StdbInternal.ClientValueCodec.httpJson.decodeOutput<bigint>(
+        StdbInternal.ContractType.u64(),
         '"not-an-integer"',
       ),
       "Expected JSON integer",

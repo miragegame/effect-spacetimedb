@@ -1,67 +1,90 @@
-import { make as makeServer } from "../../src/server/bind.ts"
 import * as Effect from "effect/Effect"
-import type * as Server from "effect-spacetimedb/server"
-import { FullModule } from "../fixtures/full-module"
-import { TestSyncRunner } from "../helpers/sync-runner"
+import * as Stdb from "effect-spacetimedb"
+import { testViewRowsLength } from "../helpers/array-bounds"
 
-const server = makeServer({
-  module: FullModule,
-  runtime: TestSyncRunner,
+const user = Stdb.table("view_context_user", {
+  public: true,
+  columns: {
+    id: Stdb.string().primaryKey(),
+    name: Stdb.string(),
+  },
 })
 
-type LiveReadonlyDb = Server.ReadonlyDbService<typeof FullModule>
-type LiveFrom = Server.FromService<typeof FullModule>
+const ViewFunctions = Stdb.Group.make("Views")
+  .add(
+    Stdb.Fn.view("senderUsers", {
+      returns: Stdb.array(user.row, testViewRowsLength),
+    }),
+  )
+  .add(
+    Stdb.Fn.anonymousView("allUsers", {
+      returns: Stdb.array(user.row, testViewRowsLength),
+    }),
+  )
 
-const senderView = server.view(
-  Effect.fn(function* () {
-    const ctx = yield* server.viewCtx
-    const from = yield* server.from
-    const db = yield* server.readonlyDb
+const ViewModule = Stdb.Module.make("view_context", {})
+  .addTables(user)
+  .add(ViewFunctions)
+
+const { AnonymousViewCtx, Db, From, ReadonlyDb, ViewCtx } = ViewModule
+
+const ViewsLive = Stdb.Builder.group(ViewModule, "Views", {
+  senderUsers: Effect.fn(function* () {
+    const ctx = yield* ViewCtx
+    const from = yield* From
+    const db = yield* ReadonlyDb
 
     void ctx.sender
-    void from.user
-    void db.user
-    void db.user.count
-    void db.user.id.find
+    void from.view_context_user
+    void db.view_context_user
+    void db.view_context_user.count
+    void db.view_context_user.id.find
 
     // @ts-expect-error readonly db must not expose table writes
-    void db.user.insert
+    void db.view_context_user.insert
 
     // @ts-expect-error readonly db must not expose lookup writes
-    void db.user.id.delete
-    return undefined
-  }),
-)
-
-const anonymousView = server.anonymousView(
-  Effect.fn(function* () {
-    const ctx = yield* server.anonymousViewCtx
-    const from = yield* server.from
-
-    void ctx.db
-    return from.user
-  }),
-)
-
-const invalidAnonymousView = server.view(
-  // @ts-expect-error sender view helper must not access anonymous view context
-  Effect.fn(function* () {
-    const ctx = yield* server.anonymousViewCtx
-    void ctx
+    void db.view_context_user.id.delete
     return []
   }),
-)
+  allUsers: Effect.fn(function* () {
+    const ctx = yield* AnonymousViewCtx
+    const from = yield* From
 
-const invalidSenderViewDb = server.view(
-  // @ts-expect-error sender views must not depend on read-write Db
-  Effect.fn(function* () {
-    const db = yield* server.db
-    void db
-    return undefined
+    void ctx.db
+    void from.view_context_user
+    return []
   }),
+})
+
+const InvalidAnonymousViewCtxLive = Stdb.Builder.group(
+  ViewModule,
+  "Views",
+  // @ts-expect-error sender views must not access anonymous view context
+  {
+    senderUsers: Effect.fn(function* () {
+      const ctx = yield* AnonymousViewCtx
+      void ctx
+      return []
+    }),
+    allUsers: () => Effect.succeed([]),
+  },
 )
 
-void senderView
-void anonymousView
-void invalidAnonymousView
-void invalidSenderViewDb
+const InvalidSenderViewDbLive = Stdb.Builder.group(
+  ViewModule,
+  "Views",
+  // @ts-expect-error sender views must not depend on read-write Db
+  {
+    senderUsers: Effect.fn(function* () {
+      const db = yield* Db
+      void db
+      return []
+    }),
+    allUsers: () => Effect.succeed([]),
+  },
+)
+
+void ViewsLive
+void InvalidAnonymousViewCtxLive
+void InvalidSenderViewDbLive

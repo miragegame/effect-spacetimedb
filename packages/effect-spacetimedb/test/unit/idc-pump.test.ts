@@ -1,3 +1,4 @@
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import * as EffectVitest from "@effect/vitest"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
@@ -154,6 +155,15 @@ describe("in-memory inter-database pump", () => {
     expect(world.pings().map((ping) => ping.note)).toEqual(["first", "second"])
   })
 
+  it("drains everything when no bound is given", () => {
+    const world = makeWorld()
+    world.send("sendPing", { note: "first", requestId: "r1" })
+    world.send("sendPing", { note: "second", requestId: "r2" })
+
+    expect(world.pump.drain()).toHaveLength(2)
+    expect(world.pings().map((ping) => ping.note)).toEqual(["first", "second"])
+  })
+
   it("records calls to a stand-in receiver and settles with its answer", () => {
     const sender = makeSender()
     const recorder = StdbTesting.IdcPump.recording({
@@ -185,11 +195,11 @@ describe("in-memory inter-database pump", () => {
   })
 
   it("leaves a row at its stream's head when the receiver refuses the connection", () => {
-    const GatedReceiverModule = Stdb.StdbModule.make("idc_gated_receiver", {
-      lifecycle: { clientConnected: Stdb.StdbFn.clientConnected() },
+    const GatedReceiverModule = Stdb.Module.make("idc_gated_receiver", {
+      lifecycle: { clientConnected: Stdb.Fn.clientConnected() },
       environment: { IDC_FIXTURE_TRUSTED_PEER: Stdb.Environment.string() },
     }).add(IdcFixtureInbox)
-    const GatedInboxLive = Stdb.StdbBuilder.group(
+    const GatedInboxLive = Stdb.Builder.group(
       GatedReceiverModule,
       "IdcFixtureInbox",
       {
@@ -198,7 +208,7 @@ describe("in-memory inter-database pump", () => {
       },
       { middleware: { reducers: Effect.void } },
     )
-    const GatedLifecycleLive = Stdb.StdbBuilder.lifecycle(GatedReceiverModule, {
+    const GatedLifecycleLive = Stdb.Builder.lifecycle(GatedReceiverModule, {
       clientConnected: () => Effect.die(new GateRefusalDefect()),
     })
     const sender = makeSender()
@@ -209,7 +219,7 @@ describe("in-memory inter-database pump", () => {
         environment: { IDC_FIXTURE_TRUSTED_PEER: senderIdentity.toHexString() },
       }),
       callables: StdbTesting.bindCallables(
-        Stdb.StdbBuilder.plan(GatedReceiverModule, [
+        StdbInternal.planModule(GatedReceiverModule, [
           GatedInboxLive,
           GatedLifecycleLive,
         ]),

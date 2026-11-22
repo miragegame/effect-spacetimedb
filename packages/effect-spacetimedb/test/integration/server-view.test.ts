@@ -1,6 +1,6 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { make as makeServer } from "../../src/server/bind.ts"
+import { makeServer } from "../helpers/module-server"
 import {
   testEffectCallbackError,
   unwrapTestEffectCallbackError,
@@ -10,13 +10,9 @@ const { expect } = EffectVitest
 
 import * as Stdb from "effect-spacetimedb"
 import * as StdbTesting from "effect-spacetimedb/testing"
-import {
-  StdbDecodeError,
-  StdbUniqueAlreadyExistsError,
-} from "effect-spacetimedb/server"
+import { StdbTableOperationDefect } from "effect-spacetimedb/server"
 import { compileModule } from "../helpers/compile-module"
 import { makeUserQuery } from "../helpers/query"
-import { assertHostBoundaryThrow, hostCause } from "../helpers/server-runtime"
 import { invokeModuleExport } from "../helpers/spacetimedb-server"
 import { TestSyncRunner } from "../helpers/sync-runner"
 import { TestLayer } from "../helpers/test-layer"
@@ -37,12 +33,12 @@ const userTable = Stdb.table("user", {
   },
 })
 
-const ViewModule = Stdb.StdbModule.make("view_module", {})
+const ViewModule = Stdb.Module.make("view_module", {})
   .addTables(userTable)
   .add(
-    Stdb.StdbGroup.make("Views")
+    Stdb.Group.make("Views")
       .add(
-        Stdb.StdbFn.anonymousView("allUsers", {
+        Stdb.Fn.anonymousView("allUsers", {
           returns: Stdb.array(
             Stdb.struct({
               id: Stdb.string(),
@@ -53,8 +49,7 @@ const ViewModule = Stdb.StdbModule.make("view_module", {})
         }),
       )
       .add(
-        Stdb.StdbFn.view("me", {
-          public: false,
+        Stdb.Fn.view("me", {
           returns: Stdb.option(
             Stdb.struct({
               id: Stdb.string(),
@@ -126,24 +121,20 @@ describe("server views", (it) => {
         }
 
         const views = server.views({
-          allUsers: server.anonymousView(
-            Effect.fn(function* () {
-              const db = yield* server.readonlyDb
-              return yield* db.user.toArray()
-            }),
-          ),
-          me: server.view(
-            Effect.fn(function* () {
-              const ctx = yield* server.viewCtx
-              const queryRoot = yield* server.from
-              const db = yield* server.readonlyDb
+          allUsers: Effect.fn(function* () {
+            const db = yield* server.ReadonlyDb
+            return yield* db.user.toArray()
+          }),
+          me: Effect.fn(function* () {
+            const ctx = yield* server.ViewCtx
+            const queryRoot = yield* server.From
+            const db = yield* server.ReadonlyDb
 
-              expect(ctx.sender).toBe("sender-1")
-              expect(queryRoot).toEqual(from)
+            expect(ctx.sender).toBe("sender-1")
+            expect(queryRoot).toEqual(from)
 
-              return yield* db.user.id.find("user-1")
-            }),
-          ),
+            return yield* db.user.id.find("user-1")
+          }),
         })
 
         const harness = makeHarness()
@@ -180,12 +171,10 @@ describe("server views", (it) => {
           user: makeUserQuery<typeof ViewModule>(),
         }
         const views = server.views({
-          allUsers: server.anonymousView(
-            Effect.fn(function* () {
-              const db = yield* server.readonlyDb
-              return yield* db.user.toArray()
-            }),
-          ),
+          allUsers: Effect.fn(function* () {
+            const db = yield* server.ReadonlyDb
+            return yield* db.user.toArray()
+          }),
         })
 
         const malformedDb = {
@@ -232,12 +221,12 @@ describe("server views", (it) => {
         )
         const cause = unwrapTestEffectCallbackError(failure)
 
-        expect(cause).toBeInstanceOf(StdbDecodeError)
-        if (cause instanceof StdbDecodeError) {
-          expect(cause.phase).toBe("row")
-          expect(cause.table).toBe("user")
-          expect(cause.op).toBe("db.user.iter")
-        }
+        expect(cause).toBeInstanceOf(StdbTableOperationDefect)
+        expect(cause).toMatchObject({
+          table: "user",
+          op: "db.user.iter.next",
+          cause: expect.anything(),
+        })
       }),
   )
 
@@ -251,13 +240,11 @@ describe("server views", (it) => {
         user: makeUserQuery<typeof ViewModule>(),
       }
       const views = server.views({
-        allUsers: server.anonymousView(
-          Effect.fn(function* () {
-            const db = yield* server.readonlyDb
-            yield* db.user.count()
-            return []
-          }),
-        ),
+        allUsers: Effect.fn(function* () {
+          const db = yield* server.ReadonlyDb
+          yield* db.user.count()
+          return []
+        }),
       })
       const db = {
         ...makeDb(),
@@ -287,59 +274,12 @@ describe("server views", (it) => {
       )
       const cause = unwrapTestEffectCallbackError(failure)
 
-      expect(cause).toBeInstanceOf(Error)
-      if (cause instanceof Error) {
-        expect(cause.message).toContain(
-          "SpaceTimeDB host call failed at db.user.count",
-        )
-        expect(cause.message).toContain("count exploded")
-      }
-    }),
-  )
-
-  it.effect("formats widened view host failures at the host boundary", () =>
-    Effect.gen(function* () {
-      const server = makeServer({
-        module: ViewModule,
-        runtime: TestSyncRunner,
+      expect(cause).toBeInstanceOf(StdbTableOperationDefect)
+      expect(cause).toMatchObject({
+        table: "user",
+        op: "db.user.count",
+        cause: new Error("count exploded"),
       })
-      const cause = hostCause("UniqueAlreadyExists")
-      const from = {
-        user: makeUserQuery<typeof ViewModule>(),
-      }
-      const views = server.views({
-        allUsers: server.anonymousView(
-          Effect.fn(function* () {
-            return yield* new StdbUniqueAlreadyExistsError({
-              op: "db.user.insert",
-              cause,
-            })
-          }),
-        ),
-      })
-
-      const failure = yield* Effect.flip(
-        Effect.try({
-          try: () =>
-            views.allUsers!.invoke(
-              {
-                env: { get: () => null },
-                db: makeDb() as never,
-                from,
-              },
-              {},
-            ),
-          catch: testEffectCallbackError(
-            "effect-spacetimedb/integration/server-view",
-          ),
-        }),
-      )
-
-      assertHostBoundaryThrow(
-        unwrapTestEffectCallbackError(failure),
-        "db.user.insert",
-        cause,
-      )
     }),
   )
 })

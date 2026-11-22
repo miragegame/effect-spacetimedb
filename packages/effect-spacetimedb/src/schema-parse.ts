@@ -13,21 +13,12 @@ export type ParseError = Schema.SchemaError
  */
 const retainWireInput = { reportInput: true } as const
 
-export class Type extends SchemaIssue.InvalidValue {
-  constructor(actual: unknown, message?: string) {
-    super(
-      message === undefined ? undefined : { message },
-      actual,
-      retainWireInput,
-    )
-  }
-}
-
-export class Unexpected extends SchemaIssue.InvalidValue {
-  constructor(actual: unknown) {
-    super(undefined, actual, retainWireInput)
-  }
-}
+export const invalidValueIssue = (actual: unknown, message?: string) =>
+  new SchemaIssue.InvalidValue(
+    message === undefined ? undefined : { message },
+    actual,
+    retainWireInput,
+  )
 
 export const parseError = (issue: SchemaIssue.Issue): Schema.SchemaError =>
   new Schema.SchemaError(issue)

@@ -2,9 +2,9 @@ import * as Data from "effect/Data"
 import * as Match from "effect/Match"
 
 // Repository codegen requires an exact CLI/SDK match because the module-def
-// format is patch-version coupled. The package peer remains ~2.14.0 so external
-// consumers may use any compatible 2.14.x SDK without invoking repo codegen.
-export const requiredSpacetimeCliVersion = "2.14.0" as const
+// format is patch-version coupled. The package peer remains ~2.16.1 so external
+// consumers may use any compatible 2.16.x SDK without invoking repo codegen.
+export const requiredSpacetimeCliVersion = "2.16.1" as const
 
 export class CodegenCliVersionError extends Data.TaggedError(
   "CodegenCliVersionError",
@@ -48,7 +48,9 @@ export class CodegenBundleError extends Data.TaggedError("CodegenBundleError")<{
   readonly cause: unknown
 }> {
   override get message(): string {
-    return "Failed to bundle the generated SpaceTimeDB code"
+    return typeof this.cause === "string"
+      ? `Failed to bundle the generated SpaceTimeDB code: ${this.cause}`
+      : "Failed to bundle the generated SpaceTimeDB code"
   }
 }
 

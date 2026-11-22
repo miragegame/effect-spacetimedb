@@ -22,7 +22,7 @@ import {
 } from "../module-input.ts"
 import { normalizeBaseUri } from "./http.ts"
 
-type ProjectableHttpMethod = Extract<
+export type ProjectableHttpMethod = Extract<
   HttpHandlerMethod,
   "post" | "put" | "patch"
 >
@@ -35,10 +35,10 @@ type ProjectableTypedHttpHandlerSpec = TypedHttpHandlerSpec<
   string
 >
 
-type HttpApiMethod<Method extends ProjectableHttpMethod> =
+export type HttpApiMethod<Method extends ProjectableHttpMethod> =
   Uppercase<Method> extends HttpMethod.HttpMethod ? Uppercase<Method> : never
 
-type DeclaredErrorSchema<Errors extends AnyErrorDefinition | undefined> =
+export type DeclaredErrorSchema<Errors extends AnyErrorDefinition | undefined> =
   Errors extends AnyErrorDefinition ? Errors["errors"][number] : never
 
 /**
@@ -48,13 +48,13 @@ type DeclaredErrorSchema<Errors extends AnyErrorDefinition | undefined> =
  * `Schema.toCodecJson`, and the helper is not re-exported, so the projection
  * keeps its own copy of the mapping it has to agree with.
  */
-type JsonCodec<S> = [S] extends [never]
+export type JsonCodec<S> = [S] extends [never]
   ? never
   : [S] extends [Schema.Constraint]
     ? Schema.toCodecJson<S>
     : never
 
-type ProjectedEndpoint<
+export type ProjectedEndpoint<
   Name extends string,
   Spec,
 > = Spec extends TypedHttpHandlerSpec<
@@ -79,14 +79,17 @@ type ProjectedEndpoint<
     : never
   : never
 
-type ProjectedEndpointMap<Module extends AnyModuleSpec> = {
+export type ProjectedEndpointMap<Module extends AnyModuleSpec> = {
   readonly [Name in keyof Module["httpHandlers"] & string]: ProjectedEndpoint<
     Name,
     Module["httpHandlers"][Name]
   >
 }
 
-type EndpointsInGroup<Module extends AnyModuleSpec, Group extends string> = {
+export type EndpointsInGroup<
+  Module extends AnyModuleSpec,
+  Group extends string,
+> = {
   [Name in keyof Module["httpHandlers"] &
     string]: Name extends keyof Module["httpGroups"]
     ? Module["httpGroups"][Name] extends Group
@@ -95,7 +98,7 @@ type EndpointsInGroup<Module extends AnyModuleSpec, Group extends string> = {
     : never
 }[keyof Module["httpHandlers"] & string]
 
-type ProjectedGroups<Module extends AnyModuleSpec> = {
+export type ProjectedGroups<Module extends AnyModuleSpec> = {
   [Group in Module["httpGroups"][keyof Module["httpGroups"] & string]]: [
     EndpointsInGroup<Module, Group>,
   ] extends [never]
@@ -112,8 +115,8 @@ export type ProjectedHttpApi<Module extends AnyModuleSpec> = HttpApi.HttpApi<
   ProjectedGroups<Module>
 >
 
-export class StdbHttpProjectionError extends Data.TaggedError(
-  "StdbHttpProjectionError",
+export class StdbHttpProjectionDefect extends Data.TaggedError(
+  "StdbHttpProjectionDefect",
 )<{
   readonly route: string
 }> {
@@ -197,7 +200,7 @@ const makeGroup = (
  * `HttpApi`.
  *
  * The projection is pure and client-direction only. It emits one
- * `HttpApiGroup` per authored `StdbHttpGroup`, preserving those group ids as
+ * `HttpApiGroup` per authored `HttpGroup`, preserving those group ids as
  * `HttpApiClient` property keys. Within those groups it emits typed `post`,
  * `put`, and `patch` routes, because those are the methods whose
  * `HttpApiClient` payload encoding is a JSON request body. Raw
@@ -234,7 +237,7 @@ export const toHttpApi = <const Input extends ModuleSpecInput>(
 
     const groupName = httpGroups[name]
     if (groupName === undefined) {
-      throw new StdbHttpProjectionError({ route: name })
+      throw new StdbHttpProjectionDefect({ route: name })
     }
 
     const endpoints = byGroup.get(groupName) ?? []

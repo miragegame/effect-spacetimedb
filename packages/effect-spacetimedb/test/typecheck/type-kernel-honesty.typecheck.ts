@@ -1,13 +1,13 @@
 import * as Schema from "effect/Schema"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { typeBuilder } from "../helpers/type-builder"
 
-const UserId = StdbTesting.ContractType.string(
+const UserId = StdbInternal.ContractType.string(
   Schema.String.pipe(Schema.brand("TypeKernelHonesty/UserId")),
 )
 type UserId = typeof UserId.Type
 
-const PositiveCount = StdbTesting.ContractType.u32(
+const PositiveCount = StdbInternal.ContractType.u32(
   Schema.Finite.pipe(
     Schema.brand("TypeKernelHonesty/PositiveCount"),
     Schema.check(Schema.isGreaterThan(0)),
@@ -15,14 +15,14 @@ const PositiveCount = StdbTesting.ContractType.u32(
 )
 type PositiveCount = typeof PositiveCount.Type
 
-void StdbTesting.ContractType.string()
-void StdbTesting.ContractType.u32()
+void StdbInternal.ContractType.string()
+void StdbInternal.ContractType.u32()
 
 const userIdValueType = UserId
 const positiveCountValueType = PositiveCount
 
-type _UserId = StdbTesting.ContractType.TypeOf<typeof userIdValueType>
-type _PositiveCount = StdbTesting.ContractType.TypeOf<
+type _UserId = StdbInternal.ContractType.TypeOf<typeof userIdValueType>
+type _PositiveCount = StdbInternal.ContractType.TypeOf<
   typeof positiveCountValueType
 >
 
@@ -37,7 +37,7 @@ void Schema.encodeEffect(userIdValueType.schema)
 void Schema.Struct({
   id: userIdValueType.schema,
 })
-void StdbTesting.ContractType.struct({
+void StdbInternal.ContractType.struct({
   id: userIdValueType,
 })
 void typeBuilder(userIdValueType)
@@ -52,7 +52,7 @@ void _userId
 void _positiveCount
 
 // @ts-expect-error branded string narrowing now requires an explicit Schema
-void StdbTesting.ContractType.string<UserId>()
+void StdbInternal.ContractType.string<UserId>()
 
 // @ts-expect-error refined numeric narrowing now requires an explicit Schema
-void StdbTesting.ContractType.u32<PositiveCount>()
+void StdbInternal.ContractType.u32<PositiveCount>()

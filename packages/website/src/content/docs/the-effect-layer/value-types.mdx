@@ -10,7 +10,7 @@ Value types wrap Effect schemas with the SpaceTimeDB type information needed for
 tables, call params, returns, declared errors, HTTP routes, and generated
 clients.
 
-```typescript twoslash
+```typescript
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 
@@ -69,13 +69,13 @@ stay a `bigint`.
 
 | Helper | Authored TypeScript value | SATS lowering | Notes |
 | --- | --- | --- | --- |
-| `Stdb.array(T, { minimum, maximum })` | `ReadonlyArray<TypeOf<T>>` | array/list | Recurses through the inner value type. The inclusive length bounds are required and enforced on decode and encode; they never reach the wire, so arrays differing only in bounds lower identically. |
+| `Stdb.array(T)` / `Stdb.array(T, { minimum, maximum })` | `ReadonlyArray<TypeOf<T>>` | array/list | Recurses through the inner value type. Either inclusive length bound is optional; a bound is enforced on decode and encode and never reaches the wire, so arrays differing only in bounds lower identically. |
 | `Stdb.option(T)` | `TypeOf<T>` or `undefined` | `option<T>` | Present field whose value can be absent. |
 | `Stdb.optional(T)` | optional struct field | `option<T>` in structs | Produces an optional TypeScript property. |
 | `T.optional()` | optional table column | `option<T>` column | Column may be omitted on inserts. |
 | `Stdb.struct({ ... })` | object | SATS struct | Use for rows, params, returns, and declared-error payloads. Anonymous structs get a content-addressed name unless you set one with [`.named(...)`](#type-names). |
-| `Stdb.sum({ Tag: Payload })` | `{ tag, value? }` | SATS enum/sum | Unit payloads omit `value`; payload variants require `value`. Anonymous sums get a content-addressed name unless you set one with [`.named(...)`](#type-names). |
-| `Stdb.enum("A", "B")` / `enumType(...)` | tagged unit variants | SATS enum | Unit-variant sums; prefer namespace form because `enum` cannot be named-imported. |
+| `Stdb.sum({ name: Payload })` | `{ tag, value? }` | SATS enum/sum | Unit payloads omit `value`; payload variants require `value`. Anonymous sums get a content-addressed name unless you set one with [`.named(...)`](#type-names). |
+| `Stdb.enum("a", "b")` | tagged unit variants | SATS enum | Unit-variant sums; needs the namespace form because `enum` cannot be named-imported. |
 | `Stdb.literal(...)` | string, number, or boolean literal | string literals -> enum; numbers -> `f64`; booleans -> `bool` | String literal generated-client tags use SpaceTimeDB PascalCase. Numeric literals reject non-finite values and unsafe integers. |
 | `Stdb.result(Ok, Err)` | Effect-style result envelope | SATS result | Normalizes host `{ ok }` / `{ err }` envelopes. |
 | `Stdb.lazy(() => T)` | recursive value | lazy SATS type | Use for recursive structs or sums. |
@@ -118,7 +118,7 @@ it directly:
 Stdb.option(user.row) // reuses the table's `User` type, not a duplicate
 ```
 
-`.named(...)` is distinct from `.name(...)`: `.name(...)` sets SpacetimeDB's
+`.named(...)` is distinct from `.columnName(...)`: `.columnName(...)` sets SpacetimeDB's
 native builder column metadata and does not rename the generated type.
 
 ## Codecs

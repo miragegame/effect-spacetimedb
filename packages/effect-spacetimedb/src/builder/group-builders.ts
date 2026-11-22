@@ -19,7 +19,7 @@ import {
 import {
   GroupImplTypeId,
   LifecycleImplTypeId,
-  type AnyStdbModule,
+  type AnyModule,
   type GroupCheckedHandlers,
   type GroupHandlersRecord,
   type GroupImpl,
@@ -31,7 +31,6 @@ import {
   type ModuleNameOf,
   type RuntimeROfGroupHandlers,
   type RuntimeROfGroupMiddleware,
-  type ValidateCheckedGroupHandlers,
   type ValidateGroupHandlers,
   type ValidateGroupMiddleware,
   type ValidateLifecycleHandlers,
@@ -39,7 +38,7 @@ import {
 } from "./handler-types.ts"
 
 export type GroupOptions<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends GroupNames<Module>,
   Middleware extends GroupMiddleware | undefined,
 > = {
@@ -47,7 +46,7 @@ export type GroupOptions<
 } & ValidateGroupMiddleware<Module, Name, Middleware>
 
 const makeGroupImpl = <
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends GroupNames<Module>,
 >(
   module: Module,
@@ -104,7 +103,7 @@ const makeGroupImpl = <
 }
 
 export function group<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   const Name extends GroupNames<Module>,
   const Handlers extends GroupHandlersRecord<Module, Name>,
   const Middleware extends GroupMiddleware | undefined = undefined,
@@ -120,35 +119,7 @@ export function group<
 >
 
 export function group<
-  Module extends AnyStdbModule,
-  const Name extends GroupNames<Module>,
->(
-  module: Module,
-  name: Name,
-  handlers: Record<string, unknown>,
-  options?: { readonly middleware?: unknown },
-): GroupImpl<Name, unknown, ModuleNameOf<Module>> {
-  return makeGroupImpl(module, name, handlers, options)
-}
-
-export function groupChecked<
-  Module extends AnyStdbModule,
-  const Name extends GroupNames<Module>,
-  const Handlers extends Record<string, unknown>,
-  const Middleware extends GroupMiddleware | undefined = undefined,
->(
-  module: Module,
-  name: Name,
-  handlers: ValidateCheckedGroupHandlers<Module, Name, Handlers> & Handlers,
-  options?: GroupOptions<Module, Name, Middleware>,
-): GroupImpl<
-  Name,
-  RuntimeROfGroupHandlers<Handlers> | RuntimeROfGroupMiddleware<Middleware>,
-  ModuleNameOf<Module>
->
-
-export function groupChecked<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   const Name extends GroupNames<Module>,
 >(
   module: Module,
@@ -165,7 +136,7 @@ export function groupChecked<
  * compiler's type-instantiation budget.
  */
 export function groupPrechecked<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   const Name extends GroupNames<Module>,
 >(
   module: Module,
@@ -174,7 +145,7 @@ export function groupPrechecked<
 ): GroupImpl<Name, never, ModuleNameOf<Module>>
 
 export function groupPrechecked<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   const Name extends GroupNames<Module>,
   const Handlers extends Record<string, unknown>,
   const Middleware extends GroupMiddleware | undefined = undefined,
@@ -186,7 +157,7 @@ export function groupPrechecked<
 ): GroupImpl<Name, RuntimeROfGroupMiddleware<Middleware>, ModuleNameOf<Module>>
 
 export function groupPrechecked<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   const Name extends GroupNames<Module>,
 >(
   module: Module,
@@ -197,7 +168,7 @@ export function groupPrechecked<
   return makeGroupImpl(module, name, handlers, options)
 }
 
-const makeLifecycleImpl = <Module extends AnyStdbModule>(
+const makeLifecycleImpl = <Module extends AnyModule>(
   module: Module,
   handlers: Record<string, unknown>,
 ): InternalLifecycleImpl<LifecycleName, unknown, ModuleNameOf<Module>> => {
@@ -209,7 +180,7 @@ const makeLifecycleImpl = <Module extends AnyStdbModule>(
       throw diagnostic(
         "UnknownEndpoint",
         ["lifecycle", name],
-        `StdbBuilder.lifecycle received unknown lifecycle hook ${name}`,
+        `Builder.lifecycle received unknown lifecycle hook ${name}`,
       )
     }
 
@@ -233,7 +204,7 @@ const makeLifecycleImpl = <Module extends AnyStdbModule>(
   >
 }
 
-export function lifecycle<Module extends AnyStdbModule, const Handlers>(
+export function lifecycle<Module extends AnyModule, const Handlers>(
   module: Module,
   handlers: Handlers & ValidateLifecycleHandlers<Module, Handlers>,
 ): LifecycleImpl<
@@ -242,7 +213,7 @@ export function lifecycle<Module extends AnyStdbModule, const Handlers>(
   ModuleNameOf<Module>
 >
 
-export function lifecycle<Module extends AnyStdbModule>(
+export function lifecycle<Module extends AnyModule>(
   module: Module,
   handlers: Record<string, unknown>,
 ): LifecycleImpl<LifecycleName, unknown, ModuleNameOf<Module>> {

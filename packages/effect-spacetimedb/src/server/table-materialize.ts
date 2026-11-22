@@ -1,8 +1,8 @@
 import { pascalCaseName } from "../contract/canonical-name.ts"
 import {
   makeStdbDiagnostic,
-  type StdbDiagnostic,
-  StdbValidationError,
+  type Diagnostic,
+  StdbValidationDefect,
 } from "../contract/diagnostic.ts"
 import { type AnyFieldType, fieldOptions } from "../contract/field.ts"
 import type { AnyModuleSpec } from "../contract/module.ts"
@@ -164,7 +164,7 @@ const indexReceiverBindings = (
   module: AnyModuleSpec,
   receiverBindings: ReadonlyArray<AnyRemoteInterfaceBinding>,
 ): ReceiverBindingsByInterface => {
-  const diagnostics: Array<StdbDiagnostic> = []
+  const diagnostics: Array<Diagnostic> = []
   const bindings = new Map<string, RemoteModuleBinding>()
   for (const [index, bound] of receiverBindings.entries()) {
     const key = remoteInterfaceKey(bound.interface)
@@ -199,7 +199,7 @@ const indexReceiverBindings = (
   }
 
   if (diagnostics.length > 0) {
-    throw new StdbValidationError({ diagnostics })
+    throw new StdbValidationDefect({ diagnostics })
   }
   return bindings
 }
@@ -215,7 +215,7 @@ const materializeOutboxTable = (
   tableSpec: AnyTableSpec,
   outbox: OutboxMetadata,
   receiverBindings: ReceiverBindingsByInterface,
-  policy: AnyModuleSpec["settings"]["caseConversionPolicy"],
+  options: ReturnType<typeof materializeTableOptions>,
 ): unknown => {
   const binding = receiverBindings.get(remoteInterfaceKey(outbox.interface))
   if (binding === undefined) {
@@ -249,24 +249,21 @@ const materializeOutboxTable = (
   )
   nameMaterializedRow(tableSpec, row)
 
-  return defineCompilerOutboxTable(
-    materializeTableOptions(tableSpec, policy),
-    row,
-    receiver,
-  )
+  return defineCompilerOutboxTable(options, row, receiver)
 }
 
 const materializeTable = (
   tableSpec: AnyTableSpec,
   receiverBindings: ReceiverBindingsByInterface,
-  policy: AnyModuleSpec["settings"]["caseConversionPolicy"],
+  settings: AnyModuleSpec["settings"],
+  wireName: string | undefined,
 ): unknown => {
+  const options = materializeTableOptions(tableSpec, settings, wireName)
   const outbox = outboxMetadataOf(tableSpec)
   if (outbox !== undefined) {
-    return materializeOutboxTable(tableSpec, outbox, receiverBindings, policy)
+    return materializeOutboxTable(tableSpec, outbox, receiverBindings, options)
   }
 
-  const options = materializeTableOptions(tableSpec, policy)
   const fields = materializeFields(tableSpec)
   const row = defineCompilerRow(materializeRow(fields))
   nameMaterializedRow(tableSpec, row)
@@ -428,6 +425,7 @@ const tableEntriesInDependencyOrder = (
 
 export const materializeTables = <Module extends AnyModuleSpec>(options: {
   readonly module: Module
+  readonly mountedWireNames?: Readonly<Record<string, string>> | undefined
   readonly receiverBindings: ReadonlyArray<AnyRemoteInterfaceBinding>
 }): Record<string, unknown> => {
   const receiverBindings = indexReceiverBindings(
@@ -441,7 +439,8 @@ export const materializeTables = <Module extends AnyModuleSpec>(options: {
         materializeTable(
           tableSpec,
           receiverBindings,
-          options.module.settings.caseConversionPolicy,
+          options.module.settings,
+          options.mountedWireNames?.[tableSpec.name],
         ),
       ],
     ),

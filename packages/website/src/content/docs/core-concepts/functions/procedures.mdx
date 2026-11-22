@@ -10,7 +10,7 @@ sidebar:
 
 Procedures are declared in callable groups with params and a return value type.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -22,18 +22,18 @@ const user = Stdb.table("user", {
   },
 })
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.procedure("user_get", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.procedure("userGet", {
     params: Stdb.struct({ id: Stdb.string() }),
     returns: Stdb.option(user.row),
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const Module = Stdb.Module.make("app").addTables(user).add(Users)
 const { Db, Tx } = Module
 
-const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
-  user_get: Effect.fn(function* ({ id }) {
+const UsersLive = Stdb.Builder.group(Module, "Users", {
+  userGet: Effect.fn(function* ({ id }) {
     const tx = yield* Tx
     return yield* tx.run(
       Effect.gen(function* () {
@@ -57,19 +57,34 @@ while a transaction is open, so fetch first, then open the transaction that
 records the result.
 
 ```ts
-const { Http, Tx, Db } = Module
+const profile = Stdb.table("profile", {
+  columns: {
+    userId: Stdb.string().primaryKey(),
+    name: Stdb.string(),
+  },
+})
 
-const syncLive = Stdb.StdbBuilder.group(Module, "Sync", {
-  sync_profile: Effect.fn(function* ({ userId }) {
+const Sync = Stdb.Group.make("Sync").add(
+  Stdb.Fn.procedure("syncProfile", {
+    params: Stdb.struct({ userId: Stdb.string() }),
+    returns: Stdb.unit(),
+  }),
+)
+
+const SyncModule = Stdb.Module.make("app").addTables(profile).add(Sync)
+const { Http, Tx, Db } = SyncModule
+
+const SyncLive = Stdb.Builder.group(SyncModule, "Sync", {
+  syncProfile: Effect.fn(function* ({ userId }) {
     const http = yield* Http
-    const response = yield* http.fetch(`https://example.test/users/${userId}`)
-    const profile = yield* http.json<{ readonly name: string }>(response)
+    const response = yield* http.fetch(`https://example.test/users/${userId}`, { timeout: "5 seconds" })
+    const remote = yield* http.json<{ readonly name: string }>(response)
 
     const tx = yield* Tx
     return yield* tx.run(
       Effect.gen(function* () {
         const db = yield* Db
-        yield* db.user.userId.replace({ userId, name: profile.name })
+        yield* db.profile.userId.update({ userId, name: remote.name })
       }),
     )
   }),
@@ -77,7 +92,7 @@ const syncLive = Stdb.StdbBuilder.group(Module, "Sync", {
 ```
 
 Failures arrive as `StdbHostCallError` in the error channel, tagged with the
-operation (`http.fetch`, `http.json`, and so on).
+operation (`http.fetch`, `http.json`, and so on). `ProcedureHttpRequestOptions.timeout` accepts a `Duration.Input`. A finite bound reaches the host in microseconds. Passing `Duration.infinity` lets the host apply its own request policy.
 
 Two host policies decide whether a request is allowed at all, and both are the
 operator's, not the module's:
@@ -106,7 +121,7 @@ backed by a scheduled table. The scheduled endpoint receives
 `{ data: table.row }`; insert future work with the generated table
 `.schedule(row)` helper from a reducer or transaction body.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -116,20 +131,20 @@ const reminderSchedule = Stdb.scheduledTable("reminderSchedule", {
   },
 })
 
-const Reminders = Stdb.StdbGroup.make("Reminders").add(
-  Stdb.StdbFn.scheduledProcedure("reminderFire", {
+const Reminders = Stdb.Group.make("Reminders").add(
+  Stdb.Fn.scheduledProcedure("reminderFire", {
     table: reminderSchedule,
     allowExternalCallers: false,
   }),
 )
 
-const Module = Stdb.StdbModule.make("app")
+const Module = Stdb.Module.make("app")
   .addTables(reminderSchedule)
   .add(Reminders)
 
 const { Db } = Module
 
-const RemindersLive = Stdb.StdbBuilder.group(Module, "Reminders", {
+const RemindersLive = Stdb.Builder.group(Module, "Reminders", {
   reminderFire: Effect.fn(function* ({ data }) {
     yield* Effect.logInfo(`reminder: ${data.note}`)
   }),

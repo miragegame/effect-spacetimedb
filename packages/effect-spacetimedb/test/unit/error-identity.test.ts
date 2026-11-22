@@ -9,14 +9,14 @@ import {
   TransportError,
 } from "effect-spacetimedb/client"
 import {
-  ReducerAsyncNotAllowedError,
+  HandlerAsyncNotAllowedDefect,
   StdbHostCallError,
-  StdbSenderFailure,
+  StdbSenderError,
   StdbUniqueAlreadyExistsError,
 } from "effect-spacetimedb/server"
 import {
   DomainCallError,
-  RemoteRejectedBody,
+  RemoteRejectedBodyError,
   RemoteRejectedError,
   WsRpcInvokeError,
 } from "../../src/client/call-errors"
@@ -35,8 +35,8 @@ describe("nominal error identity", () => {
       RemoteRejectedError.is(new RemoteRejectedError({ raw: "err" })),
     ).toBe(true)
     expect(
-      RemoteRejectedBody.is(
-        new RemoteRejectedBody({ raw: "err", status: 500 }),
+      RemoteRejectedBodyError.is(
+        new RemoteRejectedBodyError({ raw: "err", status: 500 }),
       ),
     ).toBe(true)
     expect(TransportError.is(new TransportError({ cause: "closed" }))).toBe(
@@ -61,6 +61,7 @@ describe("nominal error identity", () => {
       SubscriptionInvalidatedError.is(
         new SubscriptionInvalidatedError({
           raw: "invalidated",
+          kind: "lost",
         }),
       ),
     ).toBe(true)
@@ -80,11 +81,11 @@ describe("nominal error identity", () => {
       ),
     ).toBe(true)
     expect(
-      ReducerAsyncNotAllowedError.is(new ReducerAsyncNotAllowedError()),
+      HandlerAsyncNotAllowedDefect.is(new HandlerAsyncNotAllowedDefect()),
     ).toBe(true)
-    expect(
-      StdbSenderFailure.is(new StdbSenderFailure({ value: "denied" })),
-    ).toBe(true)
+    expect(StdbSenderError.is(new StdbSenderError({ value: "denied" }))).toBe(
+      true,
+    )
   })
 
   it("recognizes a reconstructed same-symbol object without instanceof", () => {

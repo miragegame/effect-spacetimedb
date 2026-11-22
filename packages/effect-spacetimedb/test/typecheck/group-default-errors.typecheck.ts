@@ -1,7 +1,7 @@
+import * as StdbClient from "effect-spacetimedb/client"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
-import * as StdbClient from "effect-spacetimedb/client"
 import type { Assert, IsEqual } from "./helpers"
 
 class GroupFailure extends Schema.TaggedError<GroupFailure>()(
@@ -21,31 +21,28 @@ class UndeclaredFailure extends Schema.TaggedError<UndeclaredFailure>()(
   {},
 ) {}
 
-const Calls = Stdb.StdbGroup.make("Calls", {
+const Calls = Stdb.Group.make("Calls", {
   errors: Stdb.errors(GroupFailure),
 }).add(
-  Stdb.StdbFn.reducer("fromDefault", {}),
-  Stdb.StdbFn.procedure("withEndpoint", {
+  Stdb.Fn.reducer("fromDefault", {}),
+  Stdb.Fn.procedure("withEndpoint", {
     returns: Stdb.unit(),
     errors: Stdb.errors(EndpointFailure),
   }),
 )
 
-const Http = Stdb.StdbHttpGroup.make("Http", {
+const Http = Stdb.HttpGroup.make("Http", {
   errors: Stdb.errors(GroupFailure),
 }).add(
-  Stdb.StdbHttp.get("rawRoute", "/raw"),
-  Stdb.StdbHttp.post("typedRoute", "/typed", {
+  Stdb.Http.get("rawRoute", "/raw"),
+  Stdb.Http.post("typedRoute", "/typed", {
     request: Schema.Struct({}),
     response: Schema.Struct({}),
     errors: Stdb.errors(EndpointFailure),
   }),
 )
 
-const Module = Stdb.StdbModule.make("group_default_typecheck", {}).add(
-  Calls,
-  Http,
-)
+const Module = Stdb.Module.make("group_default_typecheck", {}).add(Calls, Http)
 
 type ReducerDomainErrors = Extract<
   StdbClient.ReducerErrorsFor<typeof Module, "fromDefault">,
@@ -75,12 +72,12 @@ type _typedHttpMergesGroupAndEndpoint = Assert<
   IsEqual<TypedHttpDomainErrors, GroupFailure | EndpointFailure>
 >
 
-void Stdb.StdbBuilder.group(Module, "Calls", {
+void Stdb.Builder.group(Module, "Calls", {
   fromDefault: () => Effect.fail(GroupFailure.make({})),
   withEndpoint: () => Effect.fail(EndpointFailure.make({})),
 })
 
-void Stdb.StdbBuilder.group(
+void Stdb.Builder.group(
   Module,
   "Calls",
   {
@@ -90,17 +87,15 @@ void Stdb.StdbBuilder.group(
   { middleware: Effect.fail(GroupFailure.make({})) },
 )
 
-const Mixed = Stdb.StdbGroup.make("Mixed", {
+const Mixed = Stdb.Group.make("Mixed", {
   errors: Stdb.errors(GroupFailure),
 }).add(
-  Stdb.StdbFn.reducer("mixedReduce", {}),
-  Stdb.StdbFn.anonymousView("mixedView", { returns: Stdb.unit() }),
+  Stdb.Fn.reducer("mixedReduce", {}),
+  Stdb.Fn.anonymousView("mixedView", { returns: Stdb.unit() }),
 )
-const MixedModule = Stdb.StdbModule.make("mixed_group_middleware", {}).add(
-  Mixed,
-)
+const MixedModule = Stdb.Module.make("mixed_group_middleware", {}).add(Mixed)
 
-void Stdb.StdbBuilder.group(
+void Stdb.Builder.group(
   MixedModule,
   "Mixed",
   {
@@ -114,7 +109,7 @@ void Stdb.StdbBuilder.group(
   },
 )
 
-void Stdb.StdbBuilder.group(
+void Stdb.Builder.group(
   Module,
   "Calls",
   {
@@ -129,7 +124,7 @@ void Stdb.StdbBuilder.group(
   },
 )
 
-void Stdb.StdbBuilder.group(
+void Stdb.Builder.group(
   Module,
   "Calls",
   {
@@ -140,7 +135,7 @@ void Stdb.StdbBuilder.group(
   { middleware: Module.ReducerCtx.pipe(Effect.asVoid) },
 )
 
-void Stdb.StdbBuilder.group(
+void Stdb.Builder.group(
   Module,
   "Calls",
   {
@@ -151,7 +146,7 @@ void Stdb.StdbBuilder.group(
   { middleware: Effect.fail(UndeclaredFailure.make({})) },
 )
 
-void Stdb.StdbBuilder.group(
+void Stdb.Builder.group(
   Module,
   "Http",
   {
@@ -163,7 +158,7 @@ void Stdb.StdbBuilder.group(
 )
 
 // @ts-expect-error handler failures must remain within the post-merge declaration.
-void Stdb.StdbBuilder.group(Module, "Calls", {
+void Stdb.Builder.group(Module, "Calls", {
   fromDefault: () => Effect.fail(UndeclaredFailure.make({})),
   withEndpoint: () => Effect.void,
 })

@@ -36,7 +36,7 @@ type UniqueConstraintSpec<Table extends AnyTableSpec> = Extract<
   { readonly kind: "unique" }
 >
 
-type ContainsAllColumns<
+export type ContainsAllColumns<
   Columns extends readonly string[],
   ConstraintColumns extends readonly string[],
 > = Columns extends readonly [
@@ -48,14 +48,14 @@ type ContainsAllColumns<
     : false
   : true
 
-type IsSameColumnSet<
+export type IsSameColumnSet<
   Left extends readonly string[],
   Right extends readonly string[],
 > = ContainsAllColumns<Left, Right> extends true
   ? ContainsAllColumns<Right, Left>
   : false
 
-type HasExplicitUniqueConstraint<
+export type HasExplicitUniqueConstraint<
   Table extends AnyTableSpec,
   Columns extends readonly string[],
 > = true extends (
@@ -70,7 +70,7 @@ type HasExplicitUniqueConstraint<
   ? true
   : false
 
-type HasImplicitPrimaryKeyUniqueness<
+export type HasImplicitPrimaryKeyUniqueness<
   Table extends AnyTableSpec,
   Columns extends readonly string[],
 > = Columns extends readonly [infer Only extends string]
@@ -109,7 +109,7 @@ export type IndexPointObject<
   readonly [Column in Columns[number]]: FieldValue<Table["columns"][Column]>
 }
 
-type CollapseIndexPoint<
+export type CollapseIndexPoint<
   Table extends AnyTableSpec,
   Columns extends readonly ColumnKey<Table>[],
   Tuple extends readonly unknown[],
@@ -138,11 +138,12 @@ export type StructuralRange<T> = {
 
 export type IndexRangeMode = "native" | "structural"
 
-type RangeInput<Mode extends IndexRangeMode, Value> = Mode extends "structural"
-  ? StructuralRange<Value>
-  : Range<Value>
+export type RangeInput<
+  Mode extends IndexRangeMode,
+  Value,
+> = Mode extends "structural" ? StructuralRange<Value> : Range<Value>
 
-type CompositeIndexRangeBounds<
+export type CompositeIndexRangeBounds<
   Tuple extends readonly unknown[],
   Mode extends IndexRangeMode,
   Prefix extends readonly unknown[] = readonly [],
@@ -154,7 +155,7 @@ type CompositeIndexRangeBounds<
         | CompositeIndexRangeBounds<Tail, Mode, readonly [...Prefix, Head]>
   : never
 
-type IndexRangeBounds<
+export type IndexRangeBounds<
   Tuple extends readonly unknown[],
   Mode extends IndexRangeMode,
 > = Tuple extends readonly [infer Term]
@@ -165,7 +166,7 @@ type Expand<T> = {
   readonly [K in keyof T]: T[K]
 }
 
-type CompositeIndexRangeObject<
+export type CompositeIndexRangeObject<
   Table extends AnyTableSpec,
   Columns extends readonly ColumnKey<Table>[],
   Mode extends IndexRangeMode,

@@ -12,10 +12,8 @@ export type ProcedureSpec<
   Errors extends AnyErrorDefinition | undefined =
     | AnyErrorDefinition
     | undefined,
-  Public extends boolean = boolean,
 > = {
   readonly kind: "procedure"
-  readonly public: Public
   readonly params: Params
   readonly returns: Returns
 } & (Errors extends AnyErrorDefinition
@@ -29,7 +27,6 @@ export type ProcedureSpec<
 const EmptyParams = struct({})
 
 type ProcedureDefineOptions = {
-  readonly public?: boolean
   readonly params?: StructLikeValueType
   readonly returns: AnyValueType
   readonly errors?: ErrorsInput
@@ -53,23 +50,15 @@ type ErrorsOfOptions<Options extends ProcedureDefineOptions> = Options extends {
   ? DefinitionOfInputOrUndefined<Errors>
   : undefined
 
-type PublicOfOptions<Options extends ProcedureDefineOptions> = Options extends {
-  readonly public: infer Public extends boolean
-}
-  ? Public
-  : true
-
 export const define = <const Options extends ProcedureDefineOptions>(
   options: Options,
 ): ProcedureSpec<
   ParamsOf<Options>,
   ReturnsOf<Options>,
-  ErrorsOfOptions<Options>,
-  PublicOfOptions<Options>
+  ErrorsOfOptions<Options>
 > => {
   const procedure = {
     kind: "procedure" as const,
-    public: (options.public ?? true) as PublicOfOptions<Options>,
     params: (options.params ?? EmptyParams) as ParamsOf<Options>,
     returns: options.returns as ReturnsOf<Options>,
   }
@@ -89,7 +78,6 @@ export const define = <const Options extends ProcedureDefineOptions>(
   ) as ProcedureSpec<
     ParamsOf<Options>,
     ReturnsOf<Options>,
-    ErrorsOfOptions<Options>,
-    PublicOfOptions<Options>
+    ErrorsOfOptions<Options>
   >
 }

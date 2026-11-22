@@ -12,7 +12,7 @@ export type PrimaryKeyNames<Table extends AnyTableSpec> = {
     : never
 }[ColumnKey<Table>]
 
-type SingleUnionMember<
+export type SingleUnionMember<
   Member extends string,
   All extends string = Member,
 > = Member extends string

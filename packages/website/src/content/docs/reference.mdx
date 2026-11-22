@@ -21,11 +21,20 @@ hand-written; there is no generated API reference.
 | `effect-spacetimedb/server-compiler` | Host-only compiler entrypoint for module entries; import `build` from here. |
 | `effect-spacetimedb/server-polyfills` | Side-effect import for host compatibility shims; normal module entries get these through `server-compiler`, and an entry that loads Effect's HTTP or encoding modules first imports it first. |
 | `effect-spacetimedb/dev-server` | Programmatic local `spacetimedb-standalone` orchestration for tests and tools that publish prebuilt bundles, one database or several on one standalone. |
-| `effect-spacetimedb/testing` | Test-oriented helpers, package-local fixtures, and the `spacetimeSysAlias` preset for off-host server imports. |
+| `effect-spacetimedb/testing` | The off-host test harness: `makeTestModuleHarness`, `bindCallables`, `makeIdcPump`, and the `spacetimeSysAlias` map for tests that import a module entry. See [Testing](/core-concepts/testing). |
 | `effect-spacetimedb/testing/spacetime-sys` | Direct `spacetime:sys` host-surface stub for off-host module imports. |
 
 Normal module authors usually need only `effect-spacetimedb` and, for WebSocket
 sessions, `effect-spacetimedb/client`.
+
+## Client constructors
+
+| Entry | Constructors |
+| --- | --- |
+| `/client` over HTTP | `httpMake` |
+| `/client` over WebSocket | `wsMake`, `wsScoped`, `wsScopedGenerated`, `wsLayer`, `wsLayerGenerated`, `wsSupervisor`, `wsSupervisorGenerated` |
+| WebSocket integration | `wsGeneratedConnection` types a generated connection class. `wsSessionTag` creates a session service tag. `wsConnectAndSubscribe` acquires a session and subscribes before returning it. |
+| `/client/atom` | `wsSupervisedSessionAtom`, `wsTableAtomFamily`, `wsRowAtomFamily`, `wsTableGroupAtomFamily`, `wsTableGroupSnapshotAtom` |
 
 ## Capability Scoping
 
@@ -33,14 +42,16 @@ sessions, `effect-spacetimedb/client`.
 | --- | --- |
 | reducer, lifecycle | `Db`, `ReducerCtx`, `MutationCtx` |
 | procedure outside a transaction | platform `Http`, `Tx`, `ProcedureCtx` |
-| `Tx.run(...)` or `HttpTx.run(...)` body | `Db`, `MutationCtx`, transaction context |
+| `Tx.run(...)` body | `Db`, `MutationCtx`, transaction context |
+| `HttpTx.run(...)` body | `Db` |
 | HTTP handler | `HttpTx`, `HttpHandlerCtx` |
 | sender view | `ReadonlyDb`, `From`, `ViewCtx` |
 | anonymous view | `ReadonlyDb`, `From`, `AnonymousViewCtx` |
 | every scope above, once the module declares an environment | `Env` |
 
-Use `MutationCtx` for helpers that must run in both reducers and transaction
-bodies. Do not yield accessors from another module.
+Use `MutationCtx` for helpers that must run in both reducers and procedure
+transaction bodies; an HTTP handler has no sender, so `MutationCtx` in an
+`HttpTx.run` body is a compile error. Do not yield accessors from another module.
 
 ## Value-Type Cheat Sheet
 
@@ -61,11 +72,11 @@ bodies. Do not yield accessors from another module.
 | `Stdb.option(T)` | Nullable value type, decoded as `T` or `undefined`. |
 | `Stdb.optional(T)` | Optional struct field annotation. |
 | `T.optional()` | Optional table column annotation. |
-| `Stdb.array(T, { minimum, maximum })` | SATS array/list with required inclusive length bounds (enforced by the codecs, not on the wire). |
+| `Stdb.array(T)` / `Stdb.array(T, { minimum, maximum })` | SATS array/list. Either inclusive length bound is optional; a bound is enforced by the codecs, not on the wire. |
 | `Stdb.struct({...})` | Named object shape for params, rows, returns, and errors. |
 | `Stdb.sum({...})` | Tagged union with payload variants; key- and index-capable, never auto-increment. |
 | `T.named("Name")` | Set the generated SATS/client type name for an anonymous struct, sum, or string-literal enum; the default name is content-addressed. |
-| `Stdb.enum("A", "B")` / `enumType(...)` | Unit-variant SATS enum; prefer namespace form because `enum` cannot be named-imported. |
+| `Stdb.enum("a", "b")` | Unit-variant SATS enum; needs the namespace form because `enum` cannot be named-imported. |
 | `Stdb.unit()` | Unit value for empty scheduled procedure returns, result branches, and sum payloads. |
 | `Stdb.literal(...)` | String, number, or boolean literal values; string literals lower to enums. |
 | `Stdb.result(Ok, Err)` | Result envelope value type. |
@@ -82,15 +93,18 @@ TypeScript values, SATS lowering, bounds, and transport encoding notes.
 | --- | --- |
 | `Stdb.table(...)` / `scheduledTable(...)` | Declare persistent, event, and scheduled tables. |
 | `Stdb.index(...)` / `unique(...)` | Declare table indexes and uniqueness constraints. |
-| `Stdb.StdbFn.reducer(...)` / `procedure(...)` / `scheduledReducer(...)` / `scheduledProcedure(...)` / `view(...)` / `anonymousView(...)` | Declare callable and view endpoints. |
-| `Stdb.StdbGroup.make(...)` / `Stdb.StdbHttpGroup.make(...)` | Group reducers/procedures/views and HTTP routes. |
-| `Stdb.StdbHttp.*` | Declare typed and raw HTTP handlers. |
-| `Stdb.StdbModule.make(...)` | Assemble tables, callable groups, HTTP groups, lifecycle, and settings. |
-| `Stdb.StdbBuilder.group(...)` / `groupChecked(...)` / `groupPrechecked(...)` / `lifecycle(...)` | Attach Effect implementations to an assembled module. |
+| `Stdb.Fn.reducer(...)` / `procedure(...)` / `scheduledReducer(...)` / `scheduledProcedure(...)` / `view(...)` / `anonymousView(...)` | Declare callable and view endpoints. |
+| `Stdb.Group.make(...)` / `Stdb.HttpGroup.make(...)` | Group reducers/procedures/views and HTTP routes. |
+| `Stdb.Http.*` | Declare typed and raw HTTP handlers. |
+| `Stdb.Module.make(...)` | Assemble tables, callable groups, HTTP groups, lifecycle, and settings. |
+| `Module.mount(key, child, options?)` / `Module.mountNative<Library>()(key, options?)` | Declare a namespace. Set `options.name` to pin its canonical name. |
+| `Stdb.Builder.mount(...)` / `mountNative(...)` | Supply a child and its implementations or a native SDK namespace in the parent's build. |
+| `Module.mounts[key].run(effect)` / `.use(fn)` / `.use(kind, fn)` | Run an Effect in the child scope or invoke a native helper with its alias. Direct Effect table handles nest under `Db` and `ReadonlyDb`. See [Submodules](/core-concepts/databases/submodules). |
+| `Stdb.Builder.group(...)` / `groupPrechecked(...)` / `lifecycle(...)` | Attach Effect implementations to an assembled module. |
 | `Stdb.project(Module)` | Build client projections, targets, and generated-client adapters. |
 | `Stdb.toHttpApi(Module)` / `httpApiBaseUrl(...)` | Project typed HTTP routes into Effect `HttpApi`. |
 | `Stdb.ScheduleAt.*` | Build scheduled table `scheduledAt` values. |
-| `Stdb.Environment.*` | Declare typed database environment keys for `StdbModule.make(id, { environment })`. |
+| `Stdb.Environment.*` | Declare typed database environment keys for `Module.make(id, { environment })`. |
 | `Stdb.validate(...)` / `assertValid(...)` / `formatModuleDiagnostics(...)` | Run module validation manually. |
 
 Builder impl values are sealed. `GroupImpl<Name, RuntimeR, ModuleName>` and
@@ -98,7 +112,7 @@ Builder impl values are sealed. `GroupImpl<Name, RuntimeR, ModuleName>` and
 lifecycle, runtime-requirement, and module-identity phantoms; handler
 definitions are private to the builder pipeline. The module-name parameter
 defaults to `string` so older two-argument annotations still compile, but
-`build(...)` and `plan(...)` reject widened impl annotations. Keep
+`build(...)` rejects widened impl annotations. Keep
 implementation arrays inferred with `as const` when storing them before
 `build(...)`.
 
@@ -141,14 +155,16 @@ Only Effect failures are encoded as declared errors. Defects remain defects.
 
 | Type | Source |
 | --- | --- |
-| `ReducerAsyncNotAllowedError` | Async, promises, timers, microtasks, or `Effect.sleep` in synchronous server handlers. |
-| `ReducerGlobalRandomNotAllowedError` | Global `Math.random` use in guarded server runtime. |
-| `ReducerWallClockNotAllowedError` | Ambient `Date.now()` or no-argument `new Date()` in guarded server runtime. |
+| `HandlerAsyncNotAllowedDefect` | Async, promises, timers, microtasks, or `Effect.sleep` in synchronous server handlers. |
+| `HandlerGlobalRandomNotAllowedDefect` | Global `Math.random` use in guarded server runtime. |
+| `HandlerWallClockNotAllowedDefect` | Ambient `Date.now()` or no-argument `new Date()` in guarded server runtime. |
+| `StdbTableOperationDefect` | A server table invariant failed. Inspect `table`, `op` and `cause`. |
 | `StdbHostCallError` | Generic host ABI call failure. |
 | `StdbUniqueAlreadyExistsError` / `StdbNoSuchRowError` / `StdbAutoIncOverflowError` / `StdbScheduleDelayTooLongError` | Typed native host failures. |
 | `StdbDecodeError` | Contract decode failure. |
-| `CallFailure<E>` / `RawCallFailure<E>` | Projected client call failure unions. |
-| `RemoteRejectedError` / `TransportError` / `DomainCallError<E>` | Projected client remote, transport, and raw declared-error failures. |
+| `CallFailure<E>` / `RawCallFailure<E>` | Projected HTTP call failure unions. |
+| `WsCallFailure<E>` / `RawWsCallFailure<E>` / `WsConnectionFailure` | Projected WebSocket call failure unions, and what a session adds: `ConnectionLostError`, `CallNotSentError`, `ConnectionIdentityChangedError`. |
+| `RemoteRejectedError` / `TransportError` / `DomainCallError<E>` | Projected client remote, transport, and raw declared-error failures. A `TransportError` whose `cause` is `HttpCallDurationExceededError` overran `callDurationMax`. |
 | `WsConnectError` / `WsConnectTimeoutError` | WebSocket acquisition failed, or did not complete in time. |
 | `ConnectionLostError` | An established connection was lost while the call was in flight, or the session had ended; the call's outcome is unknown. |
 | `CallNotSentError` | Automatic reconnect: the call was refused unsent while the session reconnected. |

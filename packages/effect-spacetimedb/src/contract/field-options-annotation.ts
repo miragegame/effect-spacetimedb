@@ -2,7 +2,7 @@ import * as Data from "effect/Data"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as AST from "effect/SchemaAST"
-import { ownAnnotation } from "./schema-annotations.ts"
+import { ownAnnotation, schemaRegistryKey } from "./schema-annotations.ts"
 
 /**
  * Field options ride on the Effect Schema AST under a key minted with
@@ -41,7 +41,7 @@ import { ownAnnotation } from "./schema-annotations.ts"
  * writes this key and version, which `scripts/mixed-version-smoke.mjs` checks.)
  */
 export const StdbFieldOptionsAnnotationId = Symbol.for(
-  "effect-spacetimedb/StdbFieldOptions/versioned",
+  schemaRegistryKey("FieldOptions/versioned"),
 )
 
 /**
@@ -50,7 +50,7 @@ export const StdbFieldOptionsAnnotationId = Symbol.for(
  * carrying it is reported as an incompatible copy.
  */
 export const StdbFieldOptionsLegacyAnnotationId = Symbol.for(
-  "effect-spacetimedb/StdbFieldOptions",
+  schemaRegistryKey("FieldOptions"),
 )
 
 /** Payload version written under {@link StdbFieldOptionsAnnotationId}. */
@@ -99,22 +99,23 @@ export const FieldOptionsAnnotationOrigin =
  * A field was annotated by a different copy of `effect-spacetimedb` than the one
  * reading it. The failed premise is supplied by the consumer's dependency graph,
  * not by this package's own code, so this is a typed authoring error in the same
- * family as `StdbTypeNotNameableError` rather than a defect.
+ * family as `StdbTypeNotNameableDefect` rather than a defect.
  */
-export class StdbFieldOptionsVersionError extends Data.TaggedError(
-  "StdbFieldOptionsVersionError",
+export class StdbFieldOptionsVersionDefect extends Data.TaggedError(
+  "StdbFieldOptionsVersionDefect",
 )<{
   readonly origin: FieldOptionsAnnotationOrigin
 }> {
-  override get message(): string {
-    const found = FieldOptionsAnnotationOrigin.$match(this.origin, {
-      LegacyPayload: () =>
-        "annotation payload version 1 (effect-spacetimedb 0.6.x or earlier, which wrote an unversioned payload)",
-      IncompatiblePayload: ({ version }) =>
-        `annotation payload version ${version ?? "unknown"}`,
-    })
-    return `This field's SpaceTimeDB options were written by a different copy of effect-spacetimedb: found ${found}, but this copy reads annotation payload version ${StdbFieldOptionsAnnotationVersion}. Field options are stored under a global symbol, so two installed versions of effect-spacetimedb read each other's fields; deduplicate effect-spacetimedb to one version.`
-  }
+  override readonly message =
+    `This field's SpaceTimeDB options were written by a different copy of effect-spacetimedb: found ${FieldOptionsAnnotationOrigin.$match(
+      this.origin,
+      {
+        LegacyPayload: () =>
+          "annotation payload version 1 (effect-spacetimedb 0.6.x or earlier, which wrote an unversioned payload)",
+        IncompatiblePayload: ({ version }) =>
+          `annotation payload version ${version ?? "unknown"}`,
+      },
+    )}, but this copy reads annotation payload version ${StdbFieldOptionsAnnotationVersion}. Field options are stored under a global symbol, so two installed versions of effect-spacetimedb read each other's fields; deduplicate effect-spacetimedb to one version.`
 }
 
 type FieldOptionsAnnotationNode =
@@ -155,7 +156,7 @@ const findFieldOptionsAnnotationNode = (
 
 /**
  * Reads the field-options annotation of a value type, or `undefined` when the
- * value carries none. Throws {@link StdbFieldOptionsVersionError} when the value
+ * value carries none. Throws {@link StdbFieldOptionsVersionDefect} when the value
  * was annotated by an incompatible copy of this package; options are never
  * silently dropped.
  */
@@ -168,7 +169,7 @@ export const readFieldOptionsAnnotation = (
   }
 
   if (found.key === "legacy") {
-    throw new StdbFieldOptionsVersionError({
+    throw new StdbFieldOptionsVersionDefect({
       origin: FieldOptionsAnnotationOrigin.LegacyPayload(),
     })
   }
@@ -178,7 +179,7 @@ export const readFieldOptionsAnnotation = (
     return decoded.value
   }
 
-  throw new StdbFieldOptionsVersionError({
+  throw new StdbFieldOptionsVersionDefect({
     origin: FieldOptionsAnnotationOrigin.IncompatiblePayload({
       version: Option.getOrUndefined(
         Option.map(decodeAnnotationVersion(found.value), (it) => it.version),

@@ -4,7 +4,7 @@ import * as Deferred from "effect/Deferred"
 import * as Fiber from "effect/Fiber"
 const { expect } = EffectVitest
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { generatedArtifactShapeError } from "../../src/client/generated-artifact-shape.ts"
 import { TestLayer } from "../helpers/test-layer"
 import { testViewRowsLength } from "../helpers/array-bounds"
@@ -19,44 +19,29 @@ const userTable = Stdb.table("user", {
   },
 })
 
-const ViewModule = Stdb.StdbModule.make("view_contract_validation", {})
+const ViewModule = Stdb.Module.make("view_contract_validation", {})
   .addTables(userTable)
   .add(
-    Stdb.StdbGroup.make("Views")
-      .add(
-        Stdb.StdbFn.anonymousView("allUsers", {
-          returns: Stdb.array(
-            Stdb.struct({
-              id: Stdb.string(),
-              name: Stdb.string(),
-            }),
-            testViewRowsLength,
-          ),
-        }),
-      )
-      .add(
-        Stdb.StdbFn.view("selfUser", {
-          public: false,
-          returns: Stdb.option(
-            Stdb.struct({
-              id: Stdb.string(),
-              name: Stdb.string(),
-            }),
-          ),
-        }),
-      ),
+    Stdb.Group.make("Views").add(
+      Stdb.Fn.anonymousView("allUsers", {
+        returns: Stdb.array(
+          Stdb.struct({
+            id: Stdb.string(),
+            name: Stdb.string(),
+          }),
+          testViewRowsLength,
+        ),
+      }),
+    ),
   ).spec
 
-const NonePolicyViewModule = Stdb.StdbModule.make(
-  "view_contract_validation_none",
-  {
-    settings: { caseConversionPolicy: "none" },
-  },
-)
+const NonePolicyViewModule = Stdb.Module.make("view_contract_validation_none", {
+  settings: { caseConversionPolicy: "none" },
+})
   .addTables(userTable)
   .add(
-    Stdb.StdbGroup.make("Views").add(
-      Stdb.StdbFn.anonymousView("allUsers", {
+    Stdb.Group.make("Views").add(
+      Stdb.Fn.anonymousView("allUsers", {
         returns: Stdb.array(
           Stdb.struct({
             id: Stdb.string(),
@@ -70,7 +55,7 @@ const NonePolicyViewModule = Stdb.StdbModule.make(
 
 type ViewRowShape = { readonly id: string; readonly name: string }
 
-const emptyViewRelation = (): StdbTesting.RelationHandle<
+const emptyViewRelation = (): StdbInternal.RelationHandle<
   ViewRowShape,
   unknown
 > => ({
@@ -84,11 +69,11 @@ const emptyViewRelation = (): StdbTesting.RelationHandle<
   count: () => 0n,
 })
 
-const idleSubscriptionBuilder = <Root>(): StdbTesting.SubscriptionBuilderLike<
+const idleSubscriptionBuilder = <Root>(): StdbInternal.SubscriptionBuilderLike<
   unknown,
   Root
 > => {
-  const builder: StdbTesting.SubscriptionBuilderLike<unknown, Root> = {
+  const builder: StdbInternal.SubscriptionBuilderLike<unknown, Root> = {
     onApplied: () => builder,
     onError: () => builder,
     subscribe: () => ({ isEnded: () => false, unsubscribe: () => undefined }),
@@ -101,10 +86,8 @@ describe("view contract validation", (it) => {
     "keeps the authored view surface aligned with the supported runtime shape",
     () =>
       Effect.gen(function* () {
-        const plan = StdbTesting.makeModulePlan(ViewModule)
+        const plan = StdbInternal.makeModulePlan(ViewModule)
 
-        expect(ViewModule.views.allUsers.public).toBe(true)
-        expect(ViewModule.views.selfUser.public).toBe(false)
         expect(Object.keys(plan.publicViews)).toEqual(["allUsers"])
         // A view without params projects its target, called with nothing.
         expect(plan.targets.views.allUsers).toMatchObject({
@@ -124,7 +107,7 @@ describe("view contract validation", (it) => {
       let applied: (() => void) | undefined
       let capturedQuery: unknown
       const subscribed = yield* Deferred.make<void>()
-      const relation: StdbTesting.RelationHandle<ViewRow, unknown> = {
+      const relation: StdbInternal.RelationHandle<ViewRow, unknown> = {
         onInsert: (callback) => {
           insertCallback = callback
         },
@@ -138,9 +121,9 @@ describe("view contract validation", (it) => {
         iter: () => rows.values(),
         count: () => BigInt(rows.length),
       }
-      const builder: StdbTesting.SubscriptionBuilderLike<
+      const builder: StdbInternal.SubscriptionBuilderLike<
         unknown,
-        StdbTesting.ClientQueryRoot<typeof ViewModule>
+        StdbInternal.ClientQueryRoot<typeof ViewModule>
       > = {
         onApplied: (callback) => {
           applied = callback
@@ -155,13 +138,13 @@ describe("view contract validation", (it) => {
       }
       const db = Object.assign(Object.create(null), { allUsers: relation })
       expect(
-        generatedArtifactShapeError(StdbTesting.makeModulePlan(ViewModule), {
+        generatedArtifactShapeError(StdbInternal.makeModulePlan(ViewModule), {
           db,
           disconnect: () => undefined,
           subscriptionBuilder: () => builder,
         }),
       ).toBeUndefined()
-      const session = StdbTesting.ClientWs.make({
+      const session = StdbInternal.ClientWs.make({
         module: ViewModule,
         connection: {
           isActive: true,
@@ -197,8 +180,8 @@ describe("view contract validation", (it) => {
     "accepts a client keyed by contract key whatever the module name policy",
     () =>
       Effect.gen(function* () {
-        const snakePlan = StdbTesting.makeModulePlan(ViewModule)
-        const nonePlan = StdbTesting.makeModulePlan(NonePolicyViewModule)
+        const snakePlan = StdbInternal.makeModulePlan(ViewModule)
+        const nonePlan = StdbInternal.makeModulePlan(NonePolicyViewModule)
 
         // The wire name is the SQL name and follows the policy ...
         expect(snakePlan.targets.views.allUsers.name).toBe("all_users")
@@ -230,7 +213,7 @@ describe("view contract validation", (it) => {
     "reports a typed artifact error when a client exposes only the deprecated snake_case view accessor",
     () =>
       Effect.gen(function* () {
-        const plan = StdbTesting.makeModulePlan(ViewModule)
+        const plan = StdbInternal.makeModulePlan(ViewModule)
         const error = generatedArtifactShapeError(plan, {
           db: Object.assign(Object.create(null), {
             all_users: emptyViewRelation(),
@@ -239,7 +222,7 @@ describe("view contract validation", (it) => {
           subscriptionBuilder: idleSubscriptionBuilder,
         })
 
-        expect(StdbTesting.GeneratedArtifactShapeError.is(error)).toBe(true)
+        expect(StdbInternal.GeneratedArtifactShapeError.is(error)).toBe(true)
         expect(error?.missingKeys).toEqual(["allUsers"])
       }),
   )
@@ -250,9 +233,9 @@ describe("view contract validation", (it) => {
       Effect.gen(function* () {
         expect(
           () =>
-            Stdb.StdbModule.make("unsupported_view_shape", {}).add(
-              Stdb.StdbGroup.make("Views").add(
-                Stdb.StdbFn.anonymousView("presence_kind", {
+            Stdb.Module.make("unsupported_view_shape", {}).add(
+              Stdb.Group.make("Views").add(
+                Stdb.Fn.anonymousView("presence_kind", {
                   returns: Stdb.literal("joined", "left"),
                 }),
               ),
@@ -263,9 +246,9 @@ describe("view contract validation", (it) => {
 
         expect(
           () =>
-            Stdb.StdbModule.make("unsupported_scalar_array_view", {}).add(
-              Stdb.StdbGroup.make("Views").add(
-                Stdb.StdbFn.anonymousView("names", {
+            Stdb.Module.make("unsupported_scalar_array_view", {}).add(
+              Stdb.Group.make("Views").add(
+                Stdb.Fn.anonymousView("names", {
                   returns: Stdb.array(Stdb.string(), testViewRowsLength),
                 }),
               ),
@@ -276,9 +259,9 @@ describe("view contract validation", (it) => {
 
         expect(
           () =>
-            Stdb.StdbModule.make("unsupported_scalar_option_view", {}).add(
-              Stdb.StdbGroup.make("Views").add(
-                Stdb.StdbFn.anonymousView("maybe_name", {
+            Stdb.Module.make("unsupported_scalar_option_view", {}).add(
+              Stdb.Group.make("Views").add(
+                Stdb.Fn.anonymousView("maybe_name", {
                   returns: Stdb.option(Stdb.string()),
                 }),
               ),

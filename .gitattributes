@@ -1,1 +1,3 @@
+/bun.lock linguist-generated
 packages/effect-spacetimedb/examples/publishable-module/generated-client/** linguist-generated -diff -text
+packages/effect-spacetimedb/examples/mounted-module/generated-client/** linguist-generated -diff -text

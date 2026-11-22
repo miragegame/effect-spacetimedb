@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect"
 import * as EffectVitest from "@effect/vitest"
 const { describe, expect, it } = EffectVitest
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import {
   StableTimestamp,
   bsatnString,
@@ -20,8 +20,8 @@ import {
 const reducer = reducerInfo()
 
 const expectDecodeFailure = (value: unknown) => {
-  expect(() => StdbTesting.decodeStdbEventContextSync(value)).toThrow(
-    StdbTesting.StdbDecodeError,
+  expect(() => StdbInternal.decodeStdbEventContextSync(value)).toThrow(
+    StdbInternal.StdbDecodeError,
   )
 }
 
@@ -36,56 +36,56 @@ describe("event context decoding", () => {
         })
         const errorBytes = bsatnString("declared reducer failure")
 
-        expect(StdbTesting.decodeStdbEventContextSync(okContext)).toEqual(
-          StdbTesting.StdbEventContext.Reducer({
+        expect(StdbInternal.decodeStdbEventContextSync(okContext)).toEqual(
+          StdbInternal.StdbEventContext.Reducer({
             reducer: "userUpsert",
             timestamp: StableTimestamp,
-            outcome: StdbTesting.StdbReducerOutcome.Ok(),
+            outcome: StdbInternal.StdbReducerOutcome.Ok(),
           }),
         )
-        expect(yield* StdbTesting.decodeStdbEventContext(okContext)).toEqual(
-          StdbTesting.StdbEventContext.Reducer({
+        expect(yield* StdbInternal.decodeStdbEventContext(okContext)).toEqual(
+          StdbInternal.StdbEventContext.Reducer({
             reducer: "userUpsert",
             timestamp: StableTimestamp,
-            outcome: StdbTesting.StdbReducerOutcome.Ok(),
+            outcome: StdbInternal.StdbReducerOutcome.Ok(),
           }),
         )
         expect(
-          StdbTesting.decodeStdbEventContextSync(
+          StdbInternal.decodeStdbEventContextSync(
             reducerContext({ outcome: reducerErr(errorBytes), reducer }),
           ),
         ).toEqual(
-          StdbTesting.StdbEventContext.Reducer({
+          StdbInternal.StdbEventContext.Reducer({
             reducer: "userUpsert",
             timestamp: StableTimestamp,
-            outcome: StdbTesting.StdbReducerOutcome.Err({ error: errorBytes }),
+            outcome: StdbInternal.StdbReducerOutcome.Err({ error: errorBytes }),
           }),
         )
         expect(
-          StdbTesting.decodeStdbEventContextSync(
+          StdbInternal.decodeStdbEventContextSync(
             reducerContext({
               outcome: reducerInternalError("host failed"),
               reducer,
             }),
           ),
         ).toEqual(
-          StdbTesting.StdbEventContext.Reducer({
+          StdbInternal.StdbEventContext.Reducer({
             reducer: "userUpsert",
             timestamp: StableTimestamp,
-            outcome: StdbTesting.StdbReducerOutcome.InternalError({
+            outcome: StdbInternal.StdbReducerOutcome.InternalError({
               message: "host failed",
             }),
           }),
         )
         expect(
-          StdbTesting.decodeStdbEventContextSync(
+          StdbInternal.decodeStdbEventContextSync(
             reducerContext({ outcome: reducerOkEmpty(), reducer }),
           ),
         ).toEqual(
-          StdbTesting.StdbEventContext.Reducer({
+          StdbInternal.StdbEventContext.Reducer({
             reducer: "userUpsert",
             timestamp: StableTimestamp,
-            outcome: StdbTesting.StdbReducerOutcome.OkEmpty(),
+            outcome: StdbInternal.StdbReducerOutcome.OkEmpty(),
           }),
         )
       }),
@@ -95,17 +95,17 @@ describe("event context decoding", () => {
     const error = new Error("subscription failed")
 
     expect(
-      StdbTesting.decodeStdbEventContextSync(subscribeAppliedContext()),
-    ).toEqual(StdbTesting.StdbEventContext.SubscribeApplied())
+      StdbInternal.decodeStdbEventContextSync(subscribeAppliedContext()),
+    ).toEqual(StdbInternal.StdbEventContext.SubscribeApplied())
     expect(
-      StdbTesting.decodeStdbEventContextSync(unsubscribeAppliedContext()),
-    ).toEqual(StdbTesting.StdbEventContext.UnsubscribeApplied())
+      StdbInternal.decodeStdbEventContextSync(unsubscribeAppliedContext()),
+    ).toEqual(StdbInternal.StdbEventContext.UnsubscribeApplied())
     expect(
-      StdbTesting.decodeStdbEventContextSync(transactionContext()),
-    ).toEqual(StdbTesting.StdbEventContext.Transaction())
-    expect(StdbTesting.decodeStdbEventContextSync(errorContext(error))).toEqual(
-      StdbTesting.StdbEventContext.Error({ error }),
-    )
+      StdbInternal.decodeStdbEventContextSync(transactionContext()),
+    ).toEqual(StdbInternal.StdbEventContext.Transaction())
+    expect(
+      StdbInternal.decodeStdbEventContextSync(errorContext(error)),
+    ).toEqual(StdbInternal.StdbEventContext.Error({ error }))
   })
 
   it("rejects stale reducer outcome shapes", () => {
@@ -143,7 +143,7 @@ describe("event context decoding", () => {
 
   it.effect("surfaces stale reducer outcomes through the Effect API", () =>
     Effect.gen(function* () {
-      const failure = yield* StdbTesting.decodeStdbEventContext({
+      const failure = yield* StdbInternal.decodeStdbEventContext({
         event: {
           tag: "Reducer",
           value: {
@@ -154,7 +154,7 @@ describe("event context decoding", () => {
         },
       }).pipe(Effect.flip)
 
-      expect(failure).toBeInstanceOf(StdbTesting.StdbDecodeError)
+      expect(failure).toBeInstanceOf(StdbInternal.StdbDecodeError)
     }),
   )
 })

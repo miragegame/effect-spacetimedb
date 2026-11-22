@@ -23,7 +23,7 @@ module, then run `spacetime generate` against the built bundle:
 {
   "scripts": {
     "build": "spacetime build --module-path .",
-    "generate-client": "spacetime generate --lang typescript --js-path ./dist/bundle.js --out-dir ./src/generated --yes"
+    "generate-client": "spacetime generate --lang typescript --js-path ./dist/bundle.js --out-dir ./src/module_bindings --yes"
   }
 }
 ```
@@ -37,15 +37,10 @@ the package, and the server together.
 This is the default path. In an ordinary strict TypeScript project, import the
 generated `DbConnection` and pass it directly to the Effect client:
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
-import * as StdbClient from "effect-spacetimedb/client"
+import { DbConnection } from "./module_bindings"
 
-declare const Module: Stdb.AnyStdbModule
-declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
-  typeof Module.spec,
-  unknown
->
 declare const uri: string
 declare const databaseName: string
 declare const token: string
@@ -57,7 +52,7 @@ const WsLive = Example.client.ws.layerGenerated({
   uri,
   databaseName,
   token,
-  connectTimeoutMillis: 10_000,
+  connectDurationMax: 10_000,
 })
 ```
 
@@ -115,17 +110,17 @@ hand-written facade tied to the same module contract used by the server:
 
 ```ts
 import {
-  generatedConnection,
+  wsGeneratedConnection,
   type GeneratedConnectionOf,
 } from "effect-spacetimedb/client"
 import { DbConnection as GeneratedDbConnection } from "./generated-client/index.js"
 import { Module } from "./module"
 
 export const DbConnection: GeneratedConnectionOf<typeof Module.spec> =
-  generatedConnection(Module.spec, GeneratedDbConnection)
+  wsGeneratedConnection(Module.spec, GeneratedDbConnection)
 ```
 
-Import the facade everywhere else. `generatedConnection(...)` is an identity at
+Import the facade everywhere else. `wsGeneratedConnection(...)` is an identity at
 runtime; the generated JavaScript still comes entirely from
 `spacetime generate`, so upstream retains SDK and wire compatibility. Generated
 sessions also validate that every public table, public event table, and public
@@ -139,21 +134,16 @@ stale.
 **camelCase** spelling of each relation's name, and emits a `@deprecated`
 snake_case alias wherever the two spellings differ.
 
-effect-spacetimedb resolves tables, event tables, and views alike by their
-**contract key** — the key you wrote in `addTables(...)` or the views group.
-Declared names are required to be camelCase-canonical, so the contract key is
-the generated accessor key under either name policy, and the deprecated aliases
-are never resolved. A client that exposes only the alias is treated as stale and
-fails acquisition with `GeneratedArtifactShapeError`.
-
-Only SQL and subscription text keeps the wire name. A module on the
-`snake_case` policy still queries `all_users` while its rows arrive through the
-`allUsers` accessor.
+The Effect API keeps the declared spelling for tables, columns, indexes and
+callables. For example, a table declared as `user_profile` is available as
+`session.cache.tables.user_profile`. The adapter reads `db.userProfile` from
+the generated bindings and uses `user_profile` in SQL. Choose distinct names
+for members of the same namespace after case conversion.
 
 ## Never Format A Generated Artifact
 
 Both the artifact pipeline's `--check` mode and drift checks compare generated
-files by content. A formatter run over `src/generated` or `src/generated-client`
+files by content. A formatter run over `src/module_bindings` or `src/generated-client`
 rewrites bytes the generator did not produce and turns every subsequent check
 red, with a diff that looks like real drift. Exclude the directory *and its
 contents* from your formatter — a directory-only pattern does not stop a
@@ -188,11 +178,10 @@ needed by clients.
 
 ## HTTP Client
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
-declare const Module: Stdb.AnyStdbModule
 declare const uri: string
 declare const databaseName: string
 declare const token: string
@@ -202,12 +191,11 @@ const HttpLive = Example.client.http.layer({
   uri,
   databaseName,
   token,
-  callDurationMax: "10 seconds",
 })
 
 const program = Effect.gen(function* () {
   const client = yield* Example.client.http.Tag
-  yield* client.reducers.user_upsert({ userId: "u1", name: "Ada" })
+  yield* client.reducers.userUpsert({ userId, name })
 }).pipe(Effect.provide(HttpLive))
 ```
 
@@ -226,20 +214,39 @@ const api = Stdb.toHttpApi(Module)
 This is useful when callers already use `HttpApiClient.make(...)` and want
 status-based declared-error decoding.
 
+## Time Bounds
+
+`callDurationMax` bounds an HTTP call from request to
+fully read response, and a WebSocket call from sending it to its answer, and
+`connectDurationMax` bounds WebSocket connection acquisition. All are optional
+and default to 30 seconds, the exported `callDurationMaxDefault` and
+`connectDurationMaxDefault`. Set either option to `Duration.infinity` to disable its timer. Zero, negative
+and invalid durations throw a `TypeError` when the client is built.
+
+An overrun HTTP call fails with `TransportError` whose `cause` is
+`HttpCallDurationExceededError`. The bound stops the caller waiting, not the database:
+a request that already arrived may still commit, so treat a `TransportError` as
+"outcome unknown". Set the option from your own budget, such as a request
+deadline or a lease, when 30 seconds is not what a caller can afford.
+
+An overrun WebSocket call fails with `ConnectionLostError`, which also means
+"outcome unknown", and it ends the connection, not just the call. A socket can stay
+open with no peer behind it, after a network change for example, and an unanswered
+call is the only evidence a client gets of that. Every other call on the connection
+fails the same way, and a session supervisor replaces it. So one overrun costs the
+whole connection: raise the bound for a procedure that may legitimately take longer.
+A session that only reads makes no calls, so this cannot detect a dead socket under
+it.
+
 ## WebSocket Client
 
 WebSocket sessions use generated native bindings through
 `effect-spacetimedb/client`.
 
-```typescript twoslash
-import * as StdbClient from "effect-spacetimedb/client"
+```typescript
 import * as Stdb from "effect-spacetimedb"
+import { DbConnection } from "./module_bindings"
 
-declare const Module: Stdb.AnyStdbModule
-declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
-  typeof Module.spec,
-  unknown
->
 declare const uri: string
 declare const databaseName: string
 declare const token: string
@@ -251,7 +258,6 @@ const WsLive = Example.client.ws.layerGenerated({
   uri,
   databaseName,
   token,
-  connectTimeoutMillis: 10_000,
 })
 ```
 
@@ -261,15 +267,10 @@ entrypoint.
 
 Named tags let one process hold multiple sessions for the same module.
 
-```typescript twoslash
-import * as StdbClient from "effect-spacetimedb/client"
+```typescript
 import * as Stdb from "effect-spacetimedb"
+import { DbConnection } from "./module_bindings"
 
-declare const Module: Stdb.AnyStdbModule
-declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
-  typeof Module.spec,
-  unknown
->
 declare const uri: string
 declare const databaseName: string
 declare const token: string
@@ -277,7 +278,7 @@ declare const token: string
 const Example = Stdb.project(Module)
 const MainSession = Example.client.ws.tag("main")
 const MainLive = Example.client.ws.layerGenerated(
-  { DbConnection, uri, databaseName, token, connectTimeoutMillis: 10_000 },
+  { DbConnection, uri, databaseName, token },
   { name: "main" },
 )
 ```
@@ -332,15 +333,10 @@ batch and reconciles the cache: rows unchanged across the outage fire no
 callbacks, changed rows fire one update, insert or delete, and each replayed
 subscription fires `onApplied` again.
 
-```typescript twoslash
-import * as StdbClient from "effect-spacetimedb/client"
+```typescript
 import * as Stdb from "effect-spacetimedb"
+import { DbConnection } from "./module_bindings"
 
-declare const Module: Stdb.AnyStdbModule
-declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
-  typeof Module.spec,
-  unknown
->
 declare const uri: string
 declare const databaseName: string
 declare const token: string
@@ -352,9 +348,8 @@ const WsLive = Example.client.ws.layerGenerated({
   uri,
   databaseName,
   token,
-  connectTimeoutMillis: 10_000,
   // The SDK raises delays below 500 ms (first) and 1 s (cap) to those floors.
-  automaticReconnect: { delayMillisMin: 1_000, delayMillisMax: 30_000 },
+  automaticReconnect: { delayMin: "1 second", delayMax: "30 seconds" },
 })
 ```
 
@@ -366,6 +361,7 @@ last rows and streams stay open, while calls are refused without being sent:
 | --- | --- | --- |
 | Made while the SDK reconnects or replays | `CallNotSentError` | The server never saw it; retrying once the session is live is safe. |
 | In flight when the socket dropped | `ConnectionLostError` | The outcome is unknown; it may have committed. |
+| Unanswered at `callDurationMax` | `ConnectionLostError` | The outcome is unknown, and the connection ended with it. |
 | Made on a session whose reconnect changed identity | `ConnectionIdentityChangedError` | The session ended; no retry on it can succeed. |
 
 The SDK does not retry the *initial* connection: that failure still fails the
@@ -374,7 +370,7 @@ supervised session after it connected, subscribed and ran `setup`); a drop
 before that ends it. The session is invalidated when the SDK schedules no
 further attempt (a protocol-error close, a refused fresh token, an identity
 change, `disconnect()`), when a token refresh fails (see Tokens), or when a
-reconnect attempt or its replay is still unresolved `connectTimeoutMillis`
+reconnect attempt or its replay is still unresolved `connectDurationMax`
 after its scheduled start; the SDK has no handshake or replay timeout of its
 own, so the library ends such a connection.
 
@@ -387,7 +383,10 @@ server runtime that never sends resume events.
 A subscription that fails to replay is dropped by the SDK. A consumer stream on
 it fails with `SubscriptionRejectedError` on its own; a supervisor's
 subscription target that fails to replay ends the session, so the supervisor
-replaces it.
+replaces it. A subscription made with no failure sink of its own
+(`session.subscribe`, a table or view group's `subscribe`, `wsConnectAndSubscribe`)
+ends the connection as `lost`: its rows have left the cache, and nothing else
+would say so.
 
 ## Supervised Sessions With Automatic Reconnect
 
@@ -401,8 +400,61 @@ backoff), and per-session setup. Its phase reports which one is happening:
 | `connecting` | none yet | the supervisor's first activation |
 | `live` | current | — |
 | `recovering` | retained (published as waiting); cache readable, calls refused | the SDK, on the same session (`reconnectAttempt`, `reconnectDelayMillis`, `reason`) |
-| `reconnecting` | the previous one, as waiting | the supervisor, building a replacement |
-| `fatal` | the last one | nobody: retrying cannot help |
+| `reconnecting` | the previous one, as waiting, unless it was revoked | the supervisor, building a replacement |
+| `fatal` | the last one, unless it was revoked | nobody: retrying cannot help |
+
+Between replacements the supervisor waits `reconnectDelayFirst` (250 ms) and
+doubles the wait up to `reconnectDelayMax` (30 seconds), with jitter, both set
+through `policy`. Going live does not start that over: a server that accepts a session
+and ends it at once would otherwise have every client back at the shortest wait after
+each one. Only a session that stayed live for `stabilityWindow` does (30 seconds,
+the exported `stabilityWindowDefault`), and each stretch between two automatic
+reconnects is judged on its own. A value that bounds nothing, such as `NaN`, `Infinity`
+or a window of `0`, throws a `TypeError` when the supervisor is built.
+
+A session whose reconnect changed identity, or whose token refresh failed or died,
+is revoked: the session signal is a failure with no previous value, so
+`AsyncResult.value` returns nothing, because that session's cache may hold another
+identity's rows. So is a retained session whose replacement cannot get a token,
+because the token Effect failed, died or overran the attempt: refs read from the
+session lose their rows too, with `credentialsFailed` or `credentialsDefect` as the
+`kind`. The library cannot tell a passing failure of the token source from a user
+who signed out, so a brief failure of the token source blanks what the session
+showed until a replacement connects.
+
+So is a retained session whose replacement connects under a different identity, with
+`identityChanged` as the `kind`, as soon as the replacement connects: before its
+subscriptions and `setup` run, and whether or not they succeed. The replacement itself
+carries on, because its own connection is clean. Until it is live, the session signal,
+`wsSupervisedSessionAtom` and `wsTableGroupSnapshotAtom` read as a waiting failure with no
+value, whose error is `ConnectionLostError`, because a lost connection is what happened
+to the old session. Once it is live, `wsTableGroupSnapshotAtom` is `Initial` until its
+subscription applies. `ConnectionIdentityChangedError` never appears on this path.
+
+A client with no `token` gets a new identity on every connection, so all of its
+replacements go this way, where a client with a token keeps showing the previous rows,
+as waiting, until the new subscription applies. To keep them, keep the identity: give
+the client a `token`, because the same token keeps the same identity. `session.token` is
+the one the server issued to a connection that had none.
+
+A revocation reaches back through every session the supervisor has replaced under
+that identity, not only the latest: a snapshot atom that nothing has read for a while
+and a ref still open on an older session lose their rows all the same, and that
+session's `isRevoked()` turns true. Any other end keeps the rows, including a
+replacement that got its token and failed to connect.
+
+`wsTableGroupSnapshotAtom` carries the previous rows only into a session the supervisor
+built to replace the last one under the same identity, and keeps them if that
+replacement fails before its subscription applies. Everything else starts with none: a
+connection atom that moves to another supervisor, one that goes `Initial` when a user
+signs out, and a session with no supervisor, whose rows go to no other connection.
+
+A session you hold directly, from `client.ws.scoped` or a layer, has no supervisor to
+withdraw it, and you decide when to stop reading it. Its refs and streams fail, but
+`session.cache` and a view's `toArray` keep serving the rows after any end. Watch for
+the end with `session.observeInvalidation`, whose `kind` says what happened, or ask
+`session.isRevoked()`, which is true once those rows should no longer be shown, and
+already true when an observer hears of such an end.
 
 `setup` runs once per session. Server state that belongs to a connection rather
 than to a session (presence, for example) is discarded when the server sees the
@@ -413,16 +465,11 @@ next drop; a failure ends the session (the supervisor then replaces it), and a
 drop while it runs, including a call it makes being refused by a socket found
 closed, interrupts it instead. Keep it idempotent.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
-import * as StdbClient from "effect-spacetimedb/client"
 import * as Stdb from "effect-spacetimedb"
+import { DbConnection } from "./module_bindings"
 
-declare const Module: Stdb.AnyStdbModule
-declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
-  typeof Module.spec,
-  unknown
->
 declare const uri: string
 declare const databaseName: string
 // Never a token it already handed out, nor one due for refresh (see Tokens).
@@ -438,7 +485,6 @@ const supervisor = StdbClient.wsSupervisorGenerated({
     uri,
     databaseName,
     token: fetchFreshToken,
-    connectTimeoutMillis: 10_000,
     automaticReconnect: {},
   },
   setup: registerPresence,
@@ -449,7 +495,10 @@ const supervisor = StdbClient.wsSupervisorGenerated({
 A reconnect that comes back under a different identity parks the supervisor in
 `fatal` with a `WsConnectError` whose `cause` is `ConnectionIdentityChangedError`:
 replacing the session would silently serve another identity's data, so the owner
-decides, typically by constructing a supervisor for the new credentials.
+decides, typically by constructing a supervisor for the new credentials. That is the
+SDK's own reconnect, on a session whose subscriptions would carry over. A replacement
+the supervisor builds after a session ended is a new connection, so it does not park:
+it takes the old session's rows away, as above, and starts with none.
 
 ## Tokens
 
@@ -458,11 +507,11 @@ evaluated for every connection attempt: each scoped acquisition, every session a
 supervisor builds, and with automatic reconnect also whenever the SDK refreshes
 its retained token, which it does before a reconnect when that token has no
 expiry, has 5% of its lifetime (at least 30 seconds) or less left, or was
-rejected. An acquisition's evaluation is bounded by `connectTimeoutMillis`,
+rejected. An acquisition's evaluation is bounded by `connectDurationMax`,
 and a failure (any `Error`) fails that attempt with `WsConnectError` carrying
 it as `cause`.
 A refresh runs within its reconnect attempt's bound (the SDK's delay plus
-`connectTimeoutMillis`). One that fails, dies or overruns that bound ends the
+`connectDurationMax`). One that fails, dies or overruns that bound ends the
 session rather than let the SDK retry a token that may never come back (a
 signed-out user). A supervisor reports a failure as that `WsConnectError` and
 an overrun as `WsConnectError` with a `WsConnectTimeoutError` cause, and its
@@ -479,6 +528,14 @@ even while the client clock counts it valid: the server may just have refused
 it (revoked, or the client clock runs behind the server's). The pattern: a
 token cached when the session was checked may serve the first attempt while
 it is not due; every later evaluation fetches a fresh token, or fails.
+
+## When a server message cannot be read
+
+If the SDK cannot decode or apply a server message, it closes the connection even with automatic reconnect enabled. During acquisition, `WsConnectError.cause` carries a `WsProtocolError` with the SDK error and original decode cause. After acquisition, subscriptions are invalidated with kind `protocolError` and cached rows are revoked because the update may have been partially applied. An in-flight call fails with `ConnectionLostError` and its outcome is unknown.
+
+The supervisor parks by default. Check that the bindings match the deployed module before reconnecting. The existing `isRetryable` hook can opt into another attempt.
+
+The SDK logs exceptions from application callbacks and continues delivering events. Row decoding and callback failures in the Effect client reach their owning stream or subscription. A subscription error-message formatter that throws produces a `SubscriptionTransportError`.
 
 
 ---
@@ -497,7 +554,7 @@ sidebar:
 
 `Stdb.project(Module)` is the Effect-native SDK companion for a module.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -505,13 +562,13 @@ declare const uri: string
 declare const databaseName: string
 declare const token: string
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.reducer("user_upsert", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.reducer("userUpsert", {
     params: Stdb.struct({ userId: Stdb.string(), name: Stdb.string() }),
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").add(Users)
+const Module = Stdb.Module.make("app").add(Users)
 const Example = Stdb.project(Module)
 const HttpLive = Example.client.http.layer({
   uri,
@@ -522,7 +579,7 @@ const HttpLive = Example.client.http.layer({
 
 const program = Effect.gen(function* () {
   const client = yield* Example.client.http.Tag
-  yield* client.Users.reducers.user_upsert({ userId: "u1", name: "Ada" })
+  yield* client.groups.Users.reducers.userUpsert({ userId: "u1", name: "Ada" })
 }).pipe(Effect.provide(HttpLive))
 ```
 
@@ -546,28 +603,32 @@ Every key in the projection — table, event-table, and view keys passed to
 `spacetime generate` emits. The wire name appears only inside SQL and
 subscription text. See [Codegen](/core-concepts/clients/codegen).
 
+## Calls to mounted modules
+
+Use the mount accessor at each level of the WebSocket or HTTP client. For example, `session.procedures.stockRoom.saveItem(args)` and `http.procedures.stockRoom.saveItem(args)` call the same library procedure. Reducers nest the same way. Subscribed rows appear under `session.cache.tables.stockRoom` or `session.cache.views.stockRoom`. HTTP routes belong to the root. Only Effect module mounts contribute typed members. See [Submodules](/core-concepts/databases/submodules).
+
 ## Group-Scoped HTTP Clients
 
 The HTTP client keeps its flat `reducers`, `procedures`, and `httpHandlers`
 records and also projects every authored group as a namespace:
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
 declare const uri: string
 declare const databaseName: string
 declare const token: string
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.reducer("user_upsert", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.reducer("userUpsert", {
     params: Stdb.struct({ userId: Stdb.string(), name: Stdb.string() }),
   }),
-  Stdb.StdbFn.procedure("user_get", {
+  Stdb.Fn.procedure("userGet", {
     params: Stdb.struct({ userId: Stdb.string() }),
     returns: Stdb.option(Stdb.struct({ userId: Stdb.string(), name: Stdb.string() })),
   }),
 )
-const Module = Stdb.StdbModule.make("app").add(Users)
+const Module = Stdb.Module.make("app").add(Users)
 const Example = Stdb.project(Module)
 const client = Example.client.http.make({
   uri,
@@ -582,23 +643,21 @@ const users = Example.client.http.group("Users", {
   callDurationMax: "10 seconds",
 })
 
-const write = client.Users.reducers.user_upsert({ userId: "u1", name: "Ada" })
-const read = client.Users.procedures.user_get({ userId: "u1" })
-const scopedWrite = users.reducers.user_upsert({ userId: "u1", name: "Ada" })
+const write = client.groups.Users.reducers.userUpsert({ userId: "u1", name: "Ada" })
+const read = client.groups.Users.procedures.userGet({ userId: "u1" })
+const scopedWrite = users.reducers.userUpsert({ userId: "u1", name: "Ada" })
 ```
 
 For a narrower type at a consumer boundary, construct only one group view:
 `Example.client.http.group("Users", { uri, databaseName, token, callDurationMax })`. The result
 contains only that group's `reducers`, `procedures`, and `httpHandlers`.
 
-Grouped functions—including their `.raw` functions—are the exact same objects
-as the flat members, so grouping has no behavioral or wire-level cost. Group
-views are lazy and currently HTTP-only; WebSocket sessions remain flat.
-
-Group ids are client property keys. Module validation rejects ids that are not
-JavaScript identifiers or collide with framework/session keys (`reducers`,
-`procedures`, `subscribe`, and similar) or inherited-object names such as
-`constructor`.
+HTTP clients and WebSocket sessions both expose groups under `groups`.
+A group is built on first access. Its reducer and procedure functions,
+including `.raw`, have the same identity as the corresponding flat calls.
+HTTP groups also include their HTTP handlers. Group ids must be JavaScript
+identifiers. Prototype names such as `constructor` are reserved.
+`session.groups.identity` and `session.identity` are independent members.
 
 ## Raw Calls And Failures
 
@@ -607,7 +666,7 @@ typed call decodes declared domain errors into the error channel directly. The
 raw variant preserves a `DomainCallError` wrapper so callers can distinguish a
 remote declared error from transport, rejection, or decode failures.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 import * as StdbClient from "effect-spacetimedb/client"
@@ -616,20 +675,20 @@ const AppErrors = Stdb.errors.namespace("App")({
   UserMissing: Stdb.error({ userId: Stdb.string() }, { status: 404 }),
 })
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.procedure("user_get", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.procedure("userGet", {
     params: Stdb.struct({ userId: Stdb.string() }),
     returns: Stdb.option(Stdb.struct({ userId: Stdb.string(), name: Stdb.string() })),
     errors: AppErrors,
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").add(Users)
+const Module = Stdb.Module.make("app").add(Users)
 const Example = Stdb.project(Module)
 
 const program = Effect.gen(function* () {
   const client = yield* Example.client.http.Tag
-  return yield* client.procedures.user_get.raw({ userId: "u1" })
+  return yield* client.procedures.userGet.raw({ userId: "u1" })
 }).pipe(
   Effect.catchTag("DomainCallError", (failure: StdbClient.DomainCallError<unknown>) =>
     Effect.fail(failure.error),
@@ -641,34 +700,35 @@ The exported failure model is:
 
 | Type | Meaning |
 | --- | --- |
-| `CallFailure<E>` | Typed call error union: declared errors, `ConnectionLostError`, `CallNotSentError`, `ConnectionIdentityChangedError`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
-| `RawCallFailure<E>` | Raw call error union: `DomainCallError<E>`, `ConnectionLostError`, `CallNotSentError`, `ConnectionIdentityChangedError`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
+| `CallFailure<E>` | A typed HTTP call's error union: declared errors, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
+| `RawCallFailure<E>` | A raw HTTP call's error union: `DomainCallError<E>`, `RemoteRejectedError`, `TransportError`, or `StdbDecodeError`. |
+| `WsCallFailure<E>` | A typed WebSocket call's error union: `CallFailure<E>` plus `WsConnectionFailure`. |
+| `RawWsCallFailure<E>` | A raw WebSocket call's error union: `RawCallFailure<E>` plus `WsConnectionFailure`. |
+| `WsConnectionFailure` | What only a WebSocket session can add: `ConnectionLostError`, `CallNotSentError`, or `ConnectionIdentityChangedError`. |
 | `DomainCallError<E>` | Declared error preserved as a wrapper by `.raw`. |
 | `ConnectionLostError` | The connection was lost before a terminal response arrived (or the session had already ended); the call's outcome is unknown. |
+| `WsProtocolError` | A server message failed to decode or apply. The SDK error is available as its cause. |
 | `CallNotSentError` | With automatic reconnect: the session was reconnecting, so the call was never sent. Safe to retry once it is live. |
 | `ConnectionIdentityChangedError` | With automatic reconnect: a reconnect came back under a different identity and ended the session. |
 | `RemoteRejectedError` | The remote side rejected the call without a decodable declared error. |
 | `TransportError` | The HTTP or WebSocket transport failed before a typed response arrived. |
 | `StdbDecodeError` | A response, row, event, or payload could not be decoded with the module contract. |
 
-The lower-level `catchRawTags` helper is exported from
-`effect-spacetimedb/testing` for fixture and protocol-level assertions. Public
-application clients should usually handle the exported failure classes directly
-or use the typed call form.
+An HTTP call has no connection to lose, so its error type names none of the
+three connection errors, and a `catchTags` on it needs no arm for them.
 
 ## HTTP API Base URL
 
 Use `Stdb.httpApiBaseUrl` with `Stdb.toHttpApi(Module)` when you want a
 stock Effect `HttpApiClient` over typed `post`, `put`, or `patch` routes.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as Stdb from "effect-spacetimedb"
 
-declare const Module: Stdb.AnyStdbModule
 declare const uri: string
 declare const databaseName: string
 declare const token: string
@@ -703,41 +763,69 @@ sidebar:
 <a class="upstream-doc" href="https://spacetimedb.com/docs/databases/developing" target="_blank" rel="noopener noreferrer">SpacetimeDB: Dev & Publish ↗</a>
 
 Build with the native SpacetimeDB CLI. The module entry imports the host-only
-compiler, imports server polyfills as a side effect, and exports the compiled
-schema.
+compiler and exports the compiled schema:
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 import { build } from "effect-spacetimedb/server-compiler"
 
-const Module = Stdb.StdbModule.make("app")
+const Module = Stdb.Module.make("app")
 
-export const compiled = build(Module, [])
+const compiled = build(Module, [])
 export const ModuleExports = compiled.exportGroup()
 export default compiled.schema
 ```
 
-Publish a built bundle with the native SpacetimeDB CLI rather than a placeholder
-module-path publish command:
+`ModuleExports` and the default are the entry's only exports. The SDK refuses
+any other named export with `TypeError: exporting something that is not a
+spacetime export`, so a contract or a compiled value re-exported from the entry
+stops both `publish` and `generate`. A type-only re-export is erased and safe.
+
+Publish with the native CLI. `spacetime publish` builds the module first, or
+takes a bundle you built yourself. The CLI's default server is Maincloud, so
+name the server you mean:
 
 ```sh
+spacetime publish --server local --yes <dbName>
+
 spacetime build --module-path <moduleDir>
 spacetime publish --js-path <moduleDir>/dist/bundle.js --server <url> <dbName>
 ```
 
-The upstream `spacetime dev` command needs the full module path, server,
-database, identity, and publish settings for your local environment; see the
-[SpacetimeDB CLI docs](https://spacetimedb.com/docs/databases/developing) for the
-dev and publish flags.
+Build, publish and generate bindings for the parent database. Its schema includes the mounted modules. A pinned canonical namespace lets you rename a TypeScript mount accessor without moving stored rows. If the canonical name changes, a data-preserving publish refuses to remove any old table that still contains rows. See [Submodules](/core-concepts/databases/submodules#names-and-migrations).
+
+## Dev Loop
+
+`spacetime dev` builds, publishes, and regenerates client bindings, and does it
+again on every change. In a project whose module is the current directory:
+
+```sh
+spacetime dev --server local --module-path . --server-only --yes <dbName>
+```
+
+Without `--module-path` it looks for a `spacetimedb/` subdirectory, which is
+where `spacetime init` puts a module. It works on an effect-spacetimedb module
+as it does on any other. Its build typechecks, so a project without
+`allowImportingTsExtensions` imports `./contract`, not `./contract.ts`
+(`TS5097`). See the
+[SpacetimeDB CLI docs](https://spacetimedb.com/docs/databases/developing) for its
+other flags.
 
 ## Programmatic Dev Servers
 
 `effect-spacetimedb/dev-server` is for tests and tools that need a temporary
 local `spacetimedb-standalone` plus a published prebuilt bundle. It does not
-build the module or generate clients.
+build the module or generate clients, so build first. A relative `bundlePath` is
+resolved against `cwd`, which defaults to `process.cwd()`.
 
-```typescript twoslash
+The server needs a platform's file system, path and child-process services and an
+HTTP client, and its scope owns the process:
+
+```typescript
+import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import { makeDevServer } from "effect-spacetimedb/dev-server"
 
 const program = Effect.gen(function* () {
@@ -749,9 +837,14 @@ const program = Effect.gen(function* () {
   yield* Effect.logInfo(
     `published ${runtime.databaseName} at ${runtime.baseUrl}`,
   )
-
-  return runtime
 })
+
+const main = program.pipe(
+  Effect.scoped,
+  Effect.provide(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
+)
+
+await Effect.runPromise(main)
 ```
 
 The runtime is its first database: `runtime.databaseIdentity`, `republish`,
@@ -767,9 +860,8 @@ CLI.
 
 The generated server bundle must include
 `effect-spacetimedb/server-compiler`; native `spacetime build` preserves its
-side-effectful server polyfill import. Off-host tests that import server modules
-also need the `spacetime:sys` stub from
-`effect-spacetimedb/testing/spacetime-sys`.
+side-effectful server polyfill import. To run handlers with no server at all, see
+[Testing](/core-concepts/testing).
 
 effect-spacetimedb controls the authored TypeScript contract and compiled
 module exports; SpacetimeDB still controls local dev, publish, runtime storage,
@@ -797,16 +889,16 @@ values. The host validates them before `init` or a migration runs and keeps
 them across publishes. Declare keys on the module and read them through its
 `Env` accessor.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import * as Stdb from "effect-spacetimedb"
 
-const Settings = Stdb.StdbGroup.make("Settings").add(
-  Stdb.StdbFn.procedure("describe_settings", { returns: Stdb.string() }),
+const Settings = Stdb.Group.make("Settings").add(
+  Stdb.Fn.procedure("describeSettings", { returns: Stdb.string() }),
 )
 
-const Module = Stdb.StdbModule.make("app", {
+const Module = Stdb.Module.make("app", {
   environment: {
     API_KEY: Stdb.Environment.secret(),
     MODE: Stdb.Environment.literal("development", "production"),
@@ -817,8 +909,8 @@ const Module = Stdb.StdbModule.make("app", {
 }).add(Settings)
 const { Env } = Module
 
-const SettingsLive = Stdb.StdbBuilder.group(Module, "Settings", {
-  describe_settings: Effect.fn(function* () {
+const SettingsLive = Stdb.Builder.group(Module, "Settings", {
+  describeSettings: Effect.fn(function* () {
     const env = yield* Env
     const apiKey = yield* env.API_KEY // Redacted<string>
     const mode = yield* env.MODE // "development" | "production"
@@ -846,7 +938,7 @@ against the host's own limits:
   8 KiB each;
 - all keys and literals together are at most 2 MiB.
 
-A violation throws `StdbValidationError` with an `InvalidEnvironmentKey`,
+A violation throws `StdbValidationDefect` with an `InvalidEnvironmentKey`,
 `InvalidEnvironmentLiteral`, `InvalidEnvironmentDeclaration`,
 `EnvironmentDeclarationCountExceeded`, `EnvironmentUnionEntriesExceeded` or
 `EnvironmentSchemaBytesExceeded` diagnostic, so a module the host would refuse
@@ -969,7 +1061,7 @@ A refused update leaves the stored values unchanged.
 ## Testing
 
 The module test harness takes values the way a publish does, and refuses an
-environment the host would refuse with `TestModuleEnvironmentError`:
+environment the host would refuse with `TestModuleEnvironmentDefect`:
 
 ```ts
 const harness = StdbTesting.makeTestModuleHarness(Module.spec, {
@@ -985,10 +1077,12 @@ that calls the SDK's own `env_get` can be backed by the same values with
 synchronous body, or `withEnvironmentAsync` for one that awaits; outside such a
 scope the stub refuses, like every other host call.
 
-## Not supported
+## Mounted libraries
 
-Only a root module can declare an environment. The contract DSL does not model
-upstream submodules, which cannot declare one either.
+Declare environment keys on the root module. Read them in the root handler
+and pass the values the library needs to its operation. A mounted Effect
+module has an empty `Env`, and a native alias has no `env` reader.
+See [Submodules](/core-concepts/databases/submodules).
 
 
 ---
@@ -1014,6 +1108,8 @@ publishing and upgrading databases. What follows is the part of the host model
 that decides whether a redeclaration of your contract can be published over a
 live database.
 
+For an existing effect-spacetimedb 0.8 application, follow [Upgrading from 0.8 to 0.9](/the-effect-layer/upgrading-from-0-8).
+
 ## What Publishing Can Change In Place
 
 Reducers, procedures, views, and HTTP handlers are not part of a migration plan
@@ -1029,6 +1125,7 @@ automatic:
   primary key;
 - adding or removing an auto-increment sequence — rejected if existing values
   already fall inside the new sequence's range;
+- changing a table between any two cache policies, retaining its rows and client bindings;
 - flipping a table between public and private;
 - appending columns **that declare a default**;
 - a layout-compatible column type change: a sum may gain variants appended at
@@ -1049,7 +1146,7 @@ and the database keeps its previous schema and its data.
 A new column has to be last and has to declare a default, because the host
 materializes that default into every existing row.
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
 const user = Stdb.table("user", {
@@ -1066,7 +1163,10 @@ Without a default the publish is refused while the plan is computed, before the
 database is touched. A default cannot be combined with `.primaryKey()`,
 `.unique()`, or `.autoInc()`, so a new key column is never an appended column.
 Appending rewrites every row of the table and disconnects connected clients; it
-is not a metadata-only change.
+is not a metadata-only change. After reconnecting, a client using the 2.16.1 SDK
+with pre-migration bindings reads the columns it knows in both the initial
+snapshot and subsequent updates. The decoder uses each row’s wire boundary
+to skip trailing fields.
 
 ## Adding A Unique Or Primary Key Constraint
 
@@ -1092,10 +1192,144 @@ database stores the table under, so changing it is a rename of the table itself
 — remove plus add — and it fails while the table holds rows. Changing a module's
 case-conversion policy rewrites every stored name the same way.
 
-Columns are the exception worth knowing, because `.name("db_name")` pins the
+Columns are the exception worth knowing, because `.columnName("db_name")` pins the
 database column name independently of the TypeScript field name. With the
 database name pinned, renaming the field renames only the accessor, which
 migrates in place.
+
+
+---
+
+# Source: /core-concepts/databases/submodules
+
+---
+draft: false
+title: Submodules
+description: Mount an Effect module or a native SDK library under a namespace in the same database.
+sidebar:
+  order: 5
+---
+
+A mount embeds a library's tables and functions in the parent database under a name prefix. A reducer can write to both modules in one transaction. If the reducer fails, both writes roll back. The namespace separates names only. It provides no security boundary. Table visibility and the checks in callable handlers still govern access.
+
+Use a **module mount** for a library with an effect-spacetimedb contract. Server table handles, handler capabilities and the client projection all know that contract. Use a **native mount** for an SDK module such as `@spacetimedb/files`. The server runs its native helpers with a scoped SDK context.
+
+## Declare the namespace
+
+This inventory library gives its caller both a table and a reusable operation. The parent pins the canonical namespace to `stock`.
+
+```ts title="inventory.ts"
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const item = Stdb.table("storedItem", {
+  public: true,
+  columns: { id: Stdb.u32().primaryKey() },
+})
+
+export const Inventory = Stdb.Module.make("inventory")
+  .addTables(item)
+  .add(Stdb.Group.make("Stock").add(
+    Stdb.Fn.reducer("receiveItem", {
+      params: Stdb.struct({ id: Stdb.u32() }),
+    }),
+  ))
+
+export const receive = (id: number) =>
+  Effect.flatMap(Inventory.Db, (db) => db.storedItem.insert({ id }))
+```
+
+```ts title="warehouse.ts"
+import * as Stdb from "effect-spacetimedb"
+import { Inventory } from "./inventory"
+
+export const Warehouse = Stdb.Module.make("warehouse")
+  .mount("stockRoom", Inventory, { name: "stock" })
+```
+
+## Implement the mount
+
+Pass the same module object and its implementations to the parent's build. The parent compiles a fresh child schema. This keeps a library's registrations, schedules, outboxes and table policies local to that instance.
+
+```ts title="server.ts"
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+import { build } from "effect-spacetimedb/server-compiler"
+import { Inventory, receive } from "./inventory"
+import { Warehouse } from "./warehouse"
+
+const stock = Stdb.Builder.group(Inventory, "Stock", {
+  receiveItem: ({ id }) => receive(id).pipe(Effect.asVoid),
+})
+const compiled = build(Warehouse, [
+  Stdb.Builder.mount(Warehouse, "stockRoom", {
+    module: Inventory,
+    implementations: [stock],
+  }),
+])
+export const ModuleExports = compiled.exportGroup()
+export default compiled.schema
+```
+
+From a parent reducer or transaction, use `Db` for direct table access or `mounts.stockRoom.run` to reuse the library's operation. Both effects below use the caller's transaction.
+
+```ts
+import * as Effect from "effect/Effect"
+import { receive } from "./inventory"
+import { Warehouse } from "./warehouse"
+
+const writePair = (first: number, second: number) =>
+  Effect.gen(function* () {
+    const db = yield* Warehouse.Db
+    yield* db.stockRoom.storedItem.insert({ id: first })
+    yield* Warehouse.mounts.stockRoom.run(receive(second))
+  })
+```
+
+A procedure can run `Warehouse.withTx(writePair(1, 2))`. A root view can read `Warehouse.ReadonlyDb` or run an effect using `Inventory.From`. Running a library effect preserves handler-kind restrictions. A directly dispatched mounted view sees only its own tables through its database handles. To query a descendant from that view, run the descendant's `From` effect through its mount.
+
+For a native library, declare `mountNative<typeof import("…")>()("files")` in the contract. Import the library as a namespace in the server entry and pass it to `Builder.mountNative`. Both packages must resolve the same copy of `spacetimedb/server`. Choose the native alias for the current handler when calling a synchronous helper:
+
+| Where the helper runs | Parent accessor |
+| --- | --- |
+| Reducer or transaction body, including an HTTP transaction | `mounts.files.use(fn)` or `use("mutation", fn)` |
+| Procedure outside a transaction | `mounts.files.use("procedure", fn)` |
+| HTTP handler outside a transaction | `mounts.files.use("http", fn)` |
+
+The callback receives the scoped native context. Procedure and HTTP aliases open a transaction with `ctx.withTx` for table access. Views have no native alias. A native sender error becomes a typed sender failure, a known host error becomes a host failure, and other exceptions remain defects. See [File Storage](/core-concepts/tables/file-storage) for a complete native mount.
+
+## Read and call from a client
+
+Project the parent contract and generate bindings for the parent database. The same WebSocket session reaches every typed mount.
+
+| Operation | Inventory example |
+| --- | --- |
+| Call a reducer | `session.reducers.stockRoom.receiveItem({ id: 1 })` |
+| Subscribe to a table | `session.subscribe(projected.targets.tables.stockRoom.storedItem)` |
+| Read the subscribed cache | `session.cache.tables.stockRoom.storedItem.id.find(1)` |
+| Observe rows by path | `session.subscribeTableRef("stockRoom.storedItem")` or `session.streamTable("stockRoom.storedItem")` |
+| Call over HTTP | `projected.client.http.make(config).reducers.stockRoom.receiveItem({ id: 1 })` |
+
+Procedures follow the same namespace under `procedures` on both transports. Public event tables and views appear under `targets.eventTables` and `targets.views`. Filter a table target with `.where(...)` or pass a parameterized view its declared arguments. The root supervisor accepts the same targets. Private tables stay off the client, scheduled functions and outbox settle reducers stay off the callable facade, and native mounts have no typed Effect client. Their generated members remain accessible on the raw SDK connection. Table refs, streams and table, row and group atoms take dotted **accessor paths**, including every mount key.
+
+## Names and migrations
+
+Here `stockRoom.storedItem` is the TypeScript accessor path. The SQL relation is `"stock"."stored_item"`, and the reducer's wire name is `stock.receive_item`. Without an explicit `name`, the parent module's case policy determines the namespace. The library's own policy determines its members. Nested mounts apply those rules one segment at a time.
+
+To rename `stockRoom` to `inventory` while keeping rows and wire names, retain `{ name: "stock" }`, update your accessor paths and regenerate client bindings. Changing the canonical namespace drops the old tables and creates new ones. A data-preserving publish refuses to remove a table while it holds rows. Plan the data migration before publishing that change.
+
+## What belongs at the root
+
+- Declare environment variables on the root. Mounted aliases have no environment reader. Pass required values to library functions.
+- Declare lifecycle hooks on the root. The host rejects hooks inside a mount. The root hook can run a library effect.
+- Declare HTTP routes on the root. The host serves only the root router. Implement a root route with `mounts.stockRoom.run(...)` when the library owns the logic.
+- Declare inter-database receivers on the root. Receiver wire names are fixed and the CLI emits receiver bindings only for root reducers. A library may own an outbox and its local settle handler.
+
+The package supports four levels of mounts and one mount of a given Effect module per parent. These limits bound TypeScript inference and keep each mount associated with one compiled instance. The host accepts deeper graphs and repeated libraries.
+
+## Test the parent and child together
+
+Create one harness with `makeTestModuleHarness(Warehouse.spec)` and bind the parent's implementations with `bindCallables`. Inspect `harness.db.stockRoom.storedItem` after invoking a handler. Root and mounted writes commit or roll back together. For a native mount, pass `nativeMounts` with a factory keyed by the dotted accessor path. It receives the current parent context and returns the alias your native helper expects. Supply a stand-in only for mounts the test calls. See [Testing](/core-concepts/testing).
 
 
 ---
@@ -1115,7 +1349,7 @@ sidebar:
 Reducers run inside the host reducer transaction and may yield `Db` directly.
 Procedures and HTTP handlers open explicit transactions with `Tx` or `HttpTx`.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -1126,23 +1360,23 @@ const counter = Stdb.table("counter", {
   },
 })
 
-const Counters = Stdb.StdbGroup.make("Counters")
-  .add(Stdb.StdbFn.reducer("counter_inc", { params: Stdb.struct({ id: Stdb.string() }) }))
-  .add(Stdb.StdbFn.procedure("counter_read", {
+const Counters = Stdb.Group.make("Counters")
+  .add(Stdb.Fn.reducer("counterInc", { params: Stdb.struct({ id: Stdb.string() }) }))
+  .add(Stdb.Fn.procedure("counterRead", {
     params: Stdb.struct({ id: Stdb.string() }),
     returns: Stdb.option(counter.row),
   }))
 
-const Module = Stdb.StdbModule.make("app").addTables(counter).add(Counters)
+const Module = Stdb.Module.make("app").addTables(counter).add(Counters)
 const { Db, Tx } = Module
 
-const CountersLive = Stdb.StdbBuilder.group(Module, "Counters", {
-  counter_inc: Effect.fn(function* ({ id }) {
+const CountersLive = Stdb.Builder.group(Module, "Counters", {
+  counterInc: Effect.fn(function* ({ id }) {
     const db = yield* Db
     const current = yield* db.counter.id.find(id)
-    yield* db.counter.id.replace({ id, value: (current?.value ?? 0) + 1 })
+    yield* db.counter.id.update({ id, value: (current?.value ?? 0) + 1 })
   }),
-  counter_read: Effect.fn(function* ({ id }) {
+  counterRead: Effect.fn(function* ({ id }) {
     const tx = yield* Tx
     return yield* tx.run(
       Effect.gen(function* () {
@@ -1167,7 +1401,7 @@ transaction. Native host abort outcomes surface as typed errors such as
 
 HTTP handlers use `HttpTx` for the same explicit transaction boundary:
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
@@ -1179,24 +1413,24 @@ const counter = Stdb.table("counter", {
   },
 })
 
-const Routes = Stdb.StdbHttpGroup.make("Routes").add(
-  Stdb.StdbHttp.post("counter_inc", "/counter/inc", {
+const Routes = Stdb.HttpGroup.make("Routes").add(
+  Stdb.Http.post("counterInc", "/counter/inc", {
     request: Schema.Struct({ id: Schema.String }),
     response: Schema.Void,
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").addTables(counter).add(Routes)
+const Module = Stdb.Module.make("app").addTables(counter).add(Routes)
 const { Db, HttpTx } = Module
 
-const RoutesLive = Stdb.StdbBuilder.group(Module, "Routes", {
-  counter_inc: Effect.fn(function* ({ id }) {
+const RoutesLive = Stdb.Builder.group(Module, "Routes", {
+  counterInc: Effect.fn(function* ({ id }) {
     const tx = yield* HttpTx
     yield* tx.run(
       Effect.gen(function* () {
         const db = yield* Db
         const current = yield* db.counter.id.find(id)
-        yield* db.counter.id.replace({
+        yield* db.counter.id.update({
           id,
           value: (current?.value ?? 0) + 1,
         })
@@ -1228,35 +1462,35 @@ Declared errors are tagged errors with a namespace prefix. The namespace keeps
 wire tags globally unique within a module, while each field uses a normal
 `Stdb.*` value type.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
 const AppErrors = Stdb.errors.namespace("App")({
-  UserMissing: Stdb.error({ userId: Stdb.string() }),
+  UserMissing: Stdb.error({ userId: Stdb.string() }, { status: 404 }),
 })
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.reducer("user_require", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.reducer("userRequire", {
     params: Stdb.struct({ userId: Stdb.string() }),
     errors: AppErrors,
   }),
-  Stdb.StdbFn.procedure("user_get", {
+  Stdb.Fn.procedure("userGet", {
     params: Stdb.struct({ userId: Stdb.string() }),
     returns: Stdb.option(Stdb.struct({ id: Stdb.string() })),
     errors: AppErrors,
   }),
 )
 
-const UserRoutes = Stdb.StdbHttpGroup.make("UserRoutes").add(
-  Stdb.StdbHttp.post("user_token_rotate", "/users/token/rotate", {
+const UserRoutes = Stdb.HttpGroup.make("UserRoutes").add(
+  Stdb.Http.post("userTokenRotate", "/users/token/rotate", {
     request: Stdb.struct({ userId: Stdb.string() }).schema,
     response: Stdb.struct({ token: Stdb.string() }).schema,
     errors: AppErrors,
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").add(Users).add(UserRoutes)
+const Module = Stdb.Module.make("app").add(Users).add(UserRoutes)
 
 const fail = (userId: string) =>
   Effect.gen(function* () {
@@ -1277,7 +1511,7 @@ Clients receive declared tagged errors directly from reducer and procedure
 calls, and typed HTTP routes deliver the same errors through the projected
 Effect `HttpApi` client:
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
@@ -1290,30 +1524,30 @@ declare const token: string
 declare const userId: string
 
 const AppErrors = Stdb.errors.namespace("App")({
-  UserMissing: Stdb.error({ userId: Stdb.string() }),
+  UserMissing: Stdb.error({ userId: Stdb.string() }, { status: 404 }),
 })
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.reducer("user_require", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.reducer("userRequire", {
     params: Stdb.struct({ userId: Stdb.string() }),
     errors: AppErrors,
   }),
-  Stdb.StdbFn.procedure("user_get", {
+  Stdb.Fn.procedure("userGet", {
     params: Stdb.struct({ userId: Stdb.string() }),
     returns: Stdb.option(Stdb.struct({ id: Stdb.string() })),
     errors: AppErrors,
   }),
 )
 
-const UserRoutes = Stdb.StdbHttpGroup.make("UserRoutes").add(
-  Stdb.StdbHttp.post("user_token_rotate", "/users/token/rotate", {
+const UserRoutes = Stdb.HttpGroup.make("UserRoutes").add(
+  Stdb.Http.post("userTokenRotate", "/users/token/rotate", {
     request: Stdb.struct({ userId: Stdb.string() }).schema,
     response: Stdb.struct({ token: Stdb.string() }).schema,
     errors: AppErrors,
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").add(Users).add(UserRoutes)
+const Module = Stdb.Module.make("app").add(Users).add(UserRoutes)
 const Example = Stdb.project(Module)
 const rpcClient = Example.client.http.make({
   uri,
@@ -1322,13 +1556,13 @@ const rpcClient = Example.client.http.make({
   callDurationMax: "10 seconds",
 })
 
-const requireUser = rpcClient.reducers.user_require({ userId }).pipe(
+const requireUser = rpcClient.reducers.userRequire({ userId }).pipe(
   Effect.catchTag("AppUserMissing", (error) =>
     Effect.log(`missing ${error.userId}`),
   ),
 )
 
-const findUser = rpcClient.procedures.user_get({ userId }).pipe(
+const findUser = rpcClient.procedures.userGet({ userId }).pipe(
   Effect.catchTag("AppUserMissing", () => Effect.succeed(undefined)),
 )
 
@@ -1342,7 +1576,7 @@ const rotateToken = Effect.gen(function* () {
     ),
   })
 
-  return yield* client.UserRoutes.user_token_rotate({
+  return yield* client.UserRoutes.userTokenRotate({
     payload: { userId },
   }).pipe(
     Effect.map((response) => response.token),
@@ -1367,6 +1601,36 @@ errors are emitted by reducer, procedure, and typed HTTP route calls.
 Declared errors are Effect failures. Defects remain defects, and
 plain host rejection strings are kept separate from decoded domain failures.
 
+## Undeclared failures
+
+A procedure never throws at the host, because the host answers an exception out
+of a procedure by discarding the module's isolate. Every procedure a client can
+call returns a result on the wire, so generated bindings type its return as
+`Result<T, string>`, and any failure lands in the `err` arm:
+
+- Arguments that fail to decode answer with a message about the caller's input.
+  Typed clients fail with `RemoteRejectedError` with `status: 400`.
+- Anything else, a defect, an interruption, an undeclared host failure or a
+  result that fails to encode, answers with a fixed message and no detail.
+  Typed clients fail with `RemoteRejectedError` with `status: 500`, and the module
+  log holds the cause.
+
+Any commit a procedure's `Tx.run` made before the failure stands; a failed
+`Tx.run` rolls back before the procedure answers. A scheduled procedure has no
+caller and must return unit, so its failure only reaches the module log.
+
+Reducers abort by throwing, so arguments that fail to decode are a sender error
+carrying the same message, and any other undeclared failure answers `530` with
+the host's own text. A view has no result arm, so a failure in one still throws;
+the host logs it, keeps the isolate and answers no rows.
+
+`build(...)` takes `onDefect` to observe every undeclared failure, once each. A
+`StdbSenderError` is an answer only from a reducer or a lifecycle hook; in a
+procedure or a view it is an undeclared failure like any other. A caller's bad
+arguments never reach `onDefect`, to a reducer, a procedure or a view: the caller
+did that, and any caller could fill the log. A view still throws on them, because
+a view has no reply. See [Runtime model](/the-effect-layer/runtime-model).
+
 
 ---
 
@@ -1387,15 +1651,15 @@ context exposes the module database identity, timestamp, HTTP request data,
 randomness, UUID helpers, and transaction-scoped DB access. It does not expose a
 caller `sender`, caller identity, or connection id.
 
-Declare routes in an `StdbHttpGroup`. Typed routes provide `request` and
+Declare routes in an `HttpGroup`. Typed routes provide `request` and
 `response` schemas; raw routes omit them and work directly with `Request` and
 `SyncResponse`.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
-const tokenRotation = Stdb.table("token_rotation", {
+const tokenRotation = Stdb.table("tokenRotation", {
   columns: {
     userId: Stdb.string().primaryKey(),
     token: Stdb.string(),
@@ -1405,31 +1669,31 @@ const tokenRotation = Stdb.table("token_rotation", {
 const RotateTokenInput = Stdb.struct({ userId: Stdb.string() }).schema
 const RotateTokenOutput = Stdb.struct({ token: Stdb.string() }).schema
 
-const Webhooks = Stdb.StdbHttpGroup.make("Webhooks")
+const Webhooks = Stdb.HttpGroup.make("Webhooks")
   .prefix("/webhooks")
-  .add(Stdb.StdbHttp.post("stripe_webhook", "/stripe"))
+  .add(Stdb.Http.post("stripeWebhook", "/stripe"))
   .add(
-    Stdb.StdbHttp.post("rotate_token", "/rotate", {
+    Stdb.Http.post("rotateToken", "/rotate", {
       request: RotateTokenInput,
       response: RotateTokenOutput,
     }),
   )
 
-const Module = Stdb.StdbModule.make("app")
+const Module = Stdb.Module.make("app")
   .addTables(tokenRotation)
   .add(Webhooks)
 const { HttpTx, Db } = Module
 
-const WebhooksLive = Stdb.StdbBuilder.group(Module, "Webhooks", {
-  stripe_webhook: (request) =>
+const WebhooksLive = Stdb.Builder.group(Module, "Webhooks", {
+  stripeWebhook: (request) =>
     Effect.succeed(new Stdb.SyncResponse(request.text(), { status: 202 })),
-  rotate_token: (args) =>
+  rotateToken: (args) =>
     Effect.gen(function* () {
       const tx = yield* HttpTx
       return yield* tx.run(
         Effect.gen(function* () {
           const db = yield* Db
-          const row = yield* db.token_rotation.userId.replace({
+          const row = yield* db.tokenRotation.userId.update({
             userId: args.userId,
             token: `token:${args.userId}`,
           })
@@ -1448,8 +1712,8 @@ These are inbound routes the module serves. They are unrelated to the
 `[module-http]` server setting, which governs requests a module *makes* — see
 [Procedures](/core-concepts/functions/procedures).
 
-effect-spacetimedb uses `StdbHttpGroup` plus
-`StdbBuilder.group(...)` instead of exporting handler functions directly. Typed
+effect-spacetimedb uses `HttpGroup` plus
+`Builder.group(...)` instead of exporting handler functions directly. Typed
 `post`, `put`, and `patch` routes can also be projected to an Effect `HttpApi`.
 
 ## Project Typed Routes To HttpApi
@@ -1458,7 +1722,7 @@ Typed `post`, `put`, and `patch` routes can also be projected into a canonical
 Effect `HttpApi`. The STDB HTTP group becomes the `HttpApiClient` property key,
 and the route name becomes the typed endpoint method.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
@@ -1473,14 +1737,14 @@ declare const userId: string
 const RotateTokenInput = Stdb.struct({ userId: Stdb.string() }).schema
 const RotateTokenOutput = Stdb.struct({ token: Stdb.string() }).schema
 
-const Webhooks = Stdb.StdbHttpGroup.make("Webhooks").add(
-  Stdb.StdbHttp.post("rotate_token", "/rotate", {
+const Webhooks = Stdb.HttpGroup.make("Webhooks").add(
+  Stdb.Http.post("rotateToken", "/rotate", {
     request: RotateTokenInput,
     response: RotateTokenOutput,
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").add(Webhooks)
+const Module = Stdb.Module.make("app").add(Webhooks)
 const api = Stdb.toHttpApi(Module)
 
 const program = Effect.gen(function* () {
@@ -1491,7 +1755,7 @@ const program = Effect.gen(function* () {
     ),
   })
 
-  const response = yield* client.Webhooks.rotate_token({
+  const response = yield* client.Webhooks.rotateToken({
     payload: { userId },
   })
 
@@ -1525,11 +1789,11 @@ The pieces, using the `examples/idc-pair` modules from the repository:
 
 | Piece | Declared with | Lives in |
 | --- | --- | --- |
-| Interface | a group of `Stdb.StdbFn.receiver(...)` | a package both sides import |
+| Interface | a group of `Stdb.Fn.receiver(...)` | a package both sides import |
 | Receiver binding | `generateReceiverArtifact` (`effect-spacetimedb/codegen`) | committed next to the caller, bound in its module entry |
-| Inbox | `Stdb.StdbBuilder.group(...)` with a guard | the receiving module |
+| Inbox | `Stdb.Builder.group(...)` with a guard | the receiving module |
 | Outbox | `Stdb.outboxTable(...)` | the calling module |
-| Settle reducer | `Stdb.StdbFn.outboxResult(...)` | the calling module |
+| Settle reducer | `Stdb.Fn.outboxResult(...)` | the calling module |
 
 ## Interface
 
@@ -1537,10 +1801,10 @@ An interface is a group whose endpoints are all receivers. Its declared errors
 are how the receiver refuses a call.
 
 ```ts
-export const IdcPairInbox = Stdb.StdbGroup.make("IdcPairInbox", {
+export const IdcPairInbox = Stdb.Group.make("IdcPairInbox", {
   errors: Stdb.errors(IdcPairUnknownSender, IdcPairBlankNote),
 }).add(
-  Stdb.StdbFn.receiver("receiveNote", {
+  Stdb.Fn.receiver("receiveNote", {
     params: Stdb.struct({ note: Stdb.string() }),
   }),
 )
@@ -1601,12 +1865,12 @@ export const PairInboxInterface = Stdb.RemoteInterface.make({
 })
 ```
 
-`RemoteInterface.make` throws `StdbValidationError` (`InvalidRemoteInterface`)
+`RemoteInterface.make` throws `StdbValidationDefect` (`InvalidRemoteInterface`)
 at load when an endpoint of the group is not a receiver or the name is not a
 SpacetimeDB identifier.
 
 A package that emits declarations annotates the exported group with
-`Stdb.StdbGroup<...>` and the interface with
+`Stdb.Group<...>` and the interface with
 `Stdb.RemoteInterfaceOf<"pair_inbox", typeof IdcPairInbox>`: their inferred
 types are built from internal helpers that a consumer's declaration emit
 cannot name.
@@ -1636,23 +1900,25 @@ const compiled = build(
 )
 ```
 
-`RemoteInterface.bind` throws `StdbValidationError`
+`RemoteInterface.bind` throws `StdbValidationDefect`
 (`RemoteInterfaceBindingMismatch`) at load when the binding no longer carries a
 receiver of the interface under its wire name with its parameters in order, and
 a receiver missing from the binding's declaration is a type error. `build`
 refuses a module with an outbox whose interface has no binding
 (`OutboxReceiverBindingMissing`) or an interface bound twice
 (`DuplicateReceiverBinding`); a binding no outbox uses is accepted.
-`StdbBuilder.plan` and the test harness never read a binding.
+The test harness binds implementations directly and never reads a binding.
 
 ## Inbox
 
 The receiving module adds the group like any other and implements it. A group
 implementing a receiver must declare a guard as its `middleware.reducers`;
-`StdbBuilder.group` throws `StdbValidationError` (`ReceiverWithoutGuard`)
+`Builder.group` throws `StdbValidationDefect` (`ReceiverWithoutGuard`)
 otherwise.
 
 ```ts
+const { Db, Env, ReducerCtx } = IdcPairReceiverModule
+
 export const requireTrustedSender = Effect.gen(function* () {
   const ctx = yield* ReducerCtx
   const env = yield* Env
@@ -1667,7 +1933,7 @@ export const requireTrustedSender = Effect.gen(function* () {
   }
 })
 
-export const IdcPairInboxLive = Stdb.StdbBuilder.group(
+export const IdcPairInboxLive = Stdb.Builder.group(
   IdcPairReceiverModule,
   "IdcPairInbox",
   {
@@ -1702,43 +1968,51 @@ An outbox table is bound to one receiver of one interface. Its row is the
 call: `msgId` (`u64`, primary key, auto-increment), `target` (the receiving
 database), the receiver's parameters as the binding defines them, any local
 columns you add (stored, never sent), and `enqueuedAt`. It has a `byTarget`
-index over `[target, msgId]`, is always private, and states its encoded size
-bound.
+index over `[target, msgId]`, is always private, and limits each encoded row.
 
 ```ts
 export const noteOutbox = Stdb.outboxTable("noteOutbox", {
   interface: PairInboxInterface,
   reducer: "receiveNote",
-  rowBytesMax: 4 * 1024,
 })
 ```
 
-`rowBytesMax` defaults to `Stdb.outboxRowBytesMaxDefault` (64 KiB) and may not
+The optional `rowBytesMax` setting defaults to `Stdb.outboxRowBytesMaxDefault` (64 KiB) and may not
 exceed `Stdb.outboxRowBytesMaxCeiling` (1 MiB), half of the 2 MiB request body
 a standalone host accepts: a row over that limit can never be delivered and
 would block its stream. Send ids and digests, never blobs.
 
 The insert is the send. The handle fills `msgId` and `enqueuedAt`, and its
-error channel carries `OutboxRowTooLarge` for a row over the bound, which your
+error channel carries `OutboxRowTooLargeError` for a row over the bound, which your
 handler must handle: drop the call, or refuse its own caller with an error it
 declares.
 
 ```ts
+const { Db, Env, ReducerCtx } = IdcPairSenderModule
+
 export const resolveReceiver = Effect.gen(function* () {
   const env = yield* Env
   const hex = yield* env.IDC_PAIR_RECEIVER
   return Stdb.RemoteInterface.peer(PairInboxInterface, new Identity(hex))
 })
 
-sendNote: Effect.fn(function* ({ note }) {
-  const target = yield* resolveReceiver
-  const db = yield* Db
-  yield* db.noteOutbox.insert({ target, note }).pipe(
-    Effect.catchTag("OutboxRowTooLarge", (tooLarge) =>
-      Effect.fail(IdcPairNoteTooLarge.make({ rowBytes: tooLarge.rowBytes })),
-    ),
-  )
-})
+export const IdcPairSendsLive = Stdb.Builder.group(
+  IdcPairSenderModule,
+  "IdcPairSends",
+  {
+    sendNote: Effect.fn(function* ({ note }) {
+      const target = yield* resolveReceiver
+      const db = yield* Db
+      yield* db.noteOutbox.insert({ target, note }).pipe(
+        Effect.catchTag("OutboxRowTooLargeError", (tooLarge) =>
+          Effect.fail(
+            IdcPairNoteTooLarge.make({ rowBytes: tooLarge.rowBytes }),
+          ),
+        ),
+      )
+    }),
+  },
+)
 ```
 
 `target` is a `PeerIdentity` of the interface, which only
@@ -1757,22 +2031,30 @@ receiver's failure text otherwise. Transport failures never settle; the host
 retries them.
 
 ```ts
-export const IdcPairSettles = Stdb.StdbGroup.make("IdcPairSettles").add(
-  Stdb.StdbFn.outboxResult("noteSettled", { table: noteOutbox }),
+export const IdcPairSettles = Stdb.Group.make("IdcPairSettles").add(
+  Stdb.Fn.outboxResult("noteSettled", { table: noteOutbox }),
 )
 
-noteSettled: ({ row, result }) =>
-  Effect.gen(function* () {
-    const db = yield* Db
-    yield* db.noteDelivery.insert({
-      msgId: row.msgId,
-      note: row.note,
-      ...StdbServer.OutboxResult.$match(result, {
-        Delivered: () => ({ delivered: true, message: "" }),
-        Refused: ({ message }) => ({ delivered: false, message }),
-      }),
-    })
-  }).pipe(Effect.orDie)
+export const IdcPairSettlesLive = Stdb.Builder.group(
+  IdcPairSenderModule,
+  "IdcPairSettles",
+  {
+    noteSettled: ({ row, result }) =>
+      Effect.gen(function* () {
+        const ctx = yield* ReducerCtx
+        const db = yield* Db
+        yield* db.noteDelivery.insert({
+          msgId: row.msgId,
+          note: row.note,
+          settledBy: ctx.sender,
+          ...StdbServer.OutboxResult.$match(result, {
+            Delivered: () => ({ delivered: true, message: "" }),
+            Refused: ({ message }) => ({ delivered: false, message }),
+          }),
+        })
+      }).pipe(Effect.orDie),
+  },
+)
 ```
 
 A settle handler's error type is `never`: the host does not retry a failed
@@ -1804,11 +2086,14 @@ database with no JWT, a failure settles `Refused`, the settle runs as the zero
 identity and the row is deleted. Tests choose every interleaving explicitly.
 
 ```ts
+declare const sender: StdbTesting.IdcPumpDatabase
+declare const receiver: StdbTesting.IdcPumpDatabase
+
 const pump = StdbTesting.makeIdcPump({
   links: [{ sender, receivers: [receiver] }],
 })
 pump.deliverNext("noteOutbox") // the head row of one stream
-pump.drain({ deliveriesMax: 100 })
+pump.drain() // up to 1,000 deliveries; `{ deliveriesMax }` sets another bound
 ```
 
 `IdcPump.recording({ databaseIdentity })` stands in for a receiver you do not
@@ -1852,24 +2137,24 @@ sidebar:
 <a class="upstream-doc" href="https://spacetimedb.com/docs/functions/reducers/lifecycle" target="_blank" rel="noopener noreferrer">SpacetimeDB: Lifecycle ↗</a>
 
 Lifecycle hooks can be declared in the module config and implemented with
-`StdbBuilder.lifecycle(...)`.
+`Builder.lifecycle(...)`.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
 const Lifecycle = {
-  init: Stdb.StdbFn.init(),
-  clientConnected: Stdb.StdbFn.clientConnected(),
-  clientDisconnected: Stdb.StdbFn.clientDisconnected(),
+  init: Stdb.Fn.init(),
+  clientConnected: Stdb.Fn.clientConnected(),
+  clientDisconnected: Stdb.Fn.clientDisconnected(),
 }
 
-const Module = Stdb.StdbModule.make("app", {
+const Module = Stdb.Module.make("app", {
   lifecycle: Lifecycle,
 })
 const { ReducerCtx } = Module
 
-const LifecycleLive = Stdb.StdbBuilder.lifecycle(Module, {
+const LifecycleLive = Stdb.Builder.lifecycle(Module, {
   // Runs once when the module is first published.
   init: () => Effect.log("module initialized"),
   // clientConnected / clientDisconnected run as the joining or leaving client,
@@ -1907,7 +2192,7 @@ sidebar:
 
 Procedures are declared in callable groups with params and a return value type.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -1919,18 +2204,18 @@ const user = Stdb.table("user", {
   },
 })
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.procedure("user_get", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.procedure("userGet", {
     params: Stdb.struct({ id: Stdb.string() }),
     returns: Stdb.option(user.row),
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const Module = Stdb.Module.make("app").addTables(user).add(Users)
 const { Db, Tx } = Module
 
-const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
-  user_get: Effect.fn(function* ({ id }) {
+const UsersLive = Stdb.Builder.group(Module, "Users", {
+  userGet: Effect.fn(function* ({ id }) {
     const tx = yield* Tx
     return yield* tx.run(
       Effect.gen(function* () {
@@ -1954,19 +2239,34 @@ while a transaction is open, so fetch first, then open the transaction that
 records the result.
 
 ```ts
-const { Http, Tx, Db } = Module
+const profile = Stdb.table("profile", {
+  columns: {
+    userId: Stdb.string().primaryKey(),
+    name: Stdb.string(),
+  },
+})
 
-const syncLive = Stdb.StdbBuilder.group(Module, "Sync", {
-  sync_profile: Effect.fn(function* ({ userId }) {
+const Sync = Stdb.Group.make("Sync").add(
+  Stdb.Fn.procedure("syncProfile", {
+    params: Stdb.struct({ userId: Stdb.string() }),
+    returns: Stdb.unit(),
+  }),
+)
+
+const SyncModule = Stdb.Module.make("app").addTables(profile).add(Sync)
+const { Http, Tx, Db } = SyncModule
+
+const SyncLive = Stdb.Builder.group(SyncModule, "Sync", {
+  syncProfile: Effect.fn(function* ({ userId }) {
     const http = yield* Http
-    const response = yield* http.fetch(`https://example.test/users/${userId}`)
-    const profile = yield* http.json<{ readonly name: string }>(response)
+    const response = yield* http.fetch(`https://example.test/users/${userId}`, { timeout: "5 seconds" })
+    const remote = yield* http.json<{ readonly name: string }>(response)
 
     const tx = yield* Tx
     return yield* tx.run(
       Effect.gen(function* () {
         const db = yield* Db
-        yield* db.user.userId.replace({ userId, name: profile.name })
+        yield* db.profile.userId.update({ userId, name: remote.name })
       }),
     )
   }),
@@ -1974,7 +2274,7 @@ const syncLive = Stdb.StdbBuilder.group(Module, "Sync", {
 ```
 
 Failures arrive as `StdbHostCallError` in the error channel, tagged with the
-operation (`http.fetch`, `http.json`, and so on).
+operation (`http.fetch`, `http.json`, and so on). `ProcedureHttpRequestOptions.timeout` accepts a `Duration.Input`. A finite bound reaches the host in microseconds. Passing `Duration.infinity` lets the host apply its own request policy.
 
 Two host policies decide whether a request is allowed at all, and both are the
 operator's, not the module's:
@@ -2003,7 +2303,7 @@ backed by a scheduled table. The scheduled endpoint receives
 `{ data: table.row }`; insert future work with the generated table
 `.schedule(row)` helper from a reducer or transaction body.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -2013,20 +2313,20 @@ const reminderSchedule = Stdb.scheduledTable("reminderSchedule", {
   },
 })
 
-const Reminders = Stdb.StdbGroup.make("Reminders").add(
-  Stdb.StdbFn.scheduledProcedure("reminderFire", {
+const Reminders = Stdb.Group.make("Reminders").add(
+  Stdb.Fn.scheduledProcedure("reminderFire", {
     table: reminderSchedule,
     allowExternalCallers: false,
   }),
 )
 
-const Module = Stdb.StdbModule.make("app")
+const Module = Stdb.Module.make("app")
   .addTables(reminderSchedule)
   .add(Reminders)
 
 const { Db } = Module
 
-const RemindersLive = Stdb.StdbBuilder.group(Module, "Reminders", {
+const RemindersLive = Stdb.Builder.group(Module, "Reminders", {
   reminderFire: Effect.fn(function* ({ data }) {
     yield* Effect.logInfo(`reminder: ${data.note}`)
   }),
@@ -2067,7 +2367,7 @@ sidebar:
 
 Reducer context is an Effect service yielded from the assembled module.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -2079,17 +2379,17 @@ const audit = Stdb.table("audit", {
   },
 })
 
-const Audit = Stdb.StdbGroup.make("Audit").add(
-  Stdb.StdbFn.reducer("audit_write", {
+const Audit = Stdb.Group.make("Audit").add(
+  Stdb.Fn.reducer("auditWrite", {
     params: Stdb.struct({ message: Stdb.string() }),
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").addTables(audit).add(Audit)
+const Module = Stdb.Module.make("app").addTables(audit).add(Audit)
 const { Db, ReducerCtx } = Module
 
-const AuditLive = Stdb.StdbBuilder.group(Module, "Audit", {
-  audit_write: Effect.fn(function* ({ message }) {
+const AuditLive = Stdb.Builder.group(Module, "Audit", {
+  auditWrite: Effect.fn(function* ({ message }) {
     const ctx = yield* ReducerCtx
     const db = yield* Db
     yield* db.audit.insert({
@@ -2146,15 +2446,15 @@ avoids runtime import cycles.
 ```text
 schema.ts             shared Effect schemas and value types
 tables/users.ts       table declarations
-users/contract.ts     StdbGroup.make().add(...)
-module.ts             StdbModule.make(...).addTables(...).add(...)
-users/live.ts         StdbBuilder.group(Module, "Users", ...)
+users/contract.ts     Group.make().add(...)
+module.ts             Module.make(...).addTables(...).add(...)
+users/live.ts         Builder.group(Module, "Users", ...)
 index.ts              build(Module, [...])
 ```
 
 ## Assemble The Module Once
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
 const user = Stdb.table("user", {
@@ -2162,13 +2462,13 @@ const user = Stdb.table("user", {
   columns: { id: Stdb.string().primaryKey() },
 })
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.reducer("user_upsert", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.reducer("userUpsert", {
     params: Stdb.struct({ id: Stdb.string(), name: Stdb.string() }),
   }),
 )
 
-export const Module = Stdb.StdbModule.make("app")
+export const Module = Stdb.Module.make("app")
   .addTables(user)
   .add(Users)
 
@@ -2180,11 +2480,11 @@ handlers. They are typed against the module's tables and scopes.
 
 ## Implement Groups By Name
 
-`StdbBuilder.group(Module, "GroupName", handlers)` takes a record whose keys
+`Builder.group(Module, "GroupName", handlers)` takes a record whose keys
 match endpoint names in the group. The builder checks that every endpoint is
 implemented exactly once.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -2193,24 +2493,24 @@ const user = Stdb.table("user", {
   columns: { id: Stdb.string().primaryKey(), name: Stdb.string() },
 })
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.reducer("user_upsert", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.reducer("userUpsert", {
     params: Stdb.struct({ id: Stdb.string(), name: Stdb.string() }),
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const Module = Stdb.Module.make("app").addTables(user).add(Users)
 const { Db } = Module
 
-const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
-  user_upsert: Effect.fn(function* (args) {
+const UsersLive = Stdb.Builder.group(Module, "Users", {
+  userUpsert: Effect.fn(function* (args) {
     const db = yield* Db
-    yield* db.user.id.replace(args)
+    yield* db.user.id.update(args)
   }),
 })
 ```
 
-Reducers are declared as data with `StdbFn.reducer(...)` and
+Reducers are declared as data with `Fn.reducer(...)` and
 implemented later with Effect handlers. Reducer handlers may yield `Db`,
 `ReducerCtx`, and `MutationCtx`; transaction boundaries remain the host reducer
 call.
@@ -2225,15 +2525,15 @@ no-argument `new Date()` throw typed runtime errors. Use `Random.*` from
 
 :::
 
-Lifecycle hooks use `StdbBuilder.lifecycle(Module, handlers)`. HTTP route groups
-use the same `StdbBuilder.group` shape as callable groups.
+Lifecycle hooks use `Builder.lifecycle(Module, handlers)`. HTTP route groups
+use the same `Builder.group` shape as callable groups.
 
 ## Build The Native Export
 
 ```ts
 import { build } from "effect-spacetimedb/server-compiler"
 
-export const compiled = build(Module, [UsersLive])
+const compiled = build(Module, [UsersLive])
 export const ModuleExports = compiled.exportGroup()
 export default compiled.schema
 ```
@@ -2241,8 +2541,8 @@ export default compiled.schema
 When storing implementations before building, keep the array readonly:
 
 ```ts
-export const LiveGroups = [UsersLive] as const
-export const compiled = build(Module, LiveGroups)
+const LiveGroups = [UsersLive] as const
+const compiled = build(Module, LiveGroups)
 ```
 
 :::note
@@ -2258,16 +2558,16 @@ import * as Layer from "effect/Layer"
 import { build } from "effect-spacetimedb/server-compiler"
 
 // A custom capability your handlers need — here, injected config.
-class AppConfig extends Context.Tag("AppConfig")<
+class AppConfig extends Context.Service<
   AppConfig,
   { readonly welcomeMessage: string }
->() {}
+>()("AppConfig") {}
 
 // Handlers read it with `const config = yield* AppConfig`. Because a handler
 // requires AppConfig, build now asks for its runtime layer.
 const AppConfigLive = Layer.succeed(AppConfig, { welcomeMessage: "welcome" })
 
-export const compiled = build(Module, [UsersLive], { runtime: AppConfigLive })
+const compiled = build(Module, [UsersLive], { runtime: AppConfigLive })
 ```
 
 
@@ -2286,9 +2586,9 @@ sidebar:
 <a class="upstream-doc" href="https://spacetimedb.com/docs/functions/views" target="_blank" rel="noopener noreferrer">SpacetimeDB: Views ↗</a>
 
 Views are callable group endpoints with return value types. Sender views use
-`StdbFn.view(...)`; anonymous views use `StdbFn.anonymousView(...)`.
+`Fn.view(...)`; anonymous views use `Fn.anonymousView(...)`.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -2300,20 +2600,20 @@ const user = Stdb.table("user", {
   },
 })
 
-const Users = Stdb.StdbGroup.make("Users")
-  .add(Stdb.StdbFn.view("self_user", { returns: Stdb.option(user.row) }))
-  .add(Stdb.StdbFn.anonymousView("all_users", { returns: Stdb.array(user.row, { minimum: 0, maximum: 1_000 }) }))
+const Users = Stdb.Group.make("Users")
+  .add(Stdb.Fn.view("selfUser", { returns: Stdb.option(user.row) }))
+  .add(Stdb.Fn.anonymousView("allUsers", { returns: Stdb.array(user.row) }))
 
-const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const Module = Stdb.Module.make("app").addTables(user).add(Users)
 const { ReadonlyDb, ViewCtx } = Module
 
-const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
-  self_user: Effect.fn(function* () {
+const UsersLive = Stdb.Builder.group(Module, "Users", {
+  selfUser: Effect.fn(function* () {
     const ctx = yield* ViewCtx
     const db = yield* ReadonlyDb
     return yield* db.user.id.find(String(ctx.sender))
   }),
-  all_users: Effect.fn(function* () {
+  allUsers: Effect.fn(function* () {
     const db = yield* ReadonlyDb
     return yield* db.user.toArray()
   }),
@@ -2331,7 +2631,7 @@ handler receives them decoded, and the host computes one answer per distinct
 argument tuple: an anonymous view's answer is shared by every caller passing
 the same arguments, a sender view's is per caller.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -2345,17 +2645,17 @@ const post = Stdb.table("post", {
   indexes: (columns) => [Stdb.index("byAuthor", [columns.authorId])],
 })
 
-const Posts = Stdb.StdbGroup.make("Posts").add(
-  Stdb.StdbFn.anonymousView("postsByAuthor", {
+const Posts = Stdb.Group.make("Posts").add(
+  Stdb.Fn.anonymousView("postsByAuthor", {
     params: Stdb.struct({ authorId: Stdb.string() }),
-    returns: Stdb.array(post.row, { minimum: 0, maximum: 1_000 }),
+    returns: Stdb.array(post.row),
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").addTables(post).add(Posts)
+const Module = Stdb.Module.make("app").addTables(post).add(Posts)
 const { ReadonlyDb } = Module
 
-const PostsLive = Stdb.StdbBuilder.group(Module, "Posts", {
+const PostsLive = Stdb.Builder.group(Module, "Posts", {
   postsByAuthor: Effect.fn(function* ({ authorId }) {
     const db = yield* ReadonlyDb
     return yield* db.post.byAuthor.filterToArray(authorId)
@@ -2369,6 +2669,8 @@ arguments, and the WebSocket session's `viewGroup`, `streamViewRows` and
 params:
 
 ```typescript
+declare const session: StdbClient.WsSession<typeof Module.spec>
+
 session.viewGroup(["postsByAuthor"] as const, {
   args: { postsByAuthor: { authorId: "ada" } },
 })
@@ -2435,12 +2737,15 @@ If two consumers subscribe to the same table or event table, they own two native
 query sets. The wrapper does not add query-key APIs or client-side
 deduplication on top of the native SDK.
 
+## Targets under a mount
+
+Subscribe through the root session or supervisor with `projected.targets.tables.stockRoom.storedItem`. Apply `.where(...)` for a filtered table, or call a parameterized target such as `projected.targets.views.stockRoom.matchingItems({ id: 1 })`. The projection resolves canonical SQL identifiers for each segment. APIs that take a key, including table refs, row streams and atoms, use the dotted accessor path such as `"stockRoom.storedItem"`. See [Submodules](/core-concepts/databases/submodules#read-and-call-from-a-client).
+
 ## Streams
 
-Persistent-table streams use bounded callback queues by default and should be
-treated as invalidation signals: re-read the authoritative session cache when a
-change arrives. Event-table streams are raw event feeds and are unbounded unless
-you opt into a bounded buffer and accept lossy overflow behavior.
+Table deltas and event-table inserts use unbounded queues by default. A slow
+consumer retains each undelivered change in memory. Snapshot streams use a
+sliding buffer of 1,024 signals because each signal reads the current cache.
 
 The session stream helper family covers the common shapes:
 
@@ -2453,11 +2758,11 @@ The session stream helper family covers the common shapes:
 | `streamEventTable(key, options?)` | Event-table insert feed. |
 | `streamTarget(target, options?)` | Stream a projected subscription target. |
 
-Persistent-table streams accept `{ buffer: { bufferSize, strategy } }`, where
-`strategy` is `"sliding"` or `"dropping"`. The default is a bounded sliding
-queue sized for cache invalidation signals. Event-table streams accept
-`{ buffer: { bufferSize } }`; overflowing that buffer fails the stream with
-`EventTableStreamOverflowError` rather than silently dropping events.
+Set `buffer: { bufferSize }` to cap a queue. Overflow then fails the stream
+with a subscription transport error whose cause is `TableStreamOverflowError`
+or `EventTableStreamOverflowError`. Table delta streams also accept
+`strategy: "sliding"` to discard the oldest queued change or `"dropping"` to
+discard the incoming change. A strategy alone selects a capacity of 1,024.
 
 Event tables use native delivery semantics. Every live native query set that
 covers an event can deliver that event, so subscribe once at an app state
@@ -2485,14 +2790,14 @@ emission still re-reads the post-apply cache and converges to current state.
 `effect-spacetimedb/client` when you are working with lower-level generated
 callbacks yourself.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as StdbClient from "effect-spacetimedb/client"
 
 declare const rawContext: unknown
 
 const decoded = StdbClient.decodeStdbEventContext(rawContext).pipe(
-  Effect.map((context): StdbClient.StdbEventContextType => context),
+  Effect.map((context): StdbClient.StdbEventContext => context),
 )
 ```
 
@@ -2519,17 +2824,17 @@ sidebar:
 
 effect-spacetimedb supports table-level public visibility:
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
-const publicUser = Stdb.table("public_user", {
+const publicUser = Stdb.table("publicUser", {
   public: true,
   columns: {
     id: Stdb.string().primaryKey(),
   },
 })
 
-const privateAudit = Stdb.table("private_audit", {
+const privateAudit = Stdb.table("privateAudit", {
   public: false,
   columns: {
     id: Stdb.u64().primaryKey().autoInc(),
@@ -2550,42 +2855,48 @@ intentionally.
 ---
 draft: false
 title: Auto-Increment
-description: Use auto-increment primary keys and generated schedule ids.
+description: Use auto-increment columns and generated schedule ids.
 sidebar:
   order: 4
 ---
 
 <a class="upstream-doc" href="https://spacetimedb.com/docs/tables/auto-increment" target="_blank" rel="noopener noreferrer">SpacetimeDB: Auto-Increment ↗</a>
 
-Auto-increment is column metadata on a primary key. Chain `.primaryKey()` before
-`.autoInc()` so the declaration satisfies SpacetimeDB's host rules.
+Auto-increment is column metadata on an integer column. The column does not
+have to be a key: `.autoInc()` works alone and next to `.primaryKey()`,
+`.unique()` or `.index()`, in any order.
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
 const issue = Stdb.table("issue", {
   public: true,
   columns: {
     id: Stdb.u64().primaryKey().autoInc(),
+    number: Stdb.u32().unique().autoInc(),
     title: Stdb.string(),
   },
 })
 ```
 
+Inserting `0` asks the host for the column's next value, and any other value is
+stored as given. An update treats a `0` the same way, so a row can take a fresh
+value in place.
+
 Scheduled tables derive their auto-increment schedule id for you:
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
-const reminderSchedule = Stdb.scheduledTable("reminder_schedule", {
+const reminderSchedule = Stdb.scheduledTable("reminderSchedule", {
   columns: {
     note: Stdb.string(),
   },
 })
 ```
 
-effect-spacetimedb validates auto-increment at declaration time:
-`.autoInc()` without `.primaryKey()` throws, and defaults cannot be combined with
+effect-spacetimedb validates auto-increment at declaration time: `.autoInc()` on
+an optional or non-integer column throws, and defaults cannot be combined with
 primary keys or auto-increment columns.
 
 `.autoInc()` is narrower than `.primaryKey()`: only the integer widths carry a
@@ -2611,12 +2922,14 @@ Tables are declared with `Stdb.table(name, options)`. Bind each table to a
 variable so its `row` value type, column metadata, index metadata, and generated
 accessor types can flow through the module.
 
-```typescript twoslash
+```typescript
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 
 const UserId = Schema.String.pipe(Schema.brand("UserId"))
-const ShortString = Stdb.string(Schema.String.pipe(Schema.minLength(1)))
+const ShortString = Stdb.string(
+  Schema.String.pipe(Schema.check(Schema.isMinLength(1))),
+)
 
 export const user = Stdb.table("user", {
   public: true,
@@ -2629,11 +2942,11 @@ export const user = Stdb.table("user", {
 export const membership = Stdb.table("membership", {
   public: false,
   columns: {
-    tenant_id: ShortString,
+    tenantId: ShortString,
     email: ShortString,
   },
-  indexes: (c) => [Stdb.index("membership_email_tenant_idx", [c.email, c.tenant_id])],
-  constraints: (c) => [Stdb.unique("membership_tenant_email_unique", [c.tenant_id, c.email])],
+  indexes: (c) => [Stdb.index("byTenantEmail", [c.tenantId, c.email])],
+  constraints: (c) => [Stdb.unique("tenantEmailUnique", [c.tenantId, c.email])],
 })
 ```
 
@@ -2649,34 +2962,26 @@ both.
 
 ## Value-Type Pattern
 
-Use a plain Effect schema as the domain source of truth, then wrap it at
-SpaceTimeDB declaration boundaries:
-
-```ts
-const UserId = Schema.String.pipe(Schema.brand("UserId"))
-
-Stdb.string(UserId) // table columns, params, returns, and declared error fields
-```
-
-Keep reusable `Stdb.*` aliases for generic non-branded values, such as a
-length-limited string used in many columns. For custom codecs, use
-`Stdb.custom(schema, { type })` so the SpaceTimeDB lowering is explicit.
+By default, `Stdb.string()` accepts any string. The table example above passes
+an Effect schema to add an optional brand or length check. The same value type
+can be reused in parameters, returns and declared errors. For custom codecs,
+use `Stdb.custom(schema, { type })` to specify the SpaceTimeDB lowering.
 
 For the full helper catalog, including integer widths, native timestamp/UUID
 values, and transport codecs, see [Value Types](/the-effect-layer/value-types).
 
 ## Column Names And Row Types
 
-Use `.name("db_name")` on a value type when the database column name should
+Use `.columnName("db_name")` on a value type when the database column name should
 differ from the TypeScript field name.
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
 const user = Stdb.table("user", {
   columns: {
-    userId: Stdb.string().name("user_id").primaryKey(),
-    displayName: Stdb.string().name("display_name"),
+    userId: Stdb.string().columnName("user_id").primaryKey(),
+    displayName: Stdb.string().columnName("display_name"),
   },
 })
 
@@ -2719,7 +3024,7 @@ Primary keys and single-column unique constraints are declared on the column
 value type. Multi-column unique constraints are declared in the table's
 `constraints` callback so column names stay type-checked.
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
 const membership = Stdb.table("membership", {
@@ -2730,11 +3035,11 @@ const membership = Stdb.table("membership", {
     email: Stdb.string(),
     externalId: Stdb.string().unique(),
   },
+  indexes: (columns) => [
+    Stdb.index("byTenantEmail", [columns.tenantId, columns.email]),
+  ],
   constraints: (columns) => [
-    Stdb.unique("membership_tenant_email_unique", [
-      columns.tenantId,
-      columns.email,
-    ]),
+    Stdb.unique("tenantEmailUnique", [columns.tenantId, columns.email]),
   ],
 })
 ```
@@ -2751,15 +3056,15 @@ widths, `bool`, `string`, `Stdb.bigint()`, `Stdb.identity()`,
 `Stdb.connectionId()`, `Stdb.timestamp()`, `Stdb.timeDuration()`,
 `Stdb.uuid()`, and any `Stdb.enum(...)` or `Stdb.sum(...)`. A sum keys on its
 whole encoded value, so a payload variant is a distinct key per payload:
-`{ tag: "Retrying", value: 7 }` and `{ tag: "Retrying", value: 9 }` are two
+`{ tag: "retrying", value: 7 }` and `{ tag: "retrying", value: 9 }` are two
 rows under a sum primary key.
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
 const Status = Stdb.sum({
-  Ready: Stdb.unit(),
-  Retrying: Stdb.u32(),
+  ready: Stdb.unit(),
+  retrying: Stdb.u32(),
 })
 
 const progress = Stdb.table("progress", {
@@ -2792,7 +3097,7 @@ sidebar:
 
 Column defaults are declared with `.default(value)` on a value type.
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
 const profile = Stdb.table("profile", {
@@ -2830,7 +3135,7 @@ sidebar:
 
 Event tables use the same `Stdb.table(...)` builder with `event: true`.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import * as Stdb from "effect-spacetimedb"
@@ -2844,7 +3149,7 @@ const presenceEvent = Stdb.table("presenceEvent", {
   },
 })
 
-const Module = Stdb.StdbModule.make("presence", {}).addTables(presenceEvent)
+const Module = Stdb.Module.make("presence", {}).addTables(presenceEvent)
 const Example = Stdb.project(Module)
 
 const program = Effect.gen(function* () {
@@ -2876,18 +3181,53 @@ several consumers.
 ---
 draft: false
 title: File Storage
-description: Link to SpacetimeDB file-storage docs; effect-spacetimedb has no extra API.
+description: Mount the native files library and call its helpers from an Effect reducer.
 sidebar:
   order: 9
 ---
 
-<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/file-storage" target="_blank" rel="noopener noreferrer">SpacetimeDB: File Storage ↗</a>
+Mount `@spacetimedb/files/submodule` to store files in the same database as your application. Install `@spacetimedb/files` alongside the SDK and ensure both resolve the same `spacetimedb/server` instance. Declare a type-only reference in the shared contract. The module entry supplies the actual library.
 
-effect-spacetimedb does not add a file-storage authoring API. Follow the
-SpacetimeDB documentation for runtime file storage behavior and keep only the
-metadata that belongs in module tables in `Stdb.table(...)`.
+```ts title="files-contract.ts"
+import * as Stdb from "effect-spacetimedb"
 
-Status: link-only; no Effect-specific delta.
+export const Drive = Stdb.Module.make("drive")
+  .mountNative<typeof import("@spacetimedb/files/submodule")>()("files")
+  .add(Stdb.Group.make("Uploads").add(
+    Stdb.Fn.reducer("upload", {
+      params: Stdb.struct({ bytes: Stdb.bytes() }),
+    }),
+  ))
+```
+
+This reducer stores an owner-visible file under the calling identity. The mounted native context omits `env`. The `@spacetimedb/files` 0.1.0 helper signature expects a full reducer context including `env`. Its upload helper uses fields available on the mounted alias. Keep the type assertion local to the helper call.
+
+```ts title="files-server.ts"
+import * as files from "@spacetimedb/files/submodule"
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+import { build } from "effect-spacetimedb/server-compiler"
+import { Drive } from "./files-contract"
+
+const uploads = Stdb.Builder.group(Drive, "Uploads", {
+  upload: ({ bytes }) => Drive.mounts.files.use((ctx) =>
+    files.uploadFile(ctx as files.FilesCtx, {
+      path: "/attachment.bin",
+      bytes: Array.from(bytes),
+      mimeType: "application/octet-stream",
+      visibility: files.FILE_VISIBILITY_OWNER,
+    }, ctx.sender.toHexString()),
+  ).pipe(Effect.asVoid),
+})
+const compiled = build(Drive, [
+  uploads,
+  Stdb.Builder.mountNative(Drive, "files", files),
+])
+export const ModuleExports = compiled.exportGroup()
+export default compiled.schema
+```
+
+For a read procedure, use the same alias inside `Drive.withTx` and call `files.readFileBytes` with the path and authorized owner. The root module supplies any public routes and checks access before returning file contents. See [Submodules](/core-concepts/databases/submodules) and [SpacetimeDB File Storage](https://spacetimedb.com/docs/tables/file-storage).
 
 
 ---
@@ -2907,10 +3247,10 @@ sidebar:
 Single-column indexes can live on the column. Composite indexes live in the
 table's `indexes` callback.
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
-const playerScore = Stdb.table("player_score", {
+const playerScore = Stdb.table("playerScore", {
   public: true,
   columns: {
     id: Stdb.u64().primaryKey().autoInc(),
@@ -2919,7 +3259,7 @@ const playerScore = Stdb.table("player_score", {
     season: Stdb.string(),
   },
   indexes: (columns) => [
-    Stdb.index("player_score_season_score_idx", [
+    Stdb.index("bySeasonScore", [
       columns.season,
       columns.score,
     ], { algorithm: "btree" }),
@@ -2936,16 +3276,16 @@ are point-only; `direct` indexes are range-capable.
 `btree` and `hash` index any column type the host can key, including
 `Stdb.enum(...)` and payload-carrying `Stdb.sum(...)` columns. A unit-variant
 enum is keyed by its variant tag; a payload-carrying sum is keyed by its whole
-encoded value, so `{ tag: "Chunk", value: 4 }` and `{ tag: "Chunk", value: 5 }`
+encoded value, so `{ tag: "chunk", value: 4 }` and `{ tag: "chunk", value: 5 }`
 are two different keys.
 
 `direct` is the exception. It indexes exactly one column, and only `u8`, `u16`,
 `u32`, `u64`, or a unit-variant enum.
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
-const Kind = Stdb.enum("Ping", "Chunk")
+const Kind = Stdb.enum("ping", "chunk")
 
 const marker = Stdb.table("marker", {
   columns: {
@@ -2953,11 +3293,14 @@ const marker = Stdb.table("marker", {
     seq: Stdb.u32(),
   },
   indexes: (columns) => [
-    Stdb.index("marker_kind_seq_idx", [columns.kind, columns.seq], {
+    Stdb.index("byKindSeq", [columns.kind, columns.seq], {
       algorithm: "btree",
     }),
   ],
 })
+
+const Module = Stdb.Module.make("app").addTables(marker)
+const { Db } = Module
 ```
 
 ## Composite Lookups
@@ -2968,23 +3311,25 @@ full width. The last value you supply may be a range; every column before it is
 matched for equality.
 
 ```ts
+const db = yield* Db
+
 // Equality on both columns: a point lookup.
-yield* db.marker.marker_kind_seq_idx.filterToArray([{ tag: "Chunk" }, 7])
+yield* db.marker.byKindSeq.filterToArray([{ tag: "chunk" }, 7])
 
 // Equality on `kind`, range over `seq` — a range in the final column of a
 // full-width tuple is a range scan, not a point lookup.
-yield* db.marker.marker_kind_seq_idx.filterToArray([
-  { tag: "Chunk" },
+yield* db.marker.byKindSeq.filterToArray([
+  { tag: "chunk" },
   { from: { tag: "included", value: 1 }, to: { tag: "excluded", value: 9 } },
 ])
 
 // A one-column prefix scans every `seq` under that `kind`.
-yield* db.marker.marker_kind_seq_idx.filterToArray([{ tag: "Chunk" }])
+yield* db.marker.byKindSeq.filterToArray([{ tag: "chunk" }])
 ```
 
 A single-column index takes the bare value or a bare `{ from, to }` range
 instead of a tuple. Bounds are `{ tag: "included" | "excluded", value }` or
-`{ tag: "unbounded" }`, and `deleteAll(...)` accepts the same inputs as
+`{ tag: "unbounded" }`, and `delete(...)` accepts the same inputs as
 `filterToArray(...)`.
 
 
@@ -2995,18 +3340,45 @@ instead of a tuple. Bounds are `{ tag: "included" | "excluded", value }` or
 ---
 draft: false
 title: Performance
-description: Link to SpacetimeDB table-performance docs; effect-spacetimedb has no extra runtime semantics.
+description: Choose where table rows reside and understand the memory cost of indexes.
 sidebar:
   order: 10
 ---
 
 <a class="upstream-doc" href="https://spacetimedb.com/docs/tables/performance" target="_blank" rel="noopener noreferrer">SpacetimeDB: Performance ↗</a>
 
-Table performance is a SpacetimeDB runtime concern. effect-spacetimedb exposes
-the native index algorithms through `.index(...)` and `Stdb.index(...)`, but it
-does not change the host query planner or storage semantics.
+## Where rows reside
 
-For authoring syntax, see [Indexes](/core-concepts/tables/indexes).
+Set `cachePolicy` on a regular, scheduled, or outbox table. To set a default for the module, pass `settings: { tableCachePolicyDefault: "required_on_disk" }` to `Stdb.Module.make`. An explicit table policy takes precedence. Event tables never retain rows and cannot declare a policy.
+
+```typescript
+import * as Stdb from "effect-spacetimedb"
+
+const activeMatch = Stdb.table("activeMatch", {
+  columns: { id: Stdb.u64().primaryKey() },
+  cachePolicy: "required_in_memory",
+})
+
+const Module = Stdb.Module.make("matches", {
+  settings: { tableCachePolicyDefault: "required_on_disk" },
+}).addTables(activeMatch)
+```
+
+| Policy | Placement in SpacetimeDB 2.16 |
+| --- | --- |
+| `required_in_memory` | Keeps rows resident. This is the default. |
+| `required_on_disk` | Allows the host to page cold data to local disk and keep hot data in memory. |
+| `no_requirement` | Lets the host choose placement. Standalone treats it like `required_on_disk`. |
+
+Indexes and system tables stay in memory. Both disk-capable policies require every index on the table to be a btree, including backing indexes for keys. Contract validation reports `CachePolicyRequiresBTree` with the table, index and source of the policy.
+
+Standalone has an unlimited resident-memory budget. As of 2.16 the standard Maincloud limit is 24 GiB of resident memory per database. If a cold read fails or the host exceeds the budget, it ends execution and returns a failed internal outcome to the caller. A handler cannot catch that failure. Upstream plans to make `no_requirement` the default in 3.0. [SpacetimeDB tiered storage](https://spacetimedb.com/docs/tables/storage-and-cache-policies/)
+
+Changing placement preserves rows during an [automatic migration](/core-concepts/databases/migrations). It leaves generated client bindings byte-identical.
+
+## Subscribed client rows
+
+The TypeScript SDK keeps subscribed rows in the client process regardless of their server placement. In 2.16.1 it also builds a tree for each subscribed btree index as rows arrive. Unique lookups and equality-prefix filters use these trees. A range on the first column still scans the cache. The SDK patch corrects range comparison for object-backed keys such as timestamps. Apply the patch in the consuming project when relying on those ranges. [Index syntax](/core-concepts/tables/indexes)
 
 
 ---
@@ -3043,7 +3415,7 @@ Scheduled tables default to `public: false`, the same local default as
 spread directly into the table shape after the injected scheduler columns; there
 is no `{ data }` wrapper in the table row shape.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -3053,17 +3425,18 @@ const reminderSchedule = Stdb.scheduledTable("reminderSchedule", {
   },
 })
 
-const Reminders = Stdb.StdbGroup.make("Reminders").add(
-  Stdb.StdbFn.scheduledProcedure("reminderFire", {
+const Reminders = Stdb.Group.make("Reminders").add(
+  Stdb.Fn.scheduledProcedure("reminderFire", {
     table: reminderSchedule,
   }),
 )
 
-const Module = Stdb.StdbModule.make("app")
+const Module = Stdb.Module.make("app")
   .addTables(reminderSchedule)
   .add(Reminders)
+const { Db } = Module
 
-const RemindersLive = Stdb.StdbBuilder.group(Module, "Reminders", {
+const RemindersLive = Stdb.Builder.group(Module, "Reminders", {
   reminderFire: Effect.fn(function* ({ data }) {
     yield* Effect.log(`reminder: ${data.note}`)
   }),
@@ -3074,6 +3447,7 @@ To seed schedule rows inside a reducer or transaction body, use the generated
 `.schedule(...)` helper. It fills the auto-increment sentinel for you.
 
 ```ts
+const db = yield* Db
 yield* db.reminderSchedule.schedule({
   scheduledAt: Stdb.ScheduleAt.interval("5 minutes"),
   note: "wake up",
@@ -3091,8 +3465,8 @@ express: handle a `Time` row, insert the next one with
 `Stdb.ScheduleAt.nextCron(cron, ctx.timestamp)` or `at(...)`, then return.
 
 `Stdb.scheduledTable(...)` creates the reserved
-`scheduled_id`/`scheduled_at` columns and `StdbFn.scheduledReducer(...)` or
-`StdbFn.scheduledProcedure(...)` binds exactly one typed handler to the table.
+`scheduled_id`/`scheduled_at` columns and `Fn.scheduledReducer(...)` or
+`Fn.scheduledProcedure(...)` binds exactly one typed handler to the table.
 The binding is registered on the function, which is where SpacetimeDB expects
 it; the table itself carries no schedule option.
 
@@ -3167,7 +3541,7 @@ requiring opaque value types. Cross-object module invariants are validated by
 | Duplicate table/view relation names | No | `DuplicateRelationName` |
 | Duplicate reducer/procedure/HTTP/view/lifecycle export names | No | `DuplicateCallableName` |
 | Reserved `__http_router__` export name | No | `DuplicateCallableName` |
-| Non-canonical declared names under canonical naming policy | No | `NonCanonicalDeclaredName` |
+| Declared names without a representable generated accessor | No | `NonCanonicalDeclaredName` |
 | Reserved declared error tags | No | `ReservedDeclaredErrorTag` |
 | Duplicate declared error tags | No | `DuplicateDeclaredErrorTag` |
 | String literal authored/generated-client tag collisions | No | `LiteralTagCollision` |
@@ -3180,12 +3554,181 @@ casing policy, are better candidates for future compile-time feedback.
 
 ---
 
+# Source: /core-concepts/testing
+
+---
+draft: false
+title: Testing
+description: Run a module's handlers in-process with the test harness, bindCallables and the inter-database pump.
+sidebar:
+  order: 8
+---
+
+`effect-spacetimedb/testing` runs a module without a server. The harness is an
+in-memory database behind the real Effect DB wrapper, and `bindCallables` calls
+your handlers the way the host does, so a test exercises the handlers you
+publish. For what only a real host can show, publish to a local server: see
+[Dev & Publish](/core-concepts/databases/dev-publish).
+
+## Vitest configuration
+
+```ts title="vitest.config.ts"
+import { spacetimeSysAlias } from "effect-spacetimedb/testing"
+import { defineConfig } from "vitest/config"
+
+export default defineConfig({
+  resolve: { alias: { ...spacetimeSysAlias } },
+  test: {
+    server: { deps: { inline: ["spacetimedb", "effect-spacetimedb"] } },
+  },
+})
+```
+
+`spacetimeSysAlias` points the host syscalls at a stub, and `inline` makes Vitest
+transform both packages so the alias reaches their imports. Without
+`effect-spacetimedb` in that list, Node loads it untransformed and fails with
+`Only URLs with a scheme in: file, data, and node are supported... Received
+protocol 'spacetime:'`.
+
+The stub keeps `console` and the deterministic backstops usable off-host, so
+importing or building a module entry in a test needs no running host.
+
+## Calling a handler
+
+`makeTestModuleHarness` takes the module's spec and owns one database.
+`bindCallables` takes the module and the same implementations you pass to
+`build`, which is why they live in a file of their own: a module entry may export
+nothing but its compiled output. Continuing the module from
+[Getting Started](/getting-started):
+
+```ts title="test/messages.test.ts"
+import * as Effect from "effect/Effect"
+import { bindCallables, makeTestModuleHarness } from "effect-spacetimedb/testing"
+import { expect, it } from "vitest"
+import { QuickstartModule } from "../src/contract.ts"
+import { MessageFunctionsLive } from "../src/live.ts"
+
+const callables = bindCallables(QuickstartModule, [MessageFunctionsLive])
+
+it("stores a message", async () => {
+  const harness = makeTestModuleHarness(QuickstartModule.spec, { seed: 1n })
+  const id = "ada"
+
+  callables.messageSend?.invoke(harness.makeMutationCtx(), { id, text: "Hello" })
+
+  const rows = await Effect.runPromise(harness.effectDb.message.toArray())
+  expect(rows).toEqual([{ id, text: "Hello" }])
+})
+```
+
+`bindCallables` returns a record keyed by function name, of `invoke(ctx, args)`
+functions that run in a harness transaction. It is loosely typed: with
+`noUncheckedIndexedAccess` a member may be `undefined`, and `args` is not checked
+against the contract. The context comes from the harness, one maker per kind of
+function:
+
+| Function | Context |
+| --- | --- |
+| reducer, lifecycle hook | `harness.makeMutationCtx()` |
+| procedure | `harness.makeProcedureCtx()` |
+| HTTP handler | `harness.makeHttpHandlerCtx()` |
+| sender view | `harness.makeViewCtx()` |
+| anonymous view | `harness.makeAnonymousViewCtx()` |
+
+Each takes overrides, such as `{ sender }` or `{ timestamp }`.
+
+### What a call answers
+
+A reducer returns nothing, and throws as the host would: a declared error throws
+a `SenderError`, and any other failure throws its cause. Its transaction rolls
+back either way.
+
+`invoke` hands `args` to the handler as they are, and returns a procedure's result
+without encoding it. So a test cannot reach what a host does around the handler:
+a bad argument's `SenderError` or `BadArguments` reply, or a result that fails to
+encode. Prove those on a real host.
+
+A procedure never throws. It answers with `{ ok: value }` or `{ err: string }`,
+where `err` is the encoded declared error or a fixed message. A test of an
+undeclared failure therefore reads the cause through `onDefect`, which fires once
+per failure as it does in `build`:
+
+```ts title="test/message-list.test.ts"
+import type * as Cause from "effect/Cause"
+import { bindCallables, makeTestModuleHarness } from "effect-spacetimedb/testing"
+import { expect, it } from "vitest"
+import { QuickstartModule } from "../src/contract.ts"
+import { MessageFunctionsLive } from "../src/live.ts"
+
+it("answers with the rows", () => {
+  const causes: Array<Cause.Cause<unknown>> = []
+  const callables = bindCallables(QuickstartModule, [MessageFunctionsLive], {
+    onDefect: (cause) => causes.push(cause),
+  })
+  const harness = makeTestModuleHarness(QuickstartModule.spec, { seed: 1n })
+
+  const reply = callables.messageList?.invoke(harness.makeProcedureCtx(), {})
+
+  expect(reply).toEqual({ ok: [] })
+  expect(causes).toEqual([])
+})
+```
+
+## Reading and resetting
+
+`harness.effectDb` is the module's typed database, the same `db` a handler gets,
+and its reads are Effects. `harness.db` is the raw store, which takes and returns
+native host column values.
+
+Transactions snapshot the store, roll back while preserving row identity, and
+reject nesting with `NestedTestTransactionDefect`. A rollback restores rows but
+not sequences, the uuid counter or the random stream. `harness.reset()` empties
+every table and restarts all three, for a suite that wants a fresh database per
+test without building a new harness. The `seed` option is a `bigint` and fixes
+the random stream; scheduled rows are stored without emulating the scheduler.
+
+A module that declares an environment takes its values as a publish does; see
+[Environment Variables](/core-concepts/databases/environment-variables#testing).
+A rejected environment throws `TestModuleEnvironmentDefect`.
+
+## Mounted modules
+
+Give `makeTestModuleHarness` the parent spec and pass the parent module and its implementation tuple to `bindCallables`. Invoke a mounted callable by its nested accessor or its full canonical wire name. Inspect rows through `harness.db.<mount>.<table>`. Root and library writes share the transaction, including rollback.
+
+For a native mount used by the test, supply `nativeMounts` in the harness options. For example, `{ nativeMounts: { "stockRoom.tools": parent => makeToolsAlias(parent) } }` builds a stand-in for that path on first access in a context. Its return value is the object passed to the native helper. An absent factory raises an error identifying the path when accessed. See [Submodules](/core-concepts/databases/submodules).
+
+## Inter-database calls
+
+`makeIdcPump` delivers outbox rows between harnesses in memory, one stream at a
+time, and takes `IdcPump.recording(...)` for a receiver the test does not
+simulate. `pump.drain()` delivers until nothing waits, at most 1,000 times unless
+`deliveriesMax` says otherwise, and throws a `RangeError` if rows still wait at
+that bound. See
+[Inter-Database Calls](/core-concepts/functions/inter-database-calls).
+
+## What is exported
+
+| Name | Use |
+| --- | --- |
+| `makeTestModuleHarness` | The in-memory database. Types: `TestModuleHarness`, `TestModuleRawDb`, `TestModuleRowWrite`, `OutboxTableKeys`, `TestModuleEnvironmentValues`, `TestModuleEnvironmentUpdate`. Errors: `TestModuleEnvironmentDefect`, `NestedTestTransactionDefect`. |
+| `bindCallables` | Call handlers. |
+| `makeIdcPump`, `IdcPump`, `IdcDelivery` | Deliver inter-database calls in memory. Types: `IdcPumpDatabase`, `IdcPumpLink`, `IdcPumpReceiver`, `IdcPumpRecordingReceiver`, `IdcRecordedCall`. |
+| `Expand` | The helper type a harness's module type prints with, so a test helper's declarations can name it. |
+| `spacetimeSysAlias` | The alias map above. |
+| `SpacetimeSysStub` | The stub as a namespace, for backing `env_get` with `withEnvironment`. |
+
+`effect-spacetimedb/testing/spacetime-sys` is the stub itself, for a bundler or
+test runner that takes a path rather than an alias map.
+
+
+---
+
 # Source: /getting-started
 
 ---
 draft: false
 title: Getting Started
-description: Install effect-spacetimedb, write a minimal module, build it, and generate a client.
+description: From an empty directory to a reducer call on a local SpacetimeDB, with effect-spacetimedb.
 sidebar:
   order: 1
 ---
@@ -3194,198 +3737,280 @@ import { TabItem, Tabs } from "@astrojs/starlight/components";
 
 `effect-spacetimedb` is an Effect-first authoring layer for SpaceTimeDB modules.
 You describe the module once, implement handlers with scoped Effect services,
-then build native module exports and generated clients from the same contract.
+then build native module exports and clients from the same contract.
 
-## Install
+This page goes from an empty directory to a reducer call on a server running on
+your machine. The commands use Bun, which runs TypeScript directly; the install
+step shows npm and pnpm too. Node.js must satisfy `^22.23.4 || ^24.22.1 || >=26.12.1`.
+
+## Install the CLI
+
+```sh
+curl -sSf https://install.spacetimedb.com | sh
+spacetime version install 2.16.1 --use
+spacetime --version
+```
+
+Open a new terminal if `spacetime` is not found yet: the installer adds it to
+your `PATH`. `spacetime --version` must report `2.16.1`. The CLI version must match the
+`spacetimedb` package your project depends on, because `spacetime build` and
+`spacetime generate` read a version-specific module format. If several versions
+are installed, make sure the matching `spacetime` is the one on your `PATH`.
+
+## Start a local server
+
+In a terminal of its own:
+
+```sh
+spacetime start
+```
+
+It listens on port 3000 and keeps running. A fresh CLI's default server is
+Maincloud, the hosted service, so the commands below all say `--server local`.
+
+## Create the project
+
+```sh
+mkdir stdb-hello
+cd stdb-hello
+echo '{ "name": "stdb-hello", "private": true, "type": "module" }' > package.json
+```
 
 <Tabs syncKey="package-manager">
+  <TabItem label="bun">
+
+    ```sh
+    bun add effect-spacetimedb effect@4.1.1 spacetimedb@2.16.1
+    bun add --dev typescript @types/node
+    ```
+
+  </TabItem>
   <TabItem label="npm">
 
     ```sh
-    npm install effect-spacetimedb effect@4.1.1 spacetimedb@2.14.0
+    npm install effect-spacetimedb effect@4.1.1 spacetimedb@2.16.1
+    npm install --save-dev typescript @types/node
     ```
 
   </TabItem>
   <TabItem label="pnpm">
 
     ```sh
-    pnpm add effect-spacetimedb effect@4.1.1 spacetimedb@2.14.0
-    ```
-
-  </TabItem>
-  <TabItem label="bun">
-
-    ```sh
-    bun add effect-spacetimedb effect@4.1.1 spacetimedb@2.14.0
+    pnpm add effect-spacetimedb effect@4.1.1 spacetimedb@2.16.1
+    pnpm add --save-dev typescript @types/node
     ```
 
   </TabItem>
 </Tabs>
 
-:::caution[Version match]
+Add a `tsconfig.json`. `moduleResolution` must be `Bundler`: under `nodenext`
+the code `spacetime generate` writes fails with `TS2305`.
 
-The SpaceTimeDB CLI version must match the `spacetimedb` package version your
-project depends on — `spacetime build` and `spacetime generate` read a
-version-specific module format:
-
-```sh
-spacetime --version   # must match your installed `spacetimedb` package
-```
-
-If several CLI versions are installed, make sure the matching `spacetime` is the
-one on your `PATH`, or invoke it by full path in your build scripts.
-
-:::
-
-### Patch the SDK
-
-The published `spacetimedb` 2.14.0 package has three defects that an install
-does not fix: `Prettify` turns branded primitives into object types
-([upstream fix](https://github.com/clockworklabs/SpacetimeDB/pull/5971), merged
-but not yet released), the client `TableCache` compares ranges over
-`Identity`, `Timestamp` and other object-backed keys by wrapper rather than
-value ([open PR](https://github.com/clockworklabs/SpacetimeDB/pull/5970)), and
-a non-unique index whose columns are a strict subset of a unique constraint
-loses its range methods
-([open PR](https://github.com/clockworklabs/SpacetimeDB/pull/5969)).
-
-Copy
-[`patches/spacetimedb@2.14.0.patch`](https://github.com/miragegame/effect-spacetimedb/blob/main/patches/spacetimedb@2.14.0.patch)
-into your project. Its paths are relative to the `spacetimedb` package root, so
-Bun applies it from your root `package.json`, and pnpm from the same entry
-under `pnpm.patchedDependencies` or in `pnpm-workspace.yaml`:
-
-```json
+```json title="tsconfig.json"
 {
-  "patchedDependencies": {
-    "spacetimedb@2.14.0": "patches/spacetimedb@2.14.0.patch"
-  }
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"]
 }
 ```
 
-Other package managers need their own patch mechanism. Apply it wherever the
-SDK is installed, module and client packages alike.
+## Write the module
 
-## Minimal Module
+A module is three files, split for a reason: a client must not import the module
+entry. The entry loads the host-only `spacetime:sys` modules, which exist only
+inside the server, so importing it elsewhere fails with
+`Cannot find package 'spacetime:sys@2.2'` on Bun and
+`ERR_UNSUPPORTED_ESM_URL_SCHEME` on Node.
 
-The same module — a `user` table and a `user_upsert` reducer — in
-effect-spacetimedb and in the native SpaceTimeDB SDK:
+The contract declares the table and the callable functions. Everything else
+imports it, and it imports nothing host-only.
 
-<Tabs syncKey="impl">
-  <TabItem label="effect-spacetimedb">
-
-```typescript twoslash
-import * as Effect from "effect/Effect"
-import * as Schema from "effect/Schema"
+```ts title="src/contract.ts"
 import * as Stdb from "effect-spacetimedb"
-import { build } from "effect-spacetimedb/server-compiler"
 
-// Branded + validated id. In the native SDK this column is just `string`.
-const UserId = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(64),
-  Schema.brand("UserId"),
-)
-
-const user = Stdb.table("user", {
+export const message = Stdb.table("message", {
   public: true,
   columns: {
-    // The Effect schema IS the column's value type, so the brand and the
-    // length validation flow through to handlers and generated clients.
-    id: Stdb.string(UserId).primaryKey(),
-    name: Stdb.string(),
+    id: Stdb.string().primaryKey(),
+    text: Stdb.string(),
   },
 })
 
-// camelCase names lower to snake_case on the wire (userUpsert -> user_upsert).
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.reducer("userUpsert", {
-    // Params are validated by the same schema; the native SDK accepts any string.
-    params: Stdb.struct({
-      id: Stdb.string(UserId),
-      name: Stdb.string(),
-    }),
+export const MessageRow = Stdb.struct({
+  id: Stdb.string(),
+  text: Stdb.string(),
+}).named("MessageRow")
+
+export const MessageFunctions = Stdb.Group.make("Messages").add(
+  Stdb.Fn.reducer("messageSend", {
+    params: MessageRow,
+  }),
+  Stdb.Fn.procedure("messageList", {
+    params: Stdb.struct({}),
+    returns: Stdb.array(MessageRow),
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
-const { Db } = Module
+export const QuickstartModule = Stdb.Module.make(
+  "effect_spacetimedb_quickstart",
+  {},
+)
+  .addTables(message)
+  .add(MessageFunctions)
+```
 
-const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
-  userUpsert: (args) =>
-    Effect.gen(function* () {
+The implementation attaches a handler to each function. Handlers get what they
+need by yielding services from the module.
+
+```ts title="src/live.ts"
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+import { QuickstartModule } from "./contract.ts"
+
+const { Db, Tx } = QuickstartModule
+
+export const MessageFunctionsLive = Stdb.Builder.group(
+  QuickstartModule,
+  "Messages",
+  {
+    messageSend: Effect.fn(function* ({ id, text }) {
       const db = yield* Db
-      yield* db.user.insert(args)
+      yield* db.message.insert({ id, text })
     }),
-})
+    messageList: Effect.fn(function* () {
+      const tx = yield* Tx
+      return yield* tx.run(
+        Effect.gen(function* () {
+          const db = yield* Db
+          return yield* db.message.toArray()
+        }),
+      )
+    }),
+  },
+)
+```
 
-export const compiled = build(Module, [UsersLive])
+The entry compiles the module. Its only exports are `ModuleExports` and the
+default schema: the SDK rejects any other named export, including an
+`export *` of the contract, with `TypeError: exporting something that is not a
+spacetime export`. A type-only re-export is erased and safe.
+
+```ts title="src/index.ts"
+import { build } from "effect-spacetimedb/server-compiler"
+import { QuickstartModule } from "./contract.ts"
+import { MessageFunctionsLive } from "./live.ts"
+
+export type { QuickstartClientExample } from "./client.ts"
+
+const compiled = build(QuickstartModule, [MessageFunctionsLive])
+
 export const ModuleExports = compiled.exportGroup()
+
 export default compiled.schema
 ```
 
-  </TabItem>
-  <TabItem label="Native SDK">
+A contract that declares Effect `HttpApi` routes, or anything else that loads
+Effect's HTTP or encoding modules before `server-compiler` is imported, needs
+`import "effect-spacetimedb/server-polyfills"` as the entry's first line.
 
-```ts
-import { schema, table, t } from "spacetimedb/server"
+## Publish it
 
-const spacetime = schema({
-  user: table(
-    { public: true },
-    { id: t.string().primaryKey(), name: t.string() },
+From the project directory, build the module and publish it to the local server
+under the database name `stdb-hello`. Database names are lowercase words joined
+by dashes.
+
+```sh
+spacetime publish --server local --yes stdb-hello
+```
+
+## Call a reducer
+
+The client imports only the contract. `Stdb.project` turns it into a typed
+client with no generated code.
+
+```ts title="src/client.ts"
+import * as Stdb from "effect-spacetimedb"
+import type * as StdbClient from "effect-spacetimedb/client"
+import { QuickstartModule } from "./contract.ts"
+
+const Quickstart = Stdb.project(QuickstartModule.spec)
+
+/** Typechecked client calls shown in the package quick start. */
+const clientExample = (
+  http: StdbClient.ProjectedHttpClient<typeof QuickstartModule.spec>,
+  session: StdbClient.WsSession<typeof QuickstartModule.spec>,
+  messageId: string,
+) => ({
+  call: http.procedures.messageList({}),
+  subscribe: session.subscribe(
+    Quickstart.targets.tables.message.where((row) => row.id.eq(messageId)),
   ),
 })
 
-// The exported binding's name is the reducer name.
-export const user_upsert = spacetime.reducer(
-  { id: t.string(), name: t.string() },
-  (ctx, { id, name }) => {
-    ctx.db.user.insert({ id, name })
-  },
-)
-
-export default spacetime
+export type QuickstartClientExample = ReturnType<typeof clientExample>
 ```
 
-  </TabItem>
-</Tabs>
+Use a separate entry to run an HTTP call against the local database.
 
-The authoring flow is:
+```ts title="src/send.ts"
+import * as Effect from "effect/Effect"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
+import * as Stdb from "effect-spacetimedb"
+import { QuickstartModule } from "./contract.ts"
 
-1. Declare value types, tables, and endpoint groups.
-2. Assemble a module with `StdbModule.make(...).addTables(...).add(...)`.
-3. Implement each group with `StdbBuilder.group(...)`.
-4. Build the native module export with `build(...)` from
-   `effect-spacetimedb/server-compiler`.
+const client = Stdb.project(QuickstartModule.spec).client.http.make({
+  uri: "http://127.0.0.1:3000",
+  databaseName: "stdb-hello",
+})
 
-## Dev Loop
+const program = Effect.gen(function* () {
+  yield* client.reducers.messageSend({ id: "first", text: "Hello" })
+  yield* Effect.log(yield* client.procedures.messageList({}))
+})
 
-Build modules with the native SpaceTimeDB CLI. Put the build and client
-generation commands behind package scripts:
-
-```json
-{
-  "scripts": {
-    "build": "spacetime build --module-path .",
-    "generate-client": "spacetime generate --lang typescript --js-path ./dist/bundle.js --out-dir ./src/generated --yes"
-  }
-}
+Effect.runPromise(program.pipe(Effect.provide(FetchHttpClient.layer)))
 ```
-
-Then run the scripts from the module package:
 
 ```sh
-bun run build
-bun run generate-client
+bun run src/send.ts
 ```
 
-:::tip
+It logs the row it wrote. Typecheck the project with:
 
-Use `build` before publishing a module and `generate-client` after changing the
-module contract.
+```sh
+bunx tsc
+```
 
-:::
+The optional `token` in the client's config is a SpacetimeDB identity token.
+Without one, the server treats each call as a new anonymous identity.
+
+## Develop
+
+`spacetime dev` rebuilds and republishes on every change, and keeps generated
+client bindings in `src/module_bindings` up to date:
+
+```sh
+spacetime dev --server local --module-path . --server-only --yes stdb-hello
+```
+
+Run `spacetime generate` by hand for bindings without a dev loop. A WebSocket
+session and its live subscriptions take them as its `DbConnection`; see
+[Connection](/core-concepts/clients/connection).
+
+```sh
+spacetime generate --lang typescript --module-path . --out-dir src/module_bindings --yes
+```
 
 :::note
 
@@ -3396,33 +4021,59 @@ and a spec-typed facade described in [Codegen](/core-concepts/clients/codegen).
 
 :::
 
-## Testing your module off-host
+## Patch the SDK
 
-A module entry statically imports the host-only compiler (`build` from
-`effect-spacetimedb/server-compiler`). To import that entry in Vitest without a
-real SpaceTimeDB host, alias the host syscalls to the shipped stub and inline the
-`spacetimedb` package:
+The patch fixes [client range comparisons for object-backed keys](https://github.com/clockworklabs/SpacetimeDB/pull/5970),
+[host index classification for overlapping constraints](https://github.com/clockworklabs/SpacetimeDB/pull/5969)
+and [branded primitive inputs to native builders](https://github.com/clockworklabs/SpacetimeDB/pull/6660)
+in SDK 2.16.1.
 
-```ts
-// vitest.config.ts
-import { defineConfig } from "vitest/config"
-import { spacetimeSysAlias } from "effect-spacetimedb/testing"
+Before relying on these SDK features, copy
+[`patches/spacetimedb@2.16.1.patch`](https://github.com/miragegame/effect-spacetimedb/blob/v0.9.0/patches/spacetimedb@2.16.1.patch)
+into your project. Its paths are relative to the `spacetimedb` package root, so
+Bun applies it from your root `package.json`, and pnpm from the same entry
+under `pnpm.patchedDependencies` or in `pnpm-workspace.yaml`:
 
-export default defineConfig({
-  test: {
-    server: { deps: { inline: ["spacetimedb"] } },
-  },
-  resolve: {
-    alias: { ...spacetimeSysAlias },
-  },
-})
+```json
+{
+  "patchedDependencies": {
+    "spacetimedb@2.16.1": "patches/spacetimedb@2.16.1.patch"
+  }
+}
 ```
 
-The stub keeps `console` and the deterministic backstops usable off-host, so
-importing or building a module entry in tests does not require a running host.
+Other package managers need their own patch mechanism. Apply it wherever the
+SDK is installed, module and client packages alike.
+
+## The same module in the native SDK
+
+For comparison, the table and reducer above with no Effect layer. The params
+accept any string, and the failure paths are yours to write.
+
+```ts
+import { schema, table, t } from "spacetimedb/server"
+
+const spacetime = schema({
+  message: table(
+    { public: true },
+    { id: t.string().primaryKey(), text: t.string() },
+  ),
+})
+
+// The exported binding's name is the reducer name.
+export const message_send = spacetime.reducer(
+  { id: t.string(), text: t.string() },
+  (ctx, { id, text }) => {
+    ctx.db.message.insert({ id, text })
+  },
+)
+
+export default spacetime
+```
 
 ## Next Pages
 
+- [Testing](/core-concepts/testing)
 - [Reducers](/core-concepts/functions/reducers)
 - [Tables / Column Types](/core-concepts/tables/column-types)
 - [Runtime model](/the-effect-layer/runtime-model)
@@ -3457,11 +4108,20 @@ hand-written; there is no generated API reference.
 | `effect-spacetimedb/server-compiler` | Host-only compiler entrypoint for module entries; import `build` from here. |
 | `effect-spacetimedb/server-polyfills` | Side-effect import for host compatibility shims; normal module entries get these through `server-compiler`, and an entry that loads Effect's HTTP or encoding modules first imports it first. |
 | `effect-spacetimedb/dev-server` | Programmatic local `spacetimedb-standalone` orchestration for tests and tools that publish prebuilt bundles, one database or several on one standalone. |
-| `effect-spacetimedb/testing` | Test-oriented helpers, package-local fixtures, and the `spacetimeSysAlias` preset for off-host server imports. |
+| `effect-spacetimedb/testing` | The off-host test harness: `makeTestModuleHarness`, `bindCallables`, `makeIdcPump`, and the `spacetimeSysAlias` map for tests that import a module entry. See [Testing](/core-concepts/testing). |
 | `effect-spacetimedb/testing/spacetime-sys` | Direct `spacetime:sys` host-surface stub for off-host module imports. |
 
 Normal module authors usually need only `effect-spacetimedb` and, for WebSocket
 sessions, `effect-spacetimedb/client`.
+
+## Client constructors
+
+| Entry | Constructors |
+| --- | --- |
+| `/client` over HTTP | `httpMake` |
+| `/client` over WebSocket | `wsMake`, `wsScoped`, `wsScopedGenerated`, `wsLayer`, `wsLayerGenerated`, `wsSupervisor`, `wsSupervisorGenerated` |
+| WebSocket integration | `wsGeneratedConnection` types a generated connection class. `wsSessionTag` creates a session service tag. `wsConnectAndSubscribe` acquires a session and subscribes before returning it. |
+| `/client/atom` | `wsSupervisedSessionAtom`, `wsTableAtomFamily`, `wsRowAtomFamily`, `wsTableGroupAtomFamily`, `wsTableGroupSnapshotAtom` |
 
 ## Capability Scoping
 
@@ -3469,14 +4129,16 @@ sessions, `effect-spacetimedb/client`.
 | --- | --- |
 | reducer, lifecycle | `Db`, `ReducerCtx`, `MutationCtx` |
 | procedure outside a transaction | platform `Http`, `Tx`, `ProcedureCtx` |
-| `Tx.run(...)` or `HttpTx.run(...)` body | `Db`, `MutationCtx`, transaction context |
+| `Tx.run(...)` body | `Db`, `MutationCtx`, transaction context |
+| `HttpTx.run(...)` body | `Db` |
 | HTTP handler | `HttpTx`, `HttpHandlerCtx` |
 | sender view | `ReadonlyDb`, `From`, `ViewCtx` |
 | anonymous view | `ReadonlyDb`, `From`, `AnonymousViewCtx` |
 | every scope above, once the module declares an environment | `Env` |
 
-Use `MutationCtx` for helpers that must run in both reducers and transaction
-bodies. Do not yield accessors from another module.
+Use `MutationCtx` for helpers that must run in both reducers and procedure
+transaction bodies; an HTTP handler has no sender, so `MutationCtx` in an
+`HttpTx.run` body is a compile error. Do not yield accessors from another module.
 
 ## Value-Type Cheat Sheet
 
@@ -3497,11 +4159,11 @@ bodies. Do not yield accessors from another module.
 | `Stdb.option(T)` | Nullable value type, decoded as `T` or `undefined`. |
 | `Stdb.optional(T)` | Optional struct field annotation. |
 | `T.optional()` | Optional table column annotation. |
-| `Stdb.array(T, { minimum, maximum })` | SATS array/list with required inclusive length bounds (enforced by the codecs, not on the wire). |
+| `Stdb.array(T)` / `Stdb.array(T, { minimum, maximum })` | SATS array/list. Either inclusive length bound is optional; a bound is enforced by the codecs, not on the wire. |
 | `Stdb.struct({...})` | Named object shape for params, rows, returns, and errors. |
 | `Stdb.sum({...})` | Tagged union with payload variants; key- and index-capable, never auto-increment. |
 | `T.named("Name")` | Set the generated SATS/client type name for an anonymous struct, sum, or string-literal enum; the default name is content-addressed. |
-| `Stdb.enum("A", "B")` / `enumType(...)` | Unit-variant SATS enum; prefer namespace form because `enum` cannot be named-imported. |
+| `Stdb.enum("a", "b")` | Unit-variant SATS enum; needs the namespace form because `enum` cannot be named-imported. |
 | `Stdb.unit()` | Unit value for empty scheduled procedure returns, result branches, and sum payloads. |
 | `Stdb.literal(...)` | String, number, or boolean literal values; string literals lower to enums. |
 | `Stdb.result(Ok, Err)` | Result envelope value type. |
@@ -3518,15 +4180,18 @@ TypeScript values, SATS lowering, bounds, and transport encoding notes.
 | --- | --- |
 | `Stdb.table(...)` / `scheduledTable(...)` | Declare persistent, event, and scheduled tables. |
 | `Stdb.index(...)` / `unique(...)` | Declare table indexes and uniqueness constraints. |
-| `Stdb.StdbFn.reducer(...)` / `procedure(...)` / `scheduledReducer(...)` / `scheduledProcedure(...)` / `view(...)` / `anonymousView(...)` | Declare callable and view endpoints. |
-| `Stdb.StdbGroup.make(...)` / `Stdb.StdbHttpGroup.make(...)` | Group reducers/procedures/views and HTTP routes. |
-| `Stdb.StdbHttp.*` | Declare typed and raw HTTP handlers. |
-| `Stdb.StdbModule.make(...)` | Assemble tables, callable groups, HTTP groups, lifecycle, and settings. |
-| `Stdb.StdbBuilder.group(...)` / `groupChecked(...)` / `groupPrechecked(...)` / `lifecycle(...)` | Attach Effect implementations to an assembled module. |
+| `Stdb.Fn.reducer(...)` / `procedure(...)` / `scheduledReducer(...)` / `scheduledProcedure(...)` / `view(...)` / `anonymousView(...)` | Declare callable and view endpoints. |
+| `Stdb.Group.make(...)` / `Stdb.HttpGroup.make(...)` | Group reducers/procedures/views and HTTP routes. |
+| `Stdb.Http.*` | Declare typed and raw HTTP handlers. |
+| `Stdb.Module.make(...)` | Assemble tables, callable groups, HTTP groups, lifecycle, and settings. |
+| `Module.mount(key, child, options?)` / `Module.mountNative<Library>()(key, options?)` | Declare a namespace. Set `options.name` to pin its canonical name. |
+| `Stdb.Builder.mount(...)` / `mountNative(...)` | Supply a child and its implementations or a native SDK namespace in the parent's build. |
+| `Module.mounts[key].run(effect)` / `.use(fn)` / `.use(kind, fn)` | Run an Effect in the child scope or invoke a native helper with its alias. Direct Effect table handles nest under `Db` and `ReadonlyDb`. See [Submodules](/core-concepts/databases/submodules). |
+| `Stdb.Builder.group(...)` / `groupPrechecked(...)` / `lifecycle(...)` | Attach Effect implementations to an assembled module. |
 | `Stdb.project(Module)` | Build client projections, targets, and generated-client adapters. |
 | `Stdb.toHttpApi(Module)` / `httpApiBaseUrl(...)` | Project typed HTTP routes into Effect `HttpApi`. |
 | `Stdb.ScheduleAt.*` | Build scheduled table `scheduledAt` values. |
-| `Stdb.Environment.*` | Declare typed database environment keys for `StdbModule.make(id, { environment })`. |
+| `Stdb.Environment.*` | Declare typed database environment keys for `Module.make(id, { environment })`. |
 | `Stdb.validate(...)` / `assertValid(...)` / `formatModuleDiagnostics(...)` | Run module validation manually. |
 
 Builder impl values are sealed. `GroupImpl<Name, RuntimeR, ModuleName>` and
@@ -3534,7 +4199,7 @@ Builder impl values are sealed. `GroupImpl<Name, RuntimeR, ModuleName>` and
 lifecycle, runtime-requirement, and module-identity phantoms; handler
 definitions are private to the builder pipeline. The module-name parameter
 defaults to `string` so older two-argument annotations still compile, but
-`build(...)` and `plan(...)` reject widened impl annotations. Keep
+`build(...)` rejects widened impl annotations. Keep
 implementation arrays inferred with `as const` when storing them before
 `build(...)`.
 
@@ -3577,14 +4242,16 @@ Only Effect failures are encoded as declared errors. Defects remain defects.
 
 | Type | Source |
 | --- | --- |
-| `ReducerAsyncNotAllowedError` | Async, promises, timers, microtasks, or `Effect.sleep` in synchronous server handlers. |
-| `ReducerGlobalRandomNotAllowedError` | Global `Math.random` use in guarded server runtime. |
-| `ReducerWallClockNotAllowedError` | Ambient `Date.now()` or no-argument `new Date()` in guarded server runtime. |
+| `HandlerAsyncNotAllowedDefect` | Async, promises, timers, microtasks, or `Effect.sleep` in synchronous server handlers. |
+| `HandlerGlobalRandomNotAllowedDefect` | Global `Math.random` use in guarded server runtime. |
+| `HandlerWallClockNotAllowedDefect` | Ambient `Date.now()` or no-argument `new Date()` in guarded server runtime. |
+| `StdbTableOperationDefect` | A server table invariant failed. Inspect `table`, `op` and `cause`. |
 | `StdbHostCallError` | Generic host ABI call failure. |
 | `StdbUniqueAlreadyExistsError` / `StdbNoSuchRowError` / `StdbAutoIncOverflowError` / `StdbScheduleDelayTooLongError` | Typed native host failures. |
 | `StdbDecodeError` | Contract decode failure. |
-| `CallFailure<E>` / `RawCallFailure<E>` | Projected client call failure unions. |
-| `RemoteRejectedError` / `TransportError` / `DomainCallError<E>` | Projected client remote, transport, and raw declared-error failures. |
+| `CallFailure<E>` / `RawCallFailure<E>` | Projected HTTP call failure unions. |
+| `WsCallFailure<E>` / `RawWsCallFailure<E>` / `WsConnectionFailure` | Projected WebSocket call failure unions, and what a session adds: `ConnectionLostError`, `CallNotSentError`, `ConnectionIdentityChangedError`. |
+| `RemoteRejectedError` / `TransportError` / `DomainCallError<E>` | Projected client remote, transport, and raw declared-error failures. A `TransportError` whose `cause` is `HttpCallDurationExceededError` overran `callDurationMax`. |
 | `WsConnectError` / `WsConnectTimeoutError` | WebSocket acquisition failed, or did not complete in time. |
 | `ConnectionLostError` | An established connection was lost while the call was in flight, or the session had ended; the call's outcome is unknown. |
 | `CallNotSentError` | Automatic reconnect: the call was refused unsent while the session reconnected. |
@@ -3605,7 +4272,7 @@ sidebar:
 ---
 
 This map tracks the SpacetimeDB Core Concepts taxonomy against these docs, as of
-SpacetimeDB 2.14.0. Every upstream topic has exactly one row.
+SpacetimeDB 2.16.1. Every upstream topic has exactly one row.
 
 | Upstream Core Concept topic | Upstream link | Our status | Our page / note |
 | --- | --- | --- | --- |
@@ -3618,7 +4285,7 @@ SpacetimeDB 2.14.0. Every upstream topic has exactly one row.
 | Databases / Migrations / Automatic Migrations | [SpacetimeDB -> Automatic Migrations](https://spacetimedb.com/docs/databases/automatic-migrations) | mirrored | [Migrations](/core-concepts/databases/migrations) |
 | Databases / Migrations / Incremental Migrations | [SpacetimeDB -> Incremental Migrations](https://spacetimedb.com/docs/databases/incremental-migrations) | mirrored | [Migrations](/core-concepts/databases/migrations) |
 | Databases / Environment Variables | [SpacetimeDB -> Environment Variables](https://spacetimedb.com/docs/databases/environment-variables) | mirrored | [Environment Variables](/core-concepts/databases/environment-variables); declarations are typed contract members, reads are per-call `Env` effects, secrets read back `Redacted`. |
-| Databases / Submodules | [SpacetimeDB -> Submodules](https://spacetimedb.com/docs/submodules) | not covered | Upstream 2.8.0 lets a TypeScript module mount another module under a namespace (`schema({ tbl, lib })`, `ctx.db.<ns>`, `ctx.as.<ns>`). The contract DSL does not expose it yet; the runtime tolerates the SDK's always-present namespaces. |
+| Databases / Submodules | [SpacetimeDB -> Submodules](https://spacetimedb.com/docs/submodules) | mirrored | [Module and native mounts](/core-concepts/databases/submodules) |
 | Functions | [SpacetimeDB -> Functions](https://spacetimedb.com/docs/functions) | mirrored | Section root represented by the Functions sidebar group. |
 | Functions / Reducers | [SpacetimeDB -> Reducers](https://spacetimedb.com/docs/functions/reducers) | mirrored | [Reducers](/core-concepts/functions/reducers) |
 | Functions / Reducers / Reducer Context | [SpacetimeDB -> Reducer Context](https://spacetimedb.com/docs/functions/reducers/reducer-context) | mirrored | [Reducer Context](/core-concepts/functions/reducer-context) |
@@ -3638,6 +4305,7 @@ SpacetimeDB 2.14.0. Every upstream topic has exactly one row.
 | Tables / Access Permissions | [SpacetimeDB -> Access Permissions](https://spacetimedb.com/docs/tables/access-permissions) | not-supported | [Access Permissions](/core-concepts/tables/access-permissions); RLS / `clientVisibilityFilter` is not supported. |
 | Tables / Scheduled Tables | [SpacetimeDB -> Scheduled Tables](https://spacetimedb.com/docs/tables/schedule-tables) | mirrored | [Scheduled Tables](/core-concepts/tables/scheduled-tables) |
 | Tables / Event Tables | [SpacetimeDB -> Event Tables](https://spacetimedb.com/docs/tables/event-tables) | mirrored | [Event Tables](/core-concepts/tables/event-tables) |
+| Tables / Storage and Cache Policies | [SpacetimeDB -> Table Storage and Cache Policies](https://spacetimedb.com/docs/tables/storage-and-cache-policies/) | mirrored | [Table policies and module default](/core-concepts/tables/performance) |
 | Tables / Performance | [SpacetimeDB -> Performance](https://spacetimedb.com/docs/tables/performance) | mirrored | [Performance](/core-concepts/tables/performance) |
 | Clients / Subscriptions | [SpacetimeDB -> Subscriptions](https://spacetimedb.com/docs/clients/subscriptions) | mirrored | [Subscriptions](/core-concepts/subscriptions) |
 | Clients / Subscriptions / Semantics | [SpacetimeDB -> Subscription Semantics](https://spacetimedb.com/docs/clients/subscriptions/semantics) | mirrored | [Subscriptions](/core-concepts/subscriptions) |
@@ -3690,6 +4358,8 @@ contract, then move handlers behind the typed builder group by group.
 
 :::
 
+For an existing effect-spacetimedb 0.8 application, follow [Upgrading from 0.8 to 0.9](/the-effect-layer/upgrading-from-0-8).
+
 ## The Same Module, Both Ways
 
 The native module and the equivalent effect-spacetimedb contract — declare the
@@ -3734,18 +4404,18 @@ const user = Stdb.table("user", {
   },
 })
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.reducer("user_upsert", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.reducer("userUpsert", {
     params: Stdb.struct({ id: Stdb.string(), name: Stdb.string() }),
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const Module = Stdb.Module.make("app").addTables(user).add(Users)
 const { Db } = Module
 
 // 2. implement handlers behind the typed group
-const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
-  user_upsert: (args) =>
+const UsersLive = Stdb.Builder.group(Module, "Users", {
+  userUpsert: (args) =>
     Effect.gen(function* () {
       const db = yield* Db
       yield* db.user.insert(args)
@@ -3760,13 +4430,17 @@ const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
 
 | Native concept | effect-spacetimedb concept |
 | --- | --- |
-| reducer function export | `StdbFn.reducer(...)` in a callable group |
-| procedure function export | `StdbFn.procedure(...)` in a callable group |
+| reducer function export | `Fn.reducer(...)` in a callable group |
+| procedure function export | `Fn.procedure(...)` in a callable group |
+| `table({ cachePolicy }, columns)` | Pass the same literal to `Stdb.table`, `Stdb.scheduledTable`, or `Stdb.outboxTable`. Set a module-wide fallback with `settings.tableCachePolicyDefault`. |
 | table builder | `Stdb.table(...)` bound to a variable |
-| `reducer`/`procedure` `onSchedule` option | `StdbFn.scheduledReducer(...)` or `scheduledProcedure(...)` |
-| HTTP handler export | `StdbHttpGroup` plus `StdbBuilder.group(...)` |
+| `reducer`/`procedure` `onSchedule` option | `Fn.scheduledReducer(...)` or `scheduledProcedure(...)` |
+| `schema({ ns: lib })` | Declare `.mount("ns", Library)` for an Effect contract, or `.mountNative<typeof import("lib")>()("ns")` for a native library. Implement the declaration in the parent build. |
+| `ctx.db.ns` | Use the Effect child table handles at `(yield* Parent.Db).ns`, or the corresponding readonly handles in a root view. |
+| `ctx.as.ns` | Use `Parent.mounts.ns.use(fn)` for a native mutation helper, or select the procedure or HTTP kind. Run an Effect library operation with `Parent.mounts.ns.run(effect)`. See [Submodules](/core-concepts/databases/submodules). |
+| HTTP handler export | `HttpGroup` plus `Builder.group(...)` |
 
-Schedules are registered on the function, not the table: `StdbFn.scheduledReducer(...)`
+Schedules are registered on the function, not the table: `Fn.scheduledReducer(...)`
 and `scheduledProcedure(...)` compile to the native `onSchedule` option, which is
 where SpacetimeDB now expects the binding. If you are porting a module that
 passes `scheduled` to `table(...)`, that registration is deprecated upstream —
@@ -3832,8 +4506,8 @@ sidebar:
 ---
 
 Reducers must be deterministic. Every replica needs to reproduce the same result
-from the same logged inputs, so module code should use host-provided time and
-randomness rather than ambient JavaScript globals.
+from the same logged inputs. Use the timestamp supplied by the host and the
+SDK’s deterministic random stream.
 
 ## Reducer Randomness
 
@@ -3841,7 +4515,7 @@ Inside Effect-based reducers, use `Random.*` from `effect/Random`. The constrain
 runtime wires Effect randomness to the call context's deterministic random
 stream.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Random from "effect/Random"
 
@@ -3864,9 +4538,9 @@ fails early.
 
 Use the call timestamp supplied by the current context instead of ambient clock
 globals. In guarded development runs, `Date.now()` and no-argument `new Date()`
-throw `ReducerWallClockNotAllowedError`; `Math.random` throws
-`ReducerGlobalRandomNotAllowedError`; suspended Effects, promises, timers, and
-microtasks throw `ReducerAsyncNotAllowedError`.
+throw `HandlerWallClockNotAllowedDefect`; `Math.random` throws
+`HandlerGlobalRandomNotAllowedDefect`; suspended Effects, promises, timers, and
+microtasks throw `HandlerAsyncNotAllowedDefect`.
 
 The Effect clock is wired to the same transaction timestamp, so `Effect.Clock`
 and `DateTime.now` are deterministic inside server handlers.
@@ -3877,11 +4551,8 @@ Reducer, transaction, and HTTP handler contexts expose deterministic UUID
 helpers. Use `ctx.newUuidV4()` and `ctx.newUuidV7()` when a row needs a stable
 identifier produced inside server module code.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
-import * as Stdb from "effect-spacetimedb"
-
-declare const Module: Stdb.AnyStdbModule
 
 const { ReducerCtx } = Module
 
@@ -3896,13 +4567,11 @@ const ids = Effect.gen(function* () {
 
 :::caution
 
-These helpers are not unique across transactions. SpaceTimeDB 2.14 seeds each
-call's random stream from that call's timestamp alone and restarts the UUID v7
-counter, so two transactions the host gives the same timestamp draw the same
-UUIDs, and the 32-bit seed makes repeats likely between nearby timestamps too.
-A key inserted from them can fail as a duplicate under concurrent calls. When an
-identifier must be unique across transactions, mix in state the module owns,
-such as a counter row that every mint reads and advances in its transaction.
+The SDK seeds each call’s random stream from its timestamp alone and restarts
+the UUID v7 counter for each call. In 2.16.1 four PCG32 outputs expand that
+64-bit seed to fill the whole 128-bit generator state. Two transactions given
+the same timestamp still draw the same sequence and can mint duplicate UUIDs.
+For unique keys, mint IDs from a sequence advanced inside the transaction.
 
 :::
 
@@ -3911,7 +4580,7 @@ such as a counter row that every mint reads and advances in its transaction.
 The constrained server runtime wires `Random.*` from `effect/Random` to the
 current SpaceTimeDB call context through `ctx.random`, so helpers such as
 `Random.next`, `Random.nextIntBetween`, and `Random.shuffle` consume the same
-deterministic stream exposed by the host.
+deterministic stream supplied by the SDK.
 
 SpaceTimeDB replaces `Math.random` in module runtimes. In guarded development
 runs, `effect-spacetimedb` also replaces it with a throwing guard so accidental
@@ -3919,7 +4588,7 @@ callers fail loudly in tests and CI. The runtime still installs a deterministic
 fallback as a non-semantic backstop for stray library paths, but application
 logic should not depend on it.
 
-The host random stream is deterministic and replica-reproducible. Supplying a
+The SDK random stream is deterministic and replica-reproducible. Supplying a
 developer-chosen seed makes results more reproducible, not more secret.
 
 ## Strength
@@ -3975,10 +4644,16 @@ bounded to the current call.
 
 At the host boundary, each reducer, procedure, view, HTTP handler, and lifecycle
 handler is executed with the sync runner and `Scheduler.PreventSchedulerYield`.
-Anything that suspends the fiber surfaces as `ReducerAsyncNotAllowedError`.
-`Effect.sleep` fails with the same error in all modes. Guarded development runs
-also replace timer and microtask globals with throwing stubs so accidental use
-fails before a module is published.
+Anything that suspends the fiber surfaces as `HandlerAsyncNotAllowedDefect`.
+`Effect.sleep` dies with the same error in all modes, so no `catch` can swallow
+it. A zero-length sleep passes, so `retry` and `repeat` without a delay work.
+Guarded development runs also replace timer and microtask globals with throwing
+stubs so accidental use fails before a module is published.
+
+The body of `Tx.run` runs in a fiber of its own, because the host takes it as a
+synchronous callback. That fiber keeps its caller's context: services provided
+around the call, log annotations and the current span all carry over. The
+transaction's own services, its clock and its randomness replace the caller's.
 
 ## Determinism
 
@@ -4014,21 +4689,19 @@ their own status rows and cleanup process.
 
 ## Host Call Failures
 
-Host ABI calls can fail before user code gets a normal return value. Generic or
-unrecognized host failures surface as `StdbHostCallError` with the operation
-label and original cause. Four native SpaceTimeDB host errors are split out so
-handlers can branch without string-sniffing causes:
+Table reads and deletes return Effects with error type `never`. This includes
+index lookups and streams. A broken host operation or an undecodable stored row
+dies with `StdbTableOperationDefect`. Its `table`, `op` and `cause` identify
+the failing operation. A missing row is a normal result. `findOrFail` uses the
+error its caller supplies for that result.
 
-- `StdbUniqueAlreadyExistsError`
-- `StdbAutoIncOverflowError`
-- `StdbNoSuchRowError`
-- `StdbScheduleDelayTooLongError`
-
-Each carries `{ op, cause }`, matching `StdbHostCallError`. Branch on a specific
-tag only when a handler has a real recovery path, such as translating a unique
-constraint collision into a declared domain error. Otherwise let the error
-propagate so the host-boundary throw keeps the operation label and original
-cause.
+Inserts and updates can fail with `StdbUniqueAlreadyExistsError` on a unique
+constraint, `StdbAutoIncOverflowError` on a sequence, or
+`StdbScheduleDelayTooLongError` on a scheduled table. Updating a missing row
+fails with `StdbNoSuchRowError`. Each carries the operation and original cause.
+An oversized outbox insert can also fail with `OutboxRowTooLargeError`.
+Outside table operations, a host call such as a transaction can still fail with
+`StdbHostCallError`. A transaction propagates the typed errors from its body.
 
 The classifier uses native error class names rather than `instanceof`, because
 ordinary server runtime files cannot value-import `spacetimedb/server` without
@@ -4074,6 +4747,203 @@ host.
 - Keep transaction bodies idempotent and database-only.
 - Import `effect-spacetimedb/server-compiler` in module entrypoints; it installs
   the server polyfills without a separate bundle prelude injection.
+
+
+---
+
+# Source: /the-effect-layer/upgrading-from-0-8
+
+---
+title: Upgrading from 0.8 to 0.9
+description: Upgrade the toolchain, migrate contracts and clients, and regenerate bindings.
+sidebar:
+  order: 9
+---
+
+## Install the matching tools
+
+Use Node `^22.23.4 || ^24.22.1 || >=26.12.1`, Effect `^4.1.1`, and SpacetimeDB **2.16.1** for the JavaScript SDK, CLI and database host. Even a module that uses default storage emits the new table-cache schema section.
+
+1. Install `effect-spacetimedb@0.9.0` and pin `spacetimedb@2.16.1` in both the module and client projects.
+2. Replace the SDK 2.14 patch with the [2.16.1 patch](https://github.com/miragegame/effect-spacetimedb/blob/v0.9.0/patches/spacetimedb@2.16.1.patch). It fixes comparisons of object-valued range keys, unique index classification and branded primitive builder inputs.
+3. Configure your package manager to apply the patch and reinstall. For Bun, put the following entry in the root `package.json`. For pnpm, place the same mapping under `pnpm.patchedDependencies` or in `pnpm-workspace.yaml`. Other installers need an equivalent patch step.
+
+```json
+{
+  "patchedDependencies": {
+    "spacetimedb@2.16.1": "patches/spacetimedb@2.16.1.patch"
+  }
+}
+```
+
+## Update contracts and handlers
+
+Import the root with `import * as Stdb from "effect-spacetimedb"`. For example, declare a reducer with `Stdb.Fn.reducer`, add it to `Stdb.Group.make("Users")`, then add the group to `Stdb.Module.make("app")`.
+
+| Previous spelling | Current spelling or replacement |
+| --- | --- |
+| `StdbFn` | `Fn` |
+| `StdbGroup` | `Group` |
+| `StdbModule` | `Module` |
+| `StdbHttp` | `Http` |
+| `StdbHttpGroup` | `HttpGroup` |
+| `StdbBuilder` | `Builder` |
+| `AnyStdbModule` | `AnyModule` |
+| `StdbBuildPlan` | `BuildPlan` |
+| `StdbValueType` | `ValueType` |
+| `StdbDiagnostic` | `Diagnostic` |
+| `StdbDiagnosticSeverity` | `DiagnosticSeverity` |
+| `StdbDiagnosticCode` | `DiagnosticCode` |
+| `StdbTypeDescriptor` | `TypeDescriptor` |
+| `StdbHostFailure` | `HostFailure` |
+
+Remove `public` from reducers, procedures and views. Client-callable functions were already reachable on the host. For a restricted read, use a private table and a procedure that checks the sender. Tables keep their visibility setting. Scheduled, lifecycle and settle functions stay outside the projected client.
+
+Replace a column’s `.name("display_name")` with `.columnName("display_name")`. Use `.named("UserView")` to name a generated struct type. Check existing column names before republishing because correcting a mistaken column name changes the stored schema.
+
+An integer column can use `.autoInc()` with or without a primary key. Remove workarounds that treated chained field options as optional values. A zero on update also requests the next sequence value. Optional columns cannot carry a sequence.
+
+Other removed names and members:
+
+| 0.8 | 0.9 |
+| --- | --- |
+| `Stdb.enumType(...)` | `Stdb.enum(...)` |
+| `Builder.groupChecked(...)` | `Builder.group(...)`, or `groupPrechecked(...)` for a record already annotated `GroupCheckedHandlers` |
+| `LifecycleKeys` from `/server` | `LifecycleName` from the root |
+| `StdbEventContextType`, `StdbReducerOutcomeType` from `/client` | `StdbEventContext`, `StdbReducerOutcome`, which are types as well as values |
+| `WsSubscriptionHandleLike` from `/client` | `SubscriptionHandleLike` |
+| `db.table.key.replace(...)` | `db.table.key.update(...)` |
+| `db.table.index.deleteAll(...)` | `db.table.index.delete(...)` |
+| the handler context's deprecated `identity` | `ctx.databaseIdentity` |
+| `WaitUntilOptions.interval` | removed; `waitUntil` is event-driven and never read it |
+
+Use `Stdb.Builder.group` for implementations and `build(module, implementations)` from `effect-spacetimedb/server-compiler` for the module entry. Replace `Server.make`, `ServerInstance`, `MakeOptions` and their single-handler and transaction helpers with module accessors. A `SyncRunner` provides `runSync` and `runSyncExit`. Remove calls to `dispose` and references to `SyncRunnerLike` or `StdbServerDisposedError`. Use `toSyncRunner` to adapt a context.
+
+## Update clients and time limits
+
+| Previous spelling | Current spelling or replacement |
+| --- | --- |
+| `makeWsClient` | `wsMake` |
+| `generatedConnection` | `wsGeneratedConnection` |
+| `sessionTag` | `wsSessionTag` |
+| `connectAndSubscribe` | `wsConnectAndSubscribe` |
+| `supervisedSessionAtom` | `wsSupervisedSessionAtom` |
+| `tableAtomFamily` | `wsTableAtomFamily` |
+| `rowAtomFamily` | `wsRowAtomFamily` |
+| `tableGroupAtomFamily` | `wsTableGroupAtomFamily` |
+| `tableGroupSnapshotAtom` | `wsTableGroupSnapshotAtom` |
+| `connectTimeoutMillis` | `connectDurationMax` |
+| `reconnectDelayMillisFirst` | `reconnectDelayFirst` |
+| `reconnectDelayMillisMax` | `reconnectDelayMax` |
+| `stabilityWindowMillis` | `stabilityWindow` |
+| `delayMillisMin` | `delayMin` |
+| `delayMillisMax` | `delayMax` |
+| `connectTimeoutMillisDefault` | `connectDurationMaxDefault` |
+| `reconnectDelayMillisFirstDefault` | `reconnectDelayFirstDefault` |
+| `reconnectDelayMillisMaxDefault` | `reconnectDelayMaxDefault` |
+| `stabilityWindowMillisDefault` | `stabilityWindowDefault` |
+
+Change `client.Users.reducers.userUpsert` to `client.groups.Users.reducers.userUpsert`. The same path works on WebSocket sessions, including a session delivered by a supervisor or atom. Each group is created on first access and retains its identity. Its functions and their `.raw` variants are the same objects available under the flat `reducers` and `procedures` records. HTTP groups also have `httpHandlers`. A scoped HTTP client from `project(module).client.http.group("Users", config)` already represents one group. Names such as `cache`, `identity` and `groups` are valid group ids.
+
+Time options accept Effect `Duration.Input`. A number still means milliseconds. Calls and connection acquisition default to 30 seconds. Set `callDurationMax` or `connectDurationMax` to `Duration.infinity` to disable that timer. A WebSocket call that exceeds its deadline ends the connection and fails with `ConnectionLostError`. Its outcome is unknown. Set the deadline above the longest expected operation. The procedure HTTP adapter also accepts a duration as its `timeout`.
+
+The supervisor defaults to an initial delay of 250 milliseconds and a ceiling and stability window of 30 seconds each. A short-lived connection continues the previous backoff. The delay resets after a connection stays live for the stability window. Delays must be finite and nonnegative, and the stability window must be finite and positive.
+
+Use `CallFailure<E>` and `RawCallFailure<E>` for HTTP. On WebSocket calls use `WsCallFailure<E>` or `RawWsCallFailure<E>`. Remove HTTP recovery arms for `ConnectionLostError`, `CallNotSentError` and `ConnectionIdentityChangedError`. If you construct `SubscriptionInvalidatedError` in a test, supply its `kind`. A custom `TableAtomSession` must implement `isRevoked()` and `rowsOwner()`.
+
+## Update server failure handling
+
+Server table reads, streams, index lookups and deletes have error type `never`. A missing `find` result is `undefined`. `findOrFail` fails with the error you supply. Remove `catchTag`, retry and `orDie` around table operations whose error channel is now empty. An unexpected host call or malformed stored row dies with `StdbTableOperationDefect`. Import the class from `effect-spacetimedb/server` and inspect its `table`, `op` and `cause` in a defect observer. Client-side decoding still reports `StdbDecodeError` for malformed data received from the server.
+
+| Table operation | Typed failures |
+| --- | --- |
+| Insert, bulk insert, schedule | `StdbUniqueAlreadyExistsError` for unique constraints, `StdbAutoIncOverflowError` for sequences and `StdbScheduleDelayTooLongError` for scheduled tables |
+| Primary-key update | The applicable write errors above plus `StdbNoSuchRowError` |
+| Outbox insert | Applicable insert errors plus `OutboxRowTooLargeError` for the configured byte bound |
+| Read, delete, clear | None |
+
+`withTx` and scoped transaction helpers propagate the body's typed errors. The host transaction can also fail. A transaction no longer adds a decode error of its own. Its scope closes before commit and it inherits caller-provided services and log annotations. A finalizer that dies aborts the transaction. Keep external side effects outside a transaction body because the host can retry it.
+
+Update error class imports, string tags and pattern matches together. Local class names change independently of stored rows and declared wire errors.
+
+| Previous spelling | Current spelling or replacement |
+| --- | --- |
+| `OutboxRowTooLarge` | `OutboxRowTooLargeError` |
+| `HttpCallDurationExceeded` | `HttpCallDurationExceededError` |
+| `HttpDeclaredErrorDefinitionMissing` | `HttpDeclaredErrorDefinitionMissingDefect` |
+| `InvalidRawHttpResponse` | `InvalidRawHttpResponseDefect` |
+| `StdbSenderFailure` | `StdbSenderError` |
+| `StdbDeclaredErrorEncodingFailure` | `StdbDeclaredErrorEncodingError` |
+| `WsSessionSupervisorDefectError` | `WsSessionSupervisorFatalError` |
+| `ReducerAsyncNotAllowedError` | `HandlerAsyncNotAllowedDefect` |
+| `ReducerGlobalRandomNotAllowedError` | `HandlerGlobalRandomNotAllowedDefect` |
+| `ReducerWallClockNotAllowedError` | `HandlerWallClockNotAllowedDefect` |
+| `CallableInterruptedError` | `CallableInterruptedDefect` |
+| `RuntimeLayerAsyncError` | `RuntimeLayerAsyncDefect` |
+| `StdbDbSchemaMismatchError` | `StdbDbSchemaMismatchDefect` |
+| `NestedTestTransactionError` | `NestedTestTransactionDefect` |
+| `StdbHostAbiCapabilityError` | `StdbHostAbiCapabilityDefect` |
+| `StdbHttpProjectionError` | `StdbHttpProjectionDefect` |
+| `StdbFieldOptionsVersionError` | `StdbFieldOptionsVersionDefect` |
+| `StdbValidationError` | `StdbValidationDefect` |
+| `StdbTypeIdentifierError` | `StdbTypeIdentifierDefect` |
+| `StdbTypeNotNameableError` | `StdbTypeNotNameableDefect` |
+| `StdbTypeLoweringError` | `StdbTypeLoweringDefect` |
+| `UnsupportedStdbTypeError` | `UnsupportedStdbTypeDefect` |
+| `SatsTypeNameCollisionError` | `SatsTypeNameCollisionDefect` |
+| `TestModuleEnvironmentError` | `TestModuleEnvironmentDefect` |
+| `ServerPolyfillInstallError` | `ServerPolyfillInstallDefect` |
+| `ServerDevGuardInstallError` | `ServerDevGuardInstallDefect` |
+
+## Publish the module and regenerate its client
+
+Coordinate the module and client upgrade. **Every client-callable procedure now returns an `ok` or `err` envelope**, including procedures with no declared errors. A raw success is `[0, value]`. A raw failure is `[1, carrier]`. The carrier is a string containing either the declared error payload or a version 1 `UndeclaredFailure` with a reason and message. A 0.8 client cannot decode the new result from a formerly unwrapped procedure.
+
+```sh
+spacetime generate --lang typescript --module-path . --out-dir src/module_bindings --yes
+```
+
+The typed client decodes undeclared procedure failures as `RemoteRejectedError`. Bad arguments receive status 400 with a message capped at 1,024 characters. A handler failure or result encoding failure receives status 500 with a fixed message. The module logs the underlying cause. Reducers reject invalid caller arguments with a sender error. Scheduled procedures return unit.
+
+Pass `onDefect` to `build(module, impls, { onDefect })`. Remove the trailing observer argument from `provideConstrainedServerSupport` and `provideConstrainedServerRuntime`. An observer receives the cause once for each undeclared failure, including unexpected host errors and async work inside a synchronous handler. Zero-length sleeps complete synchronously. A positive sleep in a synchronous handler dies.
+
+## Update test helpers and imports
+
+A procedure bound with `bindCallables` answers with `{ ok }` or `{ err }`. Assert on the answer. Use `bindCallables(module, impls, { onDefect })` to inspect the cause. Bound calls take already-decoded arguments and return unencoded results. Test wire codecs against a host. Relative bundle paths passed to `makeDevServer` resolve from the current directory.
+
+| Was on `./testing` | Import from |
+| --- | --- |
+| `project`, `AnyModuleSpec`, `TableRow`, `TypeOf`, `StdbHostEncodeError` | `effect-spacetimedb` |
+| `CallFailure`, `RawCallFailure`, `WsCallFailure`, `RawWsCallFailure`, `DomainCallError`, `RemoteRejectedError`, `TransportError`, `StdbDecodeError`, `ConnectionLostError`, `catchRawTags`, `SubscriptionFailure`, `WsConnectError`, `WsConnectTimeoutError`, the stream overflow errors and buffer options | `effect-spacetimedb` or `effect-spacetimedb/client` |
+| `decodeStdbEventContext`, `decodeStdbEventContextSync`, `StdbEventContext`, `StdbReducerOutcome`, `wsGeneratedConnection` and the `Generated*` types, the `Subscription*` errors, `SubscriptionHandleLike`, `TableGroup`, `TableGroupSnapshot`, `TableChange`, `TableChangeWithContext`, `WaitUntilTimeoutError`, `WaitUntilOptions`, `unsubscribeThen`, the `WsSessionSupervisor*` types, `reconnectDelayFirstDefault`, `reconnectDelayMaxDefault` | `effect-spacetimedb/client` |
+| `provideConstrainedServerSupport` | `effect-spacetimedb/server` |
+
+Each public entry exports the types needed for its signatures. Keep using `Stdb.dbCodec`, `Stdb.httpCodec` and `Stdb.wsCodec` for transport interoperation. Use `Stdb.reflect` or module accessors for contract metadata. Use session refs and the subscription helpers for cache access.
+
+| Removed operation | Replacement |
+| --- | --- |
+| `declOf`, `encodeCallArgs`, `isUnitValueType`, `outboxTargetIndexName`, `wireNameForDecl`, `wireNameOf` | Inspect the module or use its projected calls |
+| `canonicalizeTableGroupKeys`, `canonicalRowKey`, `canonicalTableGroupKey`, `canonicalTableKey`, `canonicalValueKey`, `subscribeSnapshotRef` | `subscribeRowRef`, `subscribeTableRef`, `subscribeTableGroupRef` |
+| `httpGroupFromModulePlan`, `layerFromModulePlan`, `wsSupervisorFromModulePlan` | Construct clients from `Stdb.project(module).client` |
+| `RemoteRejectedBody` | Handle `RemoteRejectedError` with its raw response and status |
+
+Three more names changed.
+
+| Previous spelling | Current spelling or replacement |
+| --- | --- |
+| `timestampAddMillis` | `timestampAdd` |
+| `StdbBuilder.plan` | Use `build(module, implementations)` in module entries and `bindCallables(module, implementations)` in tests. |
+| `RESERVED_GROUP_CLIENT_KEYS` | Removed. Only JavaScript prototype member names remain reserved as group ids. |
+
+## Additions and defaults
+
+- Choose `required_in_memory`, `required_on_disk` or `no_requirement` through a table's `cachePolicy` or the module's `settings.tableCachePolicyDefault`. The default is in memory. Disk-capable policies require btree indexes. Republish a policy change in place with existing rows and bindings.
+- Mount an Effect module with `.mount(key, Library)` and `Builder.mount`, or a native SDK library with `.mountNative<Library>()(key)` and its native implementation. Use `mounts[key].run` for an Effect library and `mounts[key].use` for a native callback. Effect mounts expose nested calls, tables, subscription targets and cache reads. All mounts share the parent database and transaction. An optional `{ name }` pins the wire namespace. The maximum depth is four. Declare environment, HTTP routes, lifecycle hooks and inter-database receivers on the root.
+- Array length bounds are optional. `Stdb.array(item)` has no length check. Supply `minimum`, `maximum` or both when needed. When inspecting `Stdb.describe(type).length`, either bound can be absent.
+- Table deltas and event inserts retain every change by default. An explicit `bufferSize` bounds memory and signals overflow. Table delta subscribers can also opt into sliding or dropping. Snapshot notifications coalesce because a snapshot reads current rows.
+- Table, column, index and callable declarations accept snake_case and preserve authored names at the Effect boundary. Use a plain string schema when your domain has no additional string constraint.
+- An undecodable server message invalidates the affected WebSocket cache and parks a supervisor by default. A normal connection loss preserves the last rows for the same identity. A changed identity or failed token refresh revokes them. Keep a token across reconnects when the client should retain its identity.
+- `IdcPump.drain({ deliveriesMax })` defaults to 1,000 deliveries. A refused connection stops the pump, and exhausting the bound with pending rows raises `RangeError`.
 
 
 ---
@@ -4287,7 +5157,9 @@ may be kept as value-type aliases.
 For generic SATS values reused across many fields, keep a value-type alias:
 
 ```ts
-const ShortString = Stdb.string(Schema.String.pipe(Schema.minLength(1)))
+const ShortString = Stdb.string(
+  Schema.String.pipe(Schema.check(Schema.isMinLength(1))),
+)
 ```
 
 Composites and rows are the value types you usually keep. A row's `.schema`
@@ -4351,7 +5223,7 @@ Value types wrap Effect schemas with the SpaceTimeDB type information needed for
 tables, call params, returns, declared errors, HTTP routes, and generated
 clients.
 
-```typescript twoslash
+```typescript
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 
@@ -4410,13 +5282,13 @@ stay a `bigint`.
 
 | Helper | Authored TypeScript value | SATS lowering | Notes |
 | --- | --- | --- | --- |
-| `Stdb.array(T, { minimum, maximum })` | `ReadonlyArray<TypeOf<T>>` | array/list | Recurses through the inner value type. The inclusive length bounds are required and enforced on decode and encode; they never reach the wire, so arrays differing only in bounds lower identically. |
+| `Stdb.array(T)` / `Stdb.array(T, { minimum, maximum })` | `ReadonlyArray<TypeOf<T>>` | array/list | Recurses through the inner value type. Either inclusive length bound is optional; a bound is enforced on decode and encode and never reaches the wire, so arrays differing only in bounds lower identically. |
 | `Stdb.option(T)` | `TypeOf<T>` or `undefined` | `option<T>` | Present field whose value can be absent. |
 | `Stdb.optional(T)` | optional struct field | `option<T>` in structs | Produces an optional TypeScript property. |
 | `T.optional()` | optional table column | `option<T>` column | Column may be omitted on inserts. |
 | `Stdb.struct({ ... })` | object | SATS struct | Use for rows, params, returns, and declared-error payloads. Anonymous structs get a content-addressed name unless you set one with [`.named(...)`](#type-names). |
-| `Stdb.sum({ Tag: Payload })` | `{ tag, value? }` | SATS enum/sum | Unit payloads omit `value`; payload variants require `value`. Anonymous sums get a content-addressed name unless you set one with [`.named(...)`](#type-names). |
-| `Stdb.enum("A", "B")` / `enumType(...)` | tagged unit variants | SATS enum | Unit-variant sums; prefer namespace form because `enum` cannot be named-imported. |
+| `Stdb.sum({ name: Payload })` | `{ tag, value? }` | SATS enum/sum | Unit payloads omit `value`; payload variants require `value`. Anonymous sums get a content-addressed name unless you set one with [`.named(...)`](#type-names). |
+| `Stdb.enum("a", "b")` | tagged unit variants | SATS enum | Unit-variant sums; needs the namespace form because `enum` cannot be named-imported. |
 | `Stdb.literal(...)` | string, number, or boolean literal | string literals -> enum; numbers -> `f64`; booleans -> `bool` | String literal generated-client tags use SpaceTimeDB PascalCase. Numeric literals reject non-finite values and unsafe integers. |
 | `Stdb.result(Ok, Err)` | Effect-style result envelope | SATS result | Normalizes host `{ ok }` / `{ err }` envelopes. |
 | `Stdb.lazy(() => T)` | recursive value | lazy SATS type | Use for recursive structs or sums. |
@@ -4459,7 +5331,7 @@ it directly:
 Stdb.option(user.row) // reuses the table's `User` type, not a duplicate
 ```
 
-`.named(...)` is distinct from `.name(...)`: `.name(...)` sets SpacetimeDB's
+`.named(...)` is distinct from `.columnName(...)`: `.columnName(...)` sets SpacetimeDB's
 native builder column metadata and does not rename the generated type.
 
 ## Codecs

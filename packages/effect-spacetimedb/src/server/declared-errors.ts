@@ -5,10 +5,7 @@ import * as ErrorCodec from "../contract/error.ts"
 import type { ProcedureSpec } from "../contract/procedure.ts"
 import type { ReducerSpec } from "../contract/reducer.ts"
 import { StdbDecodeError } from "../decode-error.ts"
-import {
-  StdbDeclaredErrorEncodingFailure,
-  StdbSenderFailure,
-} from "./services.ts"
+import { StdbDeclaredErrorEncodingError, StdbSenderError } from "./services.ts"
 
 export type ProcedureHostResultEnvelope<Return, Error> =
   | {
@@ -45,7 +42,7 @@ export const encodeDeclaredReducerFailure = <Spec extends ReducerSpec, A, E, R>(
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<
   A,
-  E | StdbDecodeError | StdbSenderFailure | StdbDeclaredErrorEncodingFailure,
+  E | StdbDecodeError | StdbSenderError | StdbDeclaredErrorEncodingError,
   R
 > => {
   if (spec.errors == null) {
@@ -70,8 +67,8 @@ export const encodeDeclaredReducerFailure = <Spec extends ReducerSpec, A, E, R>(
               A,
               | E
               | StdbDecodeError
-              | StdbSenderFailure
-              | StdbDeclaredErrorEncodingFailure,
+              | StdbSenderError
+              | StdbDeclaredErrorEncodingError,
               R
             > => {
               if (Option.isNone(matched)) {
@@ -81,13 +78,13 @@ export const encodeDeclaredReducerFailure = <Spec extends ReducerSpec, A, E, R>(
               return ErrorCodec.encodeString(errors, matched.value).pipe(
                 Effect.mapError(
                   (cause) =>
-                    new StdbDeclaredErrorEncodingFailure({
+                    new StdbDeclaredErrorEncodingError({
                       callable: "reducer",
                       cause,
                     }),
                 ),
                 Effect.flatMap((value) =>
-                  Effect.fail(new StdbSenderFailure({ value })),
+                  Effect.fail(new StdbSenderError({ value })),
                 ),
               )
             },
@@ -106,26 +103,25 @@ export const encodeDeclaredProcedureFailure = <
   spec: Spec,
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<
-  A | ProcedureHostResultEnvelope<A, ErrorCodec.ProcedureDeclaredErrorCarrier>,
-  E | StdbDecodeError | StdbDeclaredErrorEncodingFailure,
+  ProcedureHostResultEnvelope<A, ErrorCodec.ProcedureDeclaredErrorCarrier>,
+  E | StdbDecodeError | StdbDeclaredErrorEncodingError,
   R
 > => {
-  if (spec.errors == null) {
-    return effect
-  }
+  const okEnvelope = (
+    value: A,
+  ): ProcedureHostResultEnvelope<
+    A,
+    ErrorCodec.ProcedureDeclaredErrorCarrier
+  > => ({ ok: value })
 
   const errors = spec.errors
+  if (errors == null) {
+    return Effect.map(effect, okEnvelope)
+  }
+
   return effect.pipe(
     Effect.matchCauseEffect({
-      onSuccess: (value) => {
-        const envelope = {
-          ok: value,
-        } as ProcedureHostResultEnvelope<
-          A,
-          ErrorCodec.ProcedureDeclaredErrorCarrier
-        >
-        return Effect.succeed(envelope)
-      },
+      onSuccess: (value) => Effect.succeed(okEnvelope(value)),
       onFailure: (cause) =>
         declaredErrorFromCause(errors, cause).pipe(
           Effect.catchTag("StdbDecodeError", () =>
@@ -141,7 +137,7 @@ export const encodeDeclaredProcedureFailure = <
                 A,
                 ErrorCodec.ProcedureDeclaredErrorCarrier
               >,
-              E | StdbDecodeError | StdbDeclaredErrorEncodingFailure,
+              E | StdbDecodeError | StdbDeclaredErrorEncodingError,
               R
             > => {
               if (Option.isNone(matched)) {
@@ -151,7 +147,7 @@ export const encodeDeclaredProcedureFailure = <
               return ErrorCodec.encodeString(errors, matched.value).pipe(
                 Effect.mapError(
                   (cause) =>
-                    new StdbDeclaredErrorEncodingFailure({
+                    new StdbDeclaredErrorEncodingError({
                       callable: "procedure",
                       cause,
                     }),

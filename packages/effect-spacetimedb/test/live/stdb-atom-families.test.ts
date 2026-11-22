@@ -17,9 +17,9 @@ import type {
   TableRefValue,
 } from "effect-spacetimedb/client"
 import {
-  rowAtomFamily,
-  tableAtomFamily,
-  tableGroupAtomFamily,
+  wsRowAtomFamily,
+  wsTableAtomFamily,
+  wsTableGroupAtomFamily,
 } from "effect-spacetimedb/client/atom"
 import { scopedAtomRegistry } from "./helpers/atom-registry"
 import {
@@ -43,13 +43,13 @@ type UserGroupSnapshot = TableGroupSnapshot<
 
 describe("effect-spacetimedb live atom families", () => {
   live(
-    "tableAtomFamily transitions from initial to success on live insert",
+    "wsTableAtomFamily transitions from initial to success on live insert",
     () =>
       provideLiveTest(
         Effect.gen(function* () {
           const { session, connection } = yield* makeExampleSession
           const registry = yield* scopedAtomRegistry
-          const tables = tableAtomFamily<typeof LiveModule>(session)
+          const tables = wsTableAtomFamily<typeof LiveModule>(session)
           const values: Array<TableRefValue<UserRow>> = []
           const unsubscribe = registry.subscribe(
             tables("user"),
@@ -86,13 +86,13 @@ describe("effect-spacetimedb live atom families", () => {
   )
 
   live(
-    "rowAtomFamily shares table subscriptions and preserves sibling identity",
+    "wsRowAtomFamily shares table subscriptions and preserves sibling identity",
     () =>
       provideLiveTest(
         Effect.gen(function* () {
           const { session, connection } = yield* makeExampleSession
           const registry = yield* scopedAtomRegistry
-          const rows = rowAtomFamily<typeof LiveModule>(session)
+          const rows = wsRowAtomFamily<typeof LiveModule>(session)
           const rowAValues: Array<RowRefValue<UserRow>> = []
           const rowBValues: Array<RowRefValue<UserRow>> = []
           const unsubscribeA = registry.subscribe(
@@ -160,13 +160,13 @@ describe("effect-spacetimedb live atom families", () => {
   )
 
   live(
-    "tableGroupAtomFamily emits typed snapshots and dedupes canonical keys",
+    "wsTableGroupAtomFamily emits typed snapshots and dedupes canonical keys",
     () =>
       provideLiveTest(
         Effect.gen(function* () {
           const { session, connection } = yield* makeExampleSession
           const registry = yield* scopedAtomRegistry
-          const groups = tableGroupAtomFamily<typeof LiveModule>(session)
+          const groups = wsTableGroupAtomFamily<typeof LiveModule>(session)
           expect(groups(["user"] as const)).toBe(
             groups(["user", "user"] as const),
           )

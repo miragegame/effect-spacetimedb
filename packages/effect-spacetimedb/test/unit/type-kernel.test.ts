@@ -3,7 +3,7 @@ import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import { StdbValidationError } from "effect-spacetimedb"
+import { StdbValidationDefect } from "effect-spacetimedb"
 import {
   ConnectionId,
   Identity,
@@ -19,7 +19,7 @@ import {
 
 const { expect } = EffectVitest
 
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { TreeType } from "../fixtures/recursive-types"
 import { transform } from "../helpers/schema-transform"
 import { TestLayer } from "../helpers/test-layer"
@@ -36,13 +36,13 @@ type RecursiveNameNode = {
 }
 
 const makeRecursiveNameNode = (): ReturnType<
-  typeof StdbTesting.ContractType.lazy<RecursiveNameNode, unknown>
+  typeof StdbInternal.ContractType.lazy<RecursiveNameNode, unknown>
 > => {
   const Node: ReturnType<
-    typeof StdbTesting.ContractType.lazy<RecursiveNameNode, unknown>
-  > = StdbTesting.ContractType.lazy(() =>
-    StdbTesting.ContractType.struct({
-      children: StdbTesting.ContractType.array(Node, testArrayLength),
+    typeof StdbInternal.ContractType.lazy<RecursiveNameNode, unknown>
+  > = StdbInternal.ContractType.lazy(() =>
+    StdbInternal.ContractType.struct({
+      children: StdbInternal.ContractType.array(Node, testArrayLength),
     }),
   )
 
@@ -54,7 +54,7 @@ describe("type kernel", (it) => {
     "returns opaque value-types that expose their Effect schema through .schema",
     () =>
       Effect.gen(function* () {
-        const UserId = StdbTesting.ContractType.string(
+        const UserId = StdbInternal.ContractType.string(
           Schema.String.pipe(Schema.brand("DecoratedUserId")),
         )
         const UserStruct = Schema.Struct({
@@ -85,26 +85,26 @@ describe("type kernel", (it) => {
     "keeps lowering intact through schemas passed into constructors",
     () =>
       Effect.gen(function* () {
-        const Refined = StdbTesting.ContractType.string(
+        const Refined = StdbInternal.ContractType.string(
           Schema.String.pipe(
             Schema.brand("TypeKernel/Refined"),
             Schema.check(Schema.isMinLength(0), Schema.isMaxLength(255)),
           ),
         )
-        const Annotated = StdbTesting.ContractType.string(
+        const Annotated = StdbInternal.ContractType.string(
           Schema.String.pipe(
             Schema.annotate({ description: "annotated refined value-type" }),
             Schema.brand("TypeKernel/Annotated"),
           ),
         )
-        const RefinedU64 = StdbTesting.ContractType.u64(
+        const RefinedU64 = StdbInternal.ContractType.u64(
           Schema.BigInt.pipe(
             Schema.brand("TypeKernel/RefinedU64"),
             Schema.check(Schema.isLessThanOrEqualToBigInt(10n)),
           ),
         )
-        const Transformed = StdbTesting.ContractType.string(
-          transform(Schema.String, StdbTesting.ContractType.string().schema, {
+        const Transformed = StdbInternal.ContractType.string(
+          transform(Schema.String, StdbInternal.ContractType.string().schema, {
             decode: (value) => value,
             encode: (value) => value,
           }),
@@ -115,11 +115,11 @@ describe("type kernel", (it) => {
         expect(typeBuilder(RefinedU64).algebraicType.tag).toBe("U64")
         expect(typeBuilder(Transformed).algebraicType.tag).toBe("String")
 
-        const NumberFromString = StdbTesting.ContractType.f64(
+        const NumberFromString = StdbInternal.ContractType.f64(
           Schema.FiniteFromString as never,
         )
         expect(typeBuilder(NumberFromString).algebraicType.tag).toBe(
-          typeBuilder(StdbTesting.ContractType.f64()).algebraicType.tag,
+          typeBuilder(StdbInternal.ContractType.f64()).algebraicType.tag,
         )
       }),
   )
@@ -130,17 +130,17 @@ describe("type kernel", (it) => {
       Effect.gen(function* () {
         expect(() =>
           typeBuilder(
-            Schema.String as unknown as StdbTesting.ContractType.AnyValueType,
+            Schema.String as unknown as StdbInternal.ContractType.AnyValueType,
           ),
         ).toThrow(/SpaceTimeDB type lowering failed/)
         expect(() =>
           typeBuilder(
-            Schema.Finite as unknown as StdbTesting.ContractType.AnyValueType,
+            Schema.Finite as unknown as StdbInternal.ContractType.AnyValueType,
           ),
         ).toThrow(/SpaceTimeDB type lowering failed/)
         expect(() =>
           typeBuilder(
-            Schema.Boolean as unknown as StdbTesting.ContractType.AnyValueType,
+            Schema.Boolean as unknown as StdbInternal.ContractType.AnyValueType,
           ),
         ).toThrow(/SpaceTimeDB type lowering failed/)
       }),
@@ -152,7 +152,7 @@ describe("type kernel", (it) => {
         schema: Schema.Struct({
           rows: Schema.Array(Schema.Symbol),
         }),
-      } as unknown as StdbTesting.ContractType.AnyValueType
+      } as unknown as StdbInternal.ContractType.AnyValueType
 
       expect(() => typeBuilder(UnsupportedNested)).toThrow(
         "SpaceTimeDB type lowering failed at rows[]: unsupported Effect Schema AST Symbol.",
@@ -165,19 +165,19 @@ describe("type kernel", (it) => {
 
   it.effect("enforces constructor refinements at value decode boundaries", () =>
     Effect.gen(function* () {
-      const Name = StdbTesting.ContractType.string(
+      const Name = StdbInternal.ContractType.string(
         Schema.String.pipe(
           Schema.brand("TypeKernel/Name"),
           Schema.check(Schema.isMaxLength(100)),
         ),
       )
-      const Count = StdbTesting.ContractType.u64(
+      const Count = StdbInternal.ContractType.u64(
         Schema.BigInt.pipe(
           Schema.brand("TypeKernel/Count"),
           Schema.check(Schema.isLessThanOrEqualToBigInt(10n)),
         ),
       )
-      const DomainCount = StdbTesting.ContractType.u64(
+      const DomainCount = StdbInternal.ContractType.u64(
         Schema.BigInt.check(Schema.isGreaterThanOrEqualToBigInt(0n)),
       )
 
@@ -198,10 +198,10 @@ describe("type kernel", (it) => {
 
   it.effect("supports explicit custom schema lowering", () =>
     Effect.gen(function* () {
-      const CountFromString = StdbTesting.ContractType.custom(
+      const CountFromString = StdbInternal.ContractType.custom(
         Schema.FiniteFromString,
         {
-          type: StdbTesting.ContractType.string(),
+          type: StdbInternal.ContractType.string(),
         },
       )
 
@@ -215,34 +215,34 @@ describe("type kernel", (it) => {
 
   it.effect("exposes descriptor-first metadata for authored Stdb types", () =>
     Effect.gen(function* () {
-      const Params = StdbTesting.ContractType.struct({
-        id: StdbTesting.ContractType.string(),
-        tags: StdbTesting.ContractType.array(
-          StdbTesting.ContractType.string(),
+      const Params = StdbInternal.ContractType.struct({
+        id: StdbInternal.ContractType.string(),
+        tags: StdbInternal.ContractType.array(
+          StdbInternal.ContractType.string(),
           testArrayLength,
         ),
-        maybeCount: StdbTesting.ContractType.option(
-          StdbTesting.ContractType.u32(),
+        maybeCount: StdbInternal.ContractType.option(
+          StdbInternal.ContractType.u32(),
         ),
       })
-      const MaybeCount = StdbTesting.ContractType.option(
-        StdbTesting.ContractType.u32(),
+      const MaybeCount = StdbInternal.ContractType.option(
+        StdbInternal.ContractType.u32(),
       )
 
-      const descriptor = StdbTesting.ContractTypeDescriptor.describe(Params)
+      const descriptor = StdbInternal.ContractTypeDescriptor.describe(Params)
       expect(descriptor).toEqual(
         expect.objectContaining({
           _tag: "Struct",
           kind: "struct",
         }),
       )
-      expect(StdbTesting.ContractTypeDescriptor.children(Params)).toHaveLength(
+      expect(StdbInternal.ContractTypeDescriptor.children(Params)).toHaveLength(
         3,
       )
       expect(
-        StdbTesting.ContractTypeDescriptor.describe(
-          StdbTesting.ContractType.array(
-            StdbTesting.ContractType.string(),
+        StdbInternal.ContractTypeDescriptor.describe(
+          StdbInternal.ContractType.array(
+            StdbInternal.ContractType.string(),
             testArrayLength,
           ),
         ),
@@ -275,21 +275,21 @@ describe("type kernel", (it) => {
     "uses deterministic content-addressed names for ordered structural types",
     () =>
       Effect.gen(function* () {
-        const UserParams = StdbTesting.ContractType.struct({
-          id: StdbTesting.ContractType.string(),
-          count: StdbTesting.ContractType.u32(),
+        const UserParams = StdbInternal.ContractType.struct({
+          id: StdbInternal.ContractType.string(),
+          count: StdbInternal.ContractType.u32(),
         })
-        const SameUserParams = StdbTesting.ContractType.struct({
-          id: StdbTesting.ContractType.string(),
-          count: StdbTesting.ContractType.u32(),
+        const SameUserParams = StdbInternal.ContractType.struct({
+          id: StdbInternal.ContractType.string(),
+          count: StdbInternal.ContractType.u32(),
         })
-        const ReorderedUserParams = StdbTesting.ContractType.struct({
-          count: StdbTesting.ContractType.u32(),
-          id: StdbTesting.ContractType.string(),
+        const ReorderedUserParams = StdbInternal.ContractType.struct({
+          count: StdbInternal.ContractType.u32(),
+          id: StdbInternal.ContractType.string(),
         })
-        const Nested = StdbTesting.ContractType.struct({
-          maybeUser: StdbTesting.ContractType.option(SameUserParams),
-          users: StdbTesting.ContractType.array(UserParams, testArrayLength),
+        const Nested = StdbInternal.ContractType.struct({
+          maybeUser: StdbInternal.ContractType.option(SameUserParams),
+          users: StdbInternal.ContractType.array(UserParams, testArrayLength),
         })
 
         const userName = builderTypeName(typeBuilder(UserParams))
@@ -305,11 +305,11 @@ describe("type kernel", (it) => {
           GeneratedStructName,
         )
         expect(
-          StdbTesting.ContractType.satsTypeFingerprint(SameUserParams),
-        ).toBe(StdbTesting.ContractType.satsTypeFingerprint(UserParams))
+          StdbInternal.ContractType.satsTypeFingerprint(SameUserParams),
+        ).toBe(StdbInternal.ContractType.satsTypeFingerprint(UserParams))
         expect(
-          StdbTesting.ContractType.satsTypeFingerprint(ReorderedUserParams),
-        ).not.toBe(StdbTesting.ContractType.satsTypeFingerprint(UserParams))
+          StdbInternal.ContractType.satsTypeFingerprint(ReorderedUserParams),
+        ).not.toBe(StdbInternal.ContractType.satsTypeFingerprint(UserParams))
       }),
   )
 
@@ -317,16 +317,16 @@ describe("type kernel", (it) => {
     "keeps existing composite names stable across insertion and traversal order",
     () =>
       Effect.gen(function* () {
-        const First = StdbTesting.ContractType.struct({
-          first: StdbTesting.ContractType.string(),
+        const First = StdbInternal.ContractType.struct({
+          first: StdbInternal.ContractType.string(),
         })
-        const Second = StdbTesting.ContractType.sum({
-          A: StdbTesting.ContractType.string(),
-          B: StdbTesting.ContractType.u32(),
+        const Second = StdbInternal.ContractType.sum({
+          A: StdbInternal.ContractType.string(),
+          B: StdbInternal.ContractType.u32(),
         })
-        const Envelope = StdbTesting.procedureEnvelope(
-          StdbTesting.ContractType.option(First),
-          StdbTesting.ContractError.errors(
+        const Envelope = StdbInternal.procedureEnvelope(
+          StdbInternal.ContractType.option(First),
+          StdbInternal.ContractError.errors(
             class InsertedNameError extends Schema.TaggedError<InsertedNameError>()(
               "InsertedNameError",
               { message: Schema.String },
@@ -339,8 +339,8 @@ describe("type kernel", (it) => {
           envelope: builderTypeName(typeBuilder(Envelope)),
         }
 
-        const Inserted = StdbTesting.ContractType.struct({
-          inserted: StdbTesting.ContractType.bool(),
+        const Inserted = StdbInternal.ContractType.struct({
+          inserted: StdbInternal.ContractType.bool(),
         })
         const reorderedTraversal = [
           ["second", Second],
@@ -374,11 +374,11 @@ describe("type kernel", (it) => {
       Effect.gen(function* () {
         const RecursiveFirst = makeRecursiveNameNode()
         const SameRecursive = makeRecursiveNameNode()
-        const ParentWithIndependentChildren = StdbTesting.ContractType.struct({
+        const ParentWithIndependentChildren = StdbInternal.ContractType.struct({
           first: RecursiveFirst,
           second: SameRecursive,
         })
-        const ParentWithSharedChild = StdbTesting.ContractType.struct({
+        const ParentWithSharedChild = StdbInternal.ContractType.struct({
           first: RecursiveFirst,
           second: RecursiveFirst,
         })
@@ -399,39 +399,42 @@ describe("type kernel", (it) => {
     "deduplicates ordered string enums and sums while results stay structural",
     () =>
       Effect.gen(function* () {
-        const Kind = StdbTesting.ContractType.literal("joined", "left")
-        const SameKind = StdbTesting.ContractType.literal("joined", "left")
-        const ReorderedKind = StdbTesting.ContractType.literal("left", "joined")
-        const EnumContainer = StdbTesting.ContractType.struct({
+        const Kind = StdbInternal.ContractType.literal("joined", "left")
+        const SameKind = StdbInternal.ContractType.literal("joined", "left")
+        const ReorderedKind = StdbInternal.ContractType.literal(
+          "left",
+          "joined",
+        )
+        const EnumContainer = StdbInternal.ContractType.struct({
           kind: Kind,
         })
-        const UnitSum = StdbTesting.ContractType.sum({
-          Joined: StdbTesting.ContractType.unit(),
-          Left: StdbTesting.ContractType.unit(),
+        const UnitSum = StdbInternal.ContractType.sum({
+          Joined: StdbInternal.ContractType.unit(),
+          Left: StdbInternal.ContractType.unit(),
         })
-        const UnitEnum = StdbTesting.ContractType.enum("Joined", "Left")
-        const UnitSumContainer = StdbTesting.ContractType.struct({
+        const UnitEnum = StdbInternal.ContractType.enum("Joined", "Left")
+        const UnitSumContainer = StdbInternal.ContractType.struct({
           kind: UnitSum,
         })
-        const Action = StdbTesting.ContractType.sum({
-          Create: StdbTesting.ContractType.string(),
-          Delete: StdbTesting.ContractType.unit(),
+        const Action = StdbInternal.ContractType.sum({
+          Create: StdbInternal.ContractType.string(),
+          Delete: StdbInternal.ContractType.unit(),
         })
-        const SameAction = StdbTesting.ContractType.sum({
-          Create: StdbTesting.ContractType.string(),
-          Delete: StdbTesting.ContractType.unit(),
+        const SameAction = StdbInternal.ContractType.sum({
+          Create: StdbInternal.ContractType.string(),
+          Delete: StdbInternal.ContractType.unit(),
         })
-        const ReorderedAction = StdbTesting.ContractType.sum({
-          Delete: StdbTesting.ContractType.unit(),
-          Create: StdbTesting.ContractType.string(),
+        const ReorderedAction = StdbInternal.ContractType.sum({
+          Delete: StdbInternal.ContractType.unit(),
+          Create: StdbInternal.ContractType.string(),
         })
-        const ResultType = StdbTesting.ContractType.result(
-          StdbTesting.ContractType.string(),
-          StdbTesting.ContractType.u32(),
+        const ResultType = StdbInternal.ContractType.result(
+          StdbInternal.ContractType.string(),
+          StdbInternal.ContractType.u32(),
         )
-        const Envelope = StdbTesting.procedureEnvelope(
-          StdbTesting.ContractType.string(),
-          StdbTesting.ContractError.errors(
+        const Envelope = StdbInternal.procedureEnvelope(
+          StdbInternal.ContractType.string(),
+          StdbInternal.ContractError.errors(
             class EnvelopeNameError extends Schema.TaggedError<EnvelopeNameError>()(
               "EnvelopeNameError",
               { message: Schema.String },
@@ -495,14 +498,14 @@ describe("type kernel", (it) => {
   it.effect("fails loudly when distinct fingerprints collide on one name", () =>
     Effect.gen(function* () {
       const nameFor =
-        StdbTesting.ContractTypeName.makeContentAddressedNameFactory(
+        StdbInternal.ContractTypeName.makeContentAddressedNameFactory(
           () => "00000000000000000000000000000000",
         )
       const first = nameFor("Struct", "first-fingerprint")
 
       expect(nameFor("Struct", "first-fingerprint")).toBe(first)
       expect(() => nameFor("Struct", "second-fingerprint")).toThrow(
-        StdbTesting.ContractTypeName.SatsTypeNameCollisionError,
+        StdbInternal.ContractTypeName.SatsTypeNameCollisionDefect,
       )
     }),
   )
@@ -534,306 +537,310 @@ describe("type kernel", (it) => {
           115792089237316195423570985008687907853269984665640564039457584007913129639935n
 
         expect(
-          typeBuilder(StdbTesting.ContractType.u8()).algebraicType.tag,
+          typeBuilder(StdbInternal.ContractType.u8()).algebraicType.tag,
         ).toBe("U8")
         expect(
-          typeBuilder(StdbTesting.ContractType.u16()).algebraicType.tag,
+          typeBuilder(StdbInternal.ContractType.u16()).algebraicType.tag,
         ).toBe("U16")
         expect(
-          typeBuilder(StdbTesting.ContractType.u32()).algebraicType.tag,
+          typeBuilder(StdbInternal.ContractType.u32()).algebraicType.tag,
         ).toBe("U32")
         expect(
-          typeBuilder(StdbTesting.ContractType.i8()).algebraicType.tag,
+          typeBuilder(StdbInternal.ContractType.i8()).algebraicType.tag,
         ).toBe("I8")
         expect(
-          typeBuilder(StdbTesting.ContractType.i16()).algebraicType.tag,
+          typeBuilder(StdbInternal.ContractType.i16()).algebraicType.tag,
         ).toBe("I16")
         expect(
-          typeBuilder(StdbTesting.ContractType.i32()).algebraicType.tag,
+          typeBuilder(StdbInternal.ContractType.i32()).algebraicType.tag,
         ).toBe("I32")
         expect(
-          typeBuilder(StdbTesting.ContractType.i64()).algebraicType.tag,
+          typeBuilder(StdbInternal.ContractType.i64()).algebraicType.tag,
         ).toBe("I64")
         expect(
-          typeBuilder(StdbTesting.ContractType.u64()).algebraicType.tag,
+          typeBuilder(StdbInternal.ContractType.u64()).algebraicType.tag,
         ).toBe("U64")
         expect(
-          typeBuilder(StdbTesting.ContractType.i128()).algebraicType.tag,
+          typeBuilder(StdbInternal.ContractType.i128()).algebraicType.tag,
         ).toBe("I128")
         expect(
-          typeBuilder(StdbTesting.ContractType.u128()).algebraicType.tag,
+          typeBuilder(StdbInternal.ContractType.u128()).algebraicType.tag,
         ).toBe("U128")
         expect(
-          typeBuilder(StdbTesting.ContractType.i256()).algebraicType.tag,
+          typeBuilder(StdbInternal.ContractType.i256()).algebraicType.tag,
         ).toBe("I256")
         expect(
-          typeBuilder(StdbTesting.ContractType.u256()).algebraicType.tag,
+          typeBuilder(StdbInternal.ContractType.u256()).algebraicType.tag,
         ).toBe("U256")
 
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.u8().schema,
+            StdbInternal.ContractType.u8().schema,
           )(0),
         ).toBe(0)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.u8().schema,
+            StdbInternal.ContractType.u8().schema,
           )(u8Max),
         ).toBe(u8Max)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.u16().schema,
+            StdbInternal.ContractType.u16().schema,
           )(u16Max),
         ).toBe(u16Max)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.i8().schema,
+            StdbInternal.ContractType.i8().schema,
           )(i8Min),
         ).toBe(i8Min)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.i8().schema,
+            StdbInternal.ContractType.i8().schema,
           )(i8Max),
         ).toBe(i8Max)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.i16().schema,
+            StdbInternal.ContractType.i16().schema,
           )(i16Min),
         ).toBe(i16Min)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.i16().schema,
+            StdbInternal.ContractType.i16().schema,
           )(i16Max),
         ).toBe(i16Max)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.i32().schema,
+            StdbInternal.ContractType.i32().schema,
           )(i32Min),
         ).toBe(i32Min)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.i32().schema,
+            StdbInternal.ContractType.i32().schema,
           )(i32Max),
         ).toBe(i32Max)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.u32().schema,
+            StdbInternal.ContractType.u32().schema,
           )(0),
         ).toBe(0)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.u32().schema,
+            StdbInternal.ContractType.u32().schema,
           )(u32Max),
         ).toBe(u32Max)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.i64().schema,
+            StdbInternal.ContractType.i64().schema,
           )(i64Min),
         ).toBe(i64Min)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.i64().schema,
+            StdbInternal.ContractType.i64().schema,
           )(i64Max),
         ).toBe(i64Max)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.u64().schema,
+            StdbInternal.ContractType.u64().schema,
           )(u64Max),
         ).toBe(u64Max)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.i128().schema,
+            StdbInternal.ContractType.i128().schema,
           )(i128Min),
         ).toBe(i128Min)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.i128().schema,
+            StdbInternal.ContractType.i128().schema,
           )(i128Max),
         ).toBe(i128Max)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.u128().schema,
+            StdbInternal.ContractType.u128().schema,
           )(u128Max),
         ).toBe(u128Max)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.i256().schema,
+            StdbInternal.ContractType.i256().schema,
           )(i256Min),
         ).toBe(i256Min)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.i256().schema,
+            StdbInternal.ContractType.i256().schema,
           )(i256Max),
         ).toBe(i256Max)
         expect(
           yield* Schema.decodeUnknownEffect(
-            StdbTesting.ContractType.u256().schema,
+            StdbInternal.ContractType.u256().schema,
           )(u256Max),
         ).toBe(u256Max)
 
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.u8().schema)(-1),
+          Schema.decodeUnknownResult(StdbInternal.ContractType.u8().schema)(-1),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.u8().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.u8().schema)(
             u8Max + 1,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.i8().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.i8().schema)(
             i8Min - 1,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.i8().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.i8().schema)(
             i8Max + 1,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.u16().schema)(-1),
+          Schema.decodeUnknownResult(StdbInternal.ContractType.u16().schema)(
+            -1,
+          ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.u16().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.u16().schema)(
             u16Max + 1,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.i16().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.i16().schema)(
             i16Min - 1,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.i16().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.i16().schema)(
             i16Max + 1,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.i32().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.i32().schema)(
             i32Min - 1,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.i32().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.i32().schema)(
             i32Max + 1,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.u32().schema)(-1),
+          Schema.decodeUnknownResult(StdbInternal.ContractType.u32().schema)(
+            -1,
+          ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.u32().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.u32().schema)(
             u32Max + 1,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.i64().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.i64().schema)(
             i64Min - 1n,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.i64().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.i64().schema)(
             i64Max + 1n,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.u64().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.u64().schema)(
             -1n,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.u64().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.u64().schema)(
             u64Max + 1n,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.i128().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.i128().schema)(
             i128Min - 1n,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.i128().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.i128().schema)(
             i128Max + 1n,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.u128().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.u128().schema)(
             -1n,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.u128().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.u128().schema)(
             u128Max + 1n,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.i256().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.i256().schema)(
             i256Min - 1n,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.i256().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.i256().schema)(
             i256Max + 1n,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.u256().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.u256().schema)(
             -1n,
           ),
         ).toSatisfy(Result.isFailure)
         expect(
-          Schema.decodeUnknownResult(StdbTesting.ContractType.u256().schema)(
+          Schema.decodeUnknownResult(StdbInternal.ContractType.u256().schema)(
             u256Max + 1n,
           ),
         ).toSatisfy(Result.isFailure)
 
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.u32(Schema.Finite).schema,
+            StdbInternal.ContractType.u32(Schema.Finite).schema,
           )(-1),
         ).toSatisfy(Result.isFailure)
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.u32(Schema.Finite).schema,
+            StdbInternal.ContractType.u32(Schema.Finite).schema,
           )(u32Max + 1),
         ).toSatisfy(Result.isFailure)
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.i64(Schema.BigInt).schema,
+            StdbInternal.ContractType.i64(Schema.BigInt).schema,
           )(i64Min - 1n),
         ).toSatisfy(Result.isFailure)
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.i64(Schema.BigInt).schema,
+            StdbInternal.ContractType.i64(Schema.BigInt).schema,
           )(i64Max + 1n),
         ).toSatisfy(Result.isFailure)
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.u64(Schema.BigInt).schema,
+            StdbInternal.ContractType.u64(Schema.BigInt).schema,
           )(-1n),
         ).toSatisfy(Result.isFailure)
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.u64(Schema.BigInt).schema,
+            StdbInternal.ContractType.u64(Schema.BigInt).schema,
           )(u64Max + 1n),
         ).toSatisfy(Result.isFailure)
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.i128(Schema.BigInt).schema,
+            StdbInternal.ContractType.i128(Schema.BigInt).schema,
           )(i128Min - 1n),
         ).toSatisfy(Result.isFailure)
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.i128(Schema.BigInt).schema,
+            StdbInternal.ContractType.i128(Schema.BigInt).schema,
           )(i128Max + 1n),
         ).toSatisfy(Result.isFailure)
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.u128(Schema.BigInt).schema,
+            StdbInternal.ContractType.u128(Schema.BigInt).schema,
           )(-1n),
         ).toSatisfy(Result.isFailure)
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.u128(Schema.BigInt).schema,
+            StdbInternal.ContractType.u128(Schema.BigInt).schema,
           )(u128Max + 1n),
         ).toSatisfy(Result.isFailure)
 
@@ -880,54 +887,54 @@ describe("type kernel", (it) => {
 
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.u32(InvalidU32Transform).schema,
+            StdbInternal.ContractType.u32(InvalidU32Transform).schema,
           )(u32Max + 1),
         ).toSatisfy(Result.isFailure)
         expect(
           yield* Effect.result(
             Schema.encodeEffect(
-              StdbTesting.ContractType.u32(InvalidU32Transform).schema,
+              StdbInternal.ContractType.u32(InvalidU32Transform).schema,
             )(0),
           ),
         ).toSatisfy(Result.isFailure)
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.u32(InvalidDecodedU32Transform).schema,
+            StdbInternal.ContractType.u32(InvalidDecodedU32Transform).schema,
           )(0),
         ).toSatisfy(Result.isFailure)
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.u64(InvalidUnsignedTransform).schema,
+            StdbInternal.ContractType.u64(InvalidUnsignedTransform).schema,
           )(u64Max + 1n),
         ).toSatisfy(Result.isFailure)
         expect(
           yield* Effect.result(
             Schema.encodeEffect(
-              StdbTesting.ContractType.u64(InvalidUnsignedTransform).schema,
+              StdbInternal.ContractType.u64(InvalidUnsignedTransform).schema,
             )(0n),
           ),
         ).toSatisfy(Result.isFailure)
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.i64(InvalidSignedTransform).schema,
+            StdbInternal.ContractType.i64(InvalidSignedTransform).schema,
           )(i64Max + 1n),
         ).toSatisfy(Result.isFailure)
         expect(
           yield* Effect.result(
             Schema.encodeEffect(
-              StdbTesting.ContractType.i64(InvalidSignedTransform).schema,
+              StdbInternal.ContractType.i64(InvalidSignedTransform).schema,
             )(0n),
           ),
         ).toSatisfy(Result.isFailure)
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.u64(InvalidDecodedUnsignedTransform)
+            StdbInternal.ContractType.u64(InvalidDecodedUnsignedTransform)
               .schema,
           )(0n),
         ).toSatisfy(Result.isFailure)
         expect(
           Schema.decodeUnknownResult(
-            StdbTesting.ContractType.i64(InvalidDecodedSignedTransform).schema,
+            StdbInternal.ContractType.i64(InvalidDecodedSignedTransform).schema,
           )(0n),
         ).toSatisfy(Result.isFailure)
       }),
@@ -937,9 +944,9 @@ describe("type kernel", (it) => {
     "keeps identifier-safe string literals verbatim while lowering them to SATS enums",
     () =>
       Effect.gen(function* () {
-        const PresenceKind = StdbTesting.ContractType.literal("joined", "left")
-        const ReviewKind = StdbTesting.ContractType.literal("pending_review")
-        const ActionKind = StdbTesting.ContractType.literal("edit-action")
+        const PresenceKind = StdbInternal.ContractType.literal("joined", "left")
+        const ReviewKind = StdbInternal.ContractType.literal("pending_review")
+        const ActionKind = StdbInternal.ContractType.literal("edit-action")
         const encoded = yield* Schema.encodeEffect(PresenceKind.schema)(
           "joined",
         )
@@ -991,7 +998,7 @@ describe("type kernel", (it) => {
             variants: [expect.objectContaining({ name: "EditAction" })],
           },
         })
-        expect(StdbTesting.ContractType.literalValues(PresenceKind)).toEqual([
+        expect(StdbInternal.ContractType.literalValues(PresenceKind)).toEqual([
           "joined",
           "left",
         ])
@@ -1015,7 +1022,7 @@ describe("type kernel", (it) => {
         Effect.fn(function* (values) {
           const failure = yield* Effect.flip(
             Effect.try({
-              try: () => StdbTesting.ContractType.literal(...values),
+              try: () => StdbInternal.ContractType.literal(...values),
               catch: testEffectCallbackError(
                 "effect-spacetimedb/unit/type-kernel",
               ),
@@ -1023,8 +1030,8 @@ describe("type kernel", (it) => {
           )
           const cause = unwrapTestEffectCallbackError(failure)
 
-          expect(cause).toBeInstanceOf(StdbValidationError)
-          if (cause instanceof StdbValidationError) {
+          expect(cause).toBeInstanceOf(StdbValidationDefect)
+          if (cause instanceof StdbValidationDefect) {
             expect(cause.diagnostics).toEqual([
               expect.objectContaining({
                 code: "LiteralTagCollision",
@@ -1043,7 +1050,7 @@ describe("type kernel", (it) => {
       Effect.gen(function* () {
         const failure = yield* Effect.flip(
           Effect.try({
-            try: () => StdbTesting.ContractType.literal("1-start"),
+            try: () => StdbInternal.ContractType.literal("1-start"),
             catch: testEffectCallbackError(
               "effect-spacetimedb/unit/type-kernel",
             ),
@@ -1051,8 +1058,8 @@ describe("type kernel", (it) => {
         )
         const cause = unwrapTestEffectCallbackError(failure)
 
-        expect(cause).toBeInstanceOf(StdbValidationError)
-        if (cause instanceof StdbValidationError) {
+        expect(cause).toBeInstanceOf(StdbValidationDefect)
+        if (cause instanceof StdbValidationDefect) {
           expect(cause.diagnostics).toEqual([
             expect.objectContaining({
               code: "InvalidLiteralTag",
@@ -1067,9 +1074,9 @@ describe("type kernel", (it) => {
     Effect.gen(function* () {
       yield* Effect.forEach(
         [
-          () => StdbTesting.ContractType.literal(Infinity),
-          () => StdbTesting.ContractType.literal(NaN),
-          () => StdbTesting.ContractType.literal(Number.MAX_SAFE_INTEGER + 1),
+          () => StdbInternal.ContractType.literal(Infinity),
+          () => StdbInternal.ContractType.literal(NaN),
+          () => StdbInternal.ContractType.literal(Number.MAX_SAFE_INTEGER + 1),
         ],
         Effect.fn(function* (makeLiteral) {
           const failure = yield* Effect.flip(
@@ -1082,8 +1089,8 @@ describe("type kernel", (it) => {
           )
           const cause = unwrapTestEffectCallbackError(failure)
 
-          expect(cause).toBeInstanceOf(StdbValidationError)
-          if (cause instanceof StdbValidationError) {
+          expect(cause).toBeInstanceOf(StdbValidationDefect)
+          if (cause instanceof StdbValidationDefect) {
             expect(cause.diagnostics).toEqual([
               expect.objectContaining({
                 code: "NumericLiteralPrecision",
@@ -1094,8 +1101,8 @@ describe("type kernel", (it) => {
         }),
       )
 
-      const InRange = StdbTesting.ContractType.literal(Number.MAX_SAFE_INTEGER)
-      const Float = StdbTesting.ContractType.literal(1.5)
+      const InRange = StdbInternal.ContractType.literal(Number.MAX_SAFE_INTEGER)
+      const Float = StdbInternal.ContractType.literal(1.5)
 
       expect(typeBuilder(InRange).algebraicType.tag).toBe("F64")
       expect(typeBuilder(Float).algebraicType.tag).toBe("F64")
@@ -1106,31 +1113,31 @@ describe("type kernel", (it) => {
     Effect.gen(function* () {
       const bytes = new Uint8Array([0, 1, 255])
       const bytesFromArray = yield* Schema.decodeUnknownEffect(
-        StdbTesting.ContractType.bytes().schema,
+        StdbInternal.ContractType.bytes().schema,
       )([0, 1, 255])
       const bytesFromHex = yield* Schema.decodeUnknownEffect(
-        StdbTesting.ContractType.bytes().schema,
+        StdbInternal.ContractType.bytes().schema,
       )("0001ff")
       const encodedBytes = yield* Schema.encodeEffect(
-        StdbTesting.ContractType.bytes().schema,
+        StdbInternal.ContractType.bytes().schema,
       )(bytes)
 
       expect(
-        typeBuilder(StdbTesting.ContractType.f32()).algebraicType.tag,
+        typeBuilder(StdbInternal.ContractType.f32()).algebraicType.tag,
       ).toBe("F32")
       expect(
-        typeBuilder(StdbTesting.ContractType.bytes()).algebraicType.tag,
+        typeBuilder(StdbInternal.ContractType.bytes()).algebraicType.tag,
       ).toBe("Array")
       expect(
         yield* Schema.decodeUnknownEffect(
-          StdbTesting.ContractType.f32().schema,
+          StdbInternal.ContractType.f32().schema,
         )(1.5),
       ).toBe(1.5)
       expect(Array.from(bytesFromArray)).toEqual([0, 1, 255])
       expect(Array.from(bytesFromHex)).toEqual([0, 1, 255])
       expect(encodedBytes).toBe(bytes)
       expect(
-        Schema.decodeUnknownResult(StdbTesting.ContractType.bytes().schema)([
+        Schema.decodeUnknownResult(StdbInternal.ContractType.bytes().schema)([
           256,
         ]),
       ).toSatisfy(Result.isFailure)
@@ -1139,11 +1146,11 @@ describe("type kernel", (it) => {
 
   it.effect("includes nested paths in unsupported type lowering failures", () =>
     Effect.gen(function* () {
-      const UnsupportedParams = StdbTesting.ContractType.struct({
-        id: StdbTesting.ContractType.string(),
+      const UnsupportedParams = StdbInternal.ContractType.struct({
+        id: StdbInternal.ContractType.string(),
         metadata: Schema.instanceOf(
           URL,
-        ) as unknown as StdbTesting.ContractType.AnyValueType,
+        ) as unknown as StdbInternal.ContractType.AnyValueType,
       })
 
       expect(() =>
@@ -1154,7 +1161,7 @@ describe("type kernel", (it) => {
 
   it.effect("supports branded and special SpacetimeDB-native value types", () =>
     Effect.gen(function* () {
-      const UserId = StdbTesting.ContractType.string(
+      const UserId = StdbInternal.ContractType.string(
         Schema.String.pipe(Schema.brand("UserId")),
       )
 
@@ -1163,32 +1170,32 @@ describe("type kernel", (it) => {
       )
       expect(
         (yield* Schema.decodeUnknownEffect(
-          StdbTesting.ContractType.uuid().schema,
+          StdbInternal.ContractType.uuid().schema,
         )(Uuid.NIL)).asBigInt(),
       ).toBe(Uuid.NIL.asBigInt())
       expect(
         yield* Schema.decodeUnknownEffect(
-          StdbTesting.ContractType.identity().schema,
+          StdbInternal.ContractType.identity().schema,
         )(Identity.zero()),
       ).toEqual(Identity.zero())
       expect(
         yield* Schema.decodeUnknownEffect(
-          StdbTesting.ContractType.connectionId().schema,
+          StdbInternal.ContractType.connectionId().schema,
         )(new ConnectionId(1n)),
       ).toEqual(new ConnectionId(1n))
       expect(
         yield* Schema.decodeUnknownEffect(
-          StdbTesting.ContractType.timestamp().schema,
+          StdbInternal.ContractType.timestamp().schema,
         )(new Timestamp(1_000n)),
       ).toEqual(new Timestamp(1_000n))
       expect(
         yield* Schema.decodeUnknownEffect(
-          StdbTesting.ContractType.timeDuration().schema,
+          StdbInternal.ContractType.timeDuration().schema,
         )(TimeDuration.fromMillis(5)),
       ).toEqual(TimeDuration.fromMillis(5))
       expect(
         yield* Schema.decodeUnknownEffect(
-          StdbTesting.ContractType.scheduleAt().schema,
+          StdbInternal.ContractType.scheduleAt().schema,
         )(ScheduleAt.interval(10n)),
       ).toEqual(ScheduleAt.interval(10n))
     }),
@@ -1199,10 +1206,10 @@ describe("type kernel", (it) => {
     () =>
       Effect.gen(function* () {
         const identityFailure = Schema.decodeUnknownResult(
-          StdbTesting.ContractType.identity().schema,
+          StdbInternal.ContractType.identity().schema,
         )("not-an-identity")
         const structuralScheduleAt = yield* Schema.decodeUnknownEffect(
-          StdbTesting.ContractType.scheduleAt().schema,
+          StdbInternal.ContractType.scheduleAt().schema,
         )({
           tag: "Interval",
           value: {
@@ -1210,7 +1217,7 @@ describe("type kernel", (it) => {
           },
         })
         const scheduleAtFailure = Schema.decodeUnknownResult(
-          StdbTesting.ContractType.scheduleAt().schema,
+          StdbInternal.ContractType.scheduleAt().schema,
         )({
           _tag: "Interval",
           value: TimeDuration.fromMillis(5),
@@ -1248,12 +1255,12 @@ describe("type kernel", (it) => {
           children: [{ name: "child", children: [] }],
         })
 
-        const ResultType = StdbTesting.ContractType.result(
-          StdbTesting.ContractType.struct({
-            ok: StdbTesting.ContractType.string(),
+        const ResultType = StdbInternal.ContractType.result(
+          StdbInternal.ContractType.struct({
+            ok: StdbInternal.ContractType.string(),
           }),
-          StdbTesting.ContractType.struct({
-            error: StdbTesting.ContractType.string(),
+          StdbInternal.ContractType.struct({
+            error: StdbInternal.ContractType.string(),
           }),
         )
 
@@ -1288,13 +1295,13 @@ describe("type kernel", (it) => {
           }),
         ).toSatisfy(Result.isFailure)
 
-        const SumType = StdbTesting.ContractType.sum({
-          Prose: StdbTesting.ContractType.struct({
-            text: StdbTesting.ContractType.string(),
+        const SumType = StdbInternal.ContractType.sum({
+          Prose: StdbInternal.ContractType.struct({
+            text: StdbInternal.ContractType.string(),
           }),
-          Done: StdbTesting.ContractType.unit(),
+          Done: StdbInternal.ContractType.unit(),
         })
-        const Phase = StdbTesting.ContractType.enum("Lobby", "Running")
+        const Phase = StdbInternal.ContractType.enum("Lobby", "Running")
         const makeDescriptor = Object.getOwnPropertyDescriptor(SumType, "make")
         const phaseMakeDescriptor = Object.getOwnPropertyDescriptor(
           Phase,
@@ -1310,7 +1317,7 @@ describe("type kernel", (it) => {
         expect(SumType.make.Done).toEqual({ tag: "Done" })
         expect(Phase.make.Lobby).toEqual({ tag: "Lobby" })
         expect(
-          SumType.name("sum_content").make.Prose({ text: "hello" }),
+          SumType.columnName("sum_content").make.Prose({ text: "hello" }),
         ).toEqual({
           tag: "Prose",
           value: {
@@ -1318,7 +1325,7 @@ describe("type kernel", (it) => {
           },
         })
         expect(SumType.optional().make.Done).toEqual({ tag: "Done" })
-        expect(Phase.name("phase").make.Lobby).toEqual({ tag: "Lobby" })
+        expect(Phase.columnName("phase").make.Lobby).toEqual({ tag: "Lobby" })
         expect(makeDescriptor?.enumerable).toBe(false)
         expect(makeDescriptor?.writable).toBe(false)
         expect(phaseMakeDescriptor?.enumerable).toBe(false)
@@ -1394,12 +1401,12 @@ describe("type kernel", (it) => {
             text: "hi",
           },
         })
-        const doneHttpJson = StdbTesting.ClientHttpJson.encodeHttpInput(
+        const doneHttpJson = StdbInternal.ClientHttpJson.encodeHttpInput(
           yield* Schema.encodeEffect(SumType.schema)({ tag: "Done" }),
         )
         expect(doneHttpJson).toBe('{"Done":{}}')
         expect(
-          yield* StdbTesting.ClientHttpJson.decodeHttpOutput(
+          yield* StdbInternal.ClientHttpJson.decodeHttpOutput(
             SumType,
             doneHttpJson,
           ),
@@ -1407,16 +1414,16 @@ describe("type kernel", (it) => {
           tag: "Done",
         })
 
-        const OptionArgType = StdbTesting.ContractType.option(
-          StdbTesting.ContractType.string(),
+        const OptionArgType = StdbInternal.ContractType.option(
+          StdbInternal.ContractType.string(),
         )
-        const someArgHttpJson = StdbTesting.ClientHttpJson.encodeHttpInput([
+        const someArgHttpJson = StdbInternal.ClientHttpJson.encodeHttpInput([
           yield* Schema.encodeEffect(OptionArgType.schema)("persona-1"),
         ])
         expect(someArgHttpJson).toBe('[{"some":"persona-1"}]')
         expect(
-          yield* StdbTesting.ClientHttpJson.decodeHttpOutput(
-            StdbTesting.ContractType.array(OptionArgType, testArrayLength),
+          yield* StdbInternal.ClientHttpJson.decodeHttpOutput(
+            StdbInternal.ContractType.array(OptionArgType, testArrayLength),
             someArgHttpJson,
           ),
         ).toEqual(["persona-1"])
@@ -1426,13 +1433,13 @@ describe("type kernel", (it) => {
           some: "persona-1",
         })
 
-        const noneArgHttpJson = StdbTesting.ClientHttpJson.encodeHttpInput([
+        const noneArgHttpJson = StdbInternal.ClientHttpJson.encodeHttpInput([
           yield* Schema.encodeEffect(OptionArgType.schema)(undefined),
         ])
         expect(noneArgHttpJson).toBe('[{"none":{}}]')
         expect(
-          yield* StdbTesting.ClientHttpJson.decodeHttpOutput(
-            StdbTesting.ContractType.array(OptionArgType, testArrayLength),
+          yield* StdbInternal.ClientHttpJson.decodeHttpOutput(
+            StdbInternal.ContractType.array(OptionArgType, testArrayLength),
             noneArgHttpJson,
           ),
         ).toEqual([undefined])
@@ -1441,7 +1448,7 @@ describe("type kernel", (it) => {
         ).toEqual({
           none: {},
         })
-        const OptionSumType = StdbTesting.ContractType.sum({
+        const OptionSumType = StdbInternal.ContractType.sum({
           Maybe: OptionArgType,
         })
         const encodedNoneVariant = yield* Schema.encodeEffect(
@@ -1463,10 +1470,13 @@ describe("type kernel", (it) => {
           tag: "Maybe",
           value: undefined,
         })
-        const MaybeLookup = StdbTesting.ContractType.option(
-          StdbTesting.ContractType.struct({
-            id: StdbTesting.ContractType.string(),
-            status: StdbTesting.ContractType.literal("Generating", "Completed"),
+        const MaybeLookup = StdbInternal.ContractType.option(
+          StdbInternal.ContractType.struct({
+            id: StdbInternal.ContractType.string(),
+            status: StdbInternal.ContractType.literal(
+              "Generating",
+              "Completed",
+            ),
           }),
         )
         expect(
@@ -1487,14 +1497,14 @@ describe("type kernel", (it) => {
         ).toEqual({
           none: {},
         })
-        const dialoguePayload = StdbTesting.ContractType.struct({
-          speaker: StdbTesting.ContractType.string(),
-          tone: StdbTesting.ContractType.option(
-            StdbTesting.ContractType.string(),
+        const dialoguePayload = StdbInternal.ContractType.struct({
+          speaker: StdbInternal.ContractType.string(),
+          tone: StdbInternal.ContractType.option(
+            StdbInternal.ContractType.string(),
           ),
-          text: StdbTesting.ContractType.string(),
+          text: StdbInternal.ContractType.string(),
         })
-        const dialogueType = StdbTesting.ContractType.sum({
+        const dialogueType = StdbInternal.ContractType.sum({
           dialogue: dialoguePayload,
         })
         expect(
@@ -1539,9 +1549,9 @@ describe("type kernel", (it) => {
         })
         expect(typeBuilder(SumType).algebraicType.tag).toBe("Sum")
 
-        const UnitOkResultType = StdbTesting.ContractType.result(
-          StdbTesting.ContractType.unit(),
-          StdbTesting.ContractType.string(),
+        const UnitOkResultType = StdbInternal.ContractType.result(
+          StdbInternal.ContractType.unit(),
+          StdbInternal.ContractType.string(),
         )
         expect(
           yield* Schema.decodeUnknownEffect(UnitOkResultType.schema)({
@@ -1564,9 +1574,9 @@ describe("type kernel", (it) => {
           }),
         ).toSatisfy(Result.isFailure)
 
-        const UnitErrResultType = StdbTesting.ContractType.result(
-          StdbTesting.ContractType.string(),
-          StdbTesting.ContractType.unit(),
+        const UnitErrResultType = StdbInternal.ContractType.result(
+          StdbInternal.ContractType.string(),
+          StdbInternal.ContractType.unit(),
         )
         expect(
           yield* Schema.decodeUnknownEffect(UnitErrResultType.schema)({
@@ -1583,14 +1593,14 @@ describe("type kernel", (it) => {
           tag: "err",
         })
 
-        const Done = StdbTesting.ContractType.custom(
+        const Done = StdbInternal.ContractType.custom(
           transform(Schema.Void, Schema.Literal("done"), {
             decode: () => "done" as const,
             encode: () => undefined,
           }),
-          { type: StdbTesting.ContractType.unit() },
+          { type: StdbInternal.ContractType.unit() },
         )
-        const UnitLiteralSumType = StdbTesting.ContractType.sum({
+        const UnitLiteralSumType = StdbInternal.ContractType.sum({
           Done,
         })
         expect(UnitLiteralSumType.make.Done("done")).toEqual({
@@ -1614,7 +1624,7 @@ describe("type kernel", (it) => {
           Done: {},
         })
         expect(
-          StdbTesting.encodeHostValue(
+          StdbInternal.encodeHostValue(
             UnitLiteralSumType,
             UnitLiteralSumType.make.Done("done"),
           ),
@@ -1622,14 +1632,14 @@ describe("type kernel", (it) => {
           tag: "Done",
         })
 
-        const WireLiteralDone = StdbTesting.ContractType.custom(
+        const WireLiteralDone = StdbInternal.ContractType.custom(
           transform(Schema.Literal("done"), Schema.Void, {
             decode: () => undefined,
             encode: () => "done" as const,
           }),
-          { type: StdbTesting.ContractType.string() },
+          { type: StdbInternal.ContractType.string() },
         )
-        const AuthoredUnitLiteralSumType = StdbTesting.ContractType.sum({
+        const AuthoredUnitLiteralSumType = StdbInternal.ContractType.sum({
           Done: WireLiteralDone,
         })
         expect(AuthoredUnitLiteralSumType.make.Done).toEqual({
@@ -1652,7 +1662,7 @@ describe("type kernel", (it) => {
           Done: "done",
         })
         expect(
-          StdbTesting.encodeHostValue(
+          StdbInternal.encodeHostValue(
             AuthoredUnitLiteralSumType,
             AuthoredUnitLiteralSumType.make.Done,
           ),
@@ -1660,9 +1670,9 @@ describe("type kernel", (it) => {
           tag: "Done",
           value: "done",
         })
-        const UnitLiteralOkResultType = StdbTesting.ContractType.result(
+        const UnitLiteralOkResultType = StdbInternal.ContractType.result(
           Done,
-          StdbTesting.ContractType.string(),
+          StdbInternal.ContractType.string(),
         )
         expect(
           yield* Schema.decodeUnknownEffect(UnitLiteralOkResultType.schema)({
@@ -1672,84 +1682,84 @@ describe("type kernel", (it) => {
           ok: "done",
         })
         expect(
-          StdbTesting.encodeHostValue(UnitLiteralOkResultType, {
+          StdbInternal.encodeHostValue(UnitLiteralOkResultType, {
             ok: "done",
           }),
         ).toEqual({
           ok: {},
         })
         expect(() =>
-          StdbTesting.encodeHostValue(UnitLiteralOkResultType, {
+          StdbInternal.encodeHostValue(UnitLiteralOkResultType, {
             ok: "not done",
           }),
         ).toThrow()
         expect(
-          StdbTesting.encodeHostValue(UnitLiteralOkResultType, {
+          StdbInternal.encodeHostValue(UnitLiteralOkResultType, {
             err: "not done",
           }),
         ).toEqual({
           err: "not done",
         })
-        const UnitLiteralErrResultType = StdbTesting.ContractType.result(
-          StdbTesting.ContractType.string(),
+        const UnitLiteralErrResultType = StdbInternal.ContractType.result(
+          StdbInternal.ContractType.string(),
           Done,
         )
         expect(
-          StdbTesting.encodeHostValue(UnitLiteralErrResultType, {
+          StdbInternal.encodeHostValue(UnitLiteralErrResultType, {
             err: "done",
           }),
         ).toEqual({
           err: {},
         })
         expect(() =>
-          StdbTesting.encodeHostValue(UnitLiteralErrResultType, {
+          StdbInternal.encodeHostValue(UnitLiteralErrResultType, {
             err: "not done",
           }),
         ).toThrow()
-        const StringResultType = StdbTesting.ContractType.result(
-          StdbTesting.ContractType.string(),
-          StdbTesting.ContractType.string(),
+        const StringResultType = StdbInternal.ContractType.result(
+          StdbInternal.ContractType.string(),
+          StdbInternal.ContractType.string(),
         )
         expect(
-          StdbTesting.encodeHostValue(StringResultType, { ok: "accepted" }),
+          StdbInternal.encodeHostValue(StringResultType, { ok: "accepted" }),
         ).toEqual({
           ok: "accepted",
         })
         expect(
-          StdbTesting.encodeHostValue(StringResultType, {
+          StdbInternal.encodeHostValue(StringResultType, {
             tag: "err",
             value: "rejected",
           }),
         ).toEqual({
           err: "rejected",
         })
-        const NestedResultType = StdbTesting.ContractType.result(
-          StdbTesting.ContractType.struct({
-            entries: StdbTesting.ContractType.array(
-              StdbTesting.ContractType.struct({
-                artifactId: StdbTesting.ContractType.string(),
-                labels: StdbTesting.ContractType.array(
-                  StdbTesting.ContractType.string(),
+        const NestedResultType = StdbInternal.ContractType.result(
+          StdbInternal.ContractType.struct({
+            entries: StdbInternal.ContractType.array(
+              StdbInternal.ContractType.struct({
+                artifactId: StdbInternal.ContractType.string(),
+                labels: StdbInternal.ContractType.array(
+                  StdbInternal.ContractType.string(),
                   testArrayLength,
                 ),
-                selectedBuild: StdbTesting.ContractType.option(
-                  StdbTesting.ContractType.string(),
+                selectedBuild: StdbInternal.ContractType.option(
+                  StdbInternal.ContractType.string(),
                 ),
               }),
               testArrayLength,
             ),
           }),
-          StdbTesting.ContractType.struct({
-            code: StdbTesting.ContractType.string(),
-            details: StdbTesting.ContractType.option(
-              StdbTesting.ContractType.struct({
-                retryable: StdbTesting.ContractType.bool(),
+          StdbInternal.ContractType.struct({
+            code: StdbInternal.ContractType.string(),
+            details: StdbInternal.ContractType.option(
+              StdbInternal.ContractType.struct({
+                retryable: StdbInternal.ContractType.bool(),
               }),
             ),
           }),
         )
         expect(
-          StdbTesting.encodeHostValue(NestedResultType, {
+          StdbInternal.encodeHostValue(NestedResultType, {
             ok: {
               entries: [
                 {
@@ -1780,7 +1790,7 @@ describe("type kernel", (it) => {
           },
         })
         expect(
-          StdbTesting.encodeHostValue(NestedResultType, {
+          StdbInternal.encodeHostValue(NestedResultType, {
             tag: "err",
             value: {
               code: "retry-later",
@@ -1796,18 +1806,18 @@ describe("type kernel", (it) => {
           },
         })
 
-        const Params = StdbTesting.ContractType.struct({
-          id: StdbTesting.ContractType.string(),
-          child: StdbTesting.ContractType.optional(
-            StdbTesting.ContractType.lazy(() =>
-              StdbTesting.ContractType.struct({
-                label: StdbTesting.ContractType.string(),
+        const Params = StdbInternal.ContractType.struct({
+          id: StdbInternal.ContractType.string(),
+          child: StdbInternal.ContractType.optional(
+            StdbInternal.ContractType.lazy(() =>
+              StdbInternal.ContractType.struct({
+                label: StdbInternal.ContractType.string(),
               }),
             ),
           ),
         })
 
-        const paramsFields = StdbTesting.ContractType.structFields(Params)
+        const paramsFields = StdbInternal.ContractType.structFields(Params)
 
         expect(paramsFields && Object.keys(paramsFields)).toEqual([
           "id",
@@ -1843,7 +1853,7 @@ describe("type kernel", (it) => {
         )
         expect(typeBuilder(TreeType)).toBe(typeBuilder(TreeType))
 
-        const ForestType = StdbTesting.ContractType.array(
+        const ForestType = StdbInternal.ContractType.array(
           TreeType,
           testArrayLength,
         )

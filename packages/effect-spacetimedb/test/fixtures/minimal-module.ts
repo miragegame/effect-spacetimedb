@@ -7,6 +7,6 @@ const thing = Stdb.table("thing", {
   },
 })
 
-export const MinimalModule = Stdb.StdbModule.make("minimal", {}).addTables(
+export const MinimalModule = Stdb.Module.make("minimal", {}).addTables(
   thing,
 ).spec

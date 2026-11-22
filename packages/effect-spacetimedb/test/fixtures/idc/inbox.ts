@@ -15,7 +15,10 @@ export class FixtureRejected extends Schema.TaggedError<FixtureRejected>()(
   { note: Schema.String },
 ) {}
 
-const DetailLabelsLength: Stdb.ArrayLengthBounds = { minimum: 0, maximum: 16 }
+const DetailLabelsLength: Stdb.ArrayLengthBounds = {
+  minimum: 0,
+  maximum: 16,
+}
 
 /** A named nested type, so the binding carries an interface-scoped type name. */
 export const PingDetails = Stdb.struct({
@@ -23,13 +26,13 @@ export const PingDetails = Stdb.struct({
   state: Stdb.literal("ready", "deferred"),
 }).named("PingDetails")
 
-export const IdcFixtureInbox = Stdb.StdbGroup.make("IdcFixtureInbox", {
+export const IdcFixtureInbox = Stdb.Group.make("IdcFixtureInbox", {
   errors: Stdb.errors(FixtureUnknownPeer, FixtureRejected),
 }).add(
-  Stdb.StdbFn.receiver("receivePing", {
+  Stdb.Fn.receiver("receivePing", {
     params: Stdb.struct({ note: Stdb.string() }),
   }),
-  Stdb.StdbFn.receiver("receiveDetails", {
+  Stdb.Fn.receiver("receiveDetails", {
     params: Stdb.struct({ body: Stdb.string(), details: PingDetails }),
   }),
 )

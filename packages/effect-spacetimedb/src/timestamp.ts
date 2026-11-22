@@ -1,3 +1,4 @@
+import * as Duration from "effect/Duration"
 import { Timestamp } from "spacetimedb"
 
 // Timestamp-to-Date conversion truncates to milliseconds. Compare native
@@ -10,12 +11,13 @@ export const compareTimestampAsc = (a: Timestamp, b: Timestamp): number => {
 export const compareTimestampDesc = (a: Timestamp, b: Timestamp): number =>
   compareTimestampAsc(b, a)
 
-export const timestampAddMillis = (
+export const timestampAdd = (
   timestamp: Timestamp,
-  millis: number,
+  duration: Duration.Input,
 ): Timestamp =>
   new Timestamp(
-    timestamp.microsSinceUnixEpoch + BigInt(Math.round(millis)) * 1000n,
+    timestamp.microsSinceUnixEpoch +
+      BigInt(Math.round(Duration.toMillis(duration))) * 1000n,
   )
 
 export const timestampIsDue = (timestamp: Timestamp, now: Timestamp): boolean =>

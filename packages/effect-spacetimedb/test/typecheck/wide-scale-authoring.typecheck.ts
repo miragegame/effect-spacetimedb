@@ -14,10 +14,10 @@ const scaleName = <const Prefix extends string, const Suffix extends string>(
 ): `${Prefix}_${Suffix}` => `${prefix}_${suffix}`
 
 const reducer = <const Name extends string>(name: Name) =>
-  Stdb.StdbFn.reducer(name, { params: ScaleParams })
+  Stdb.Fn.reducer(name, { params: ScaleParams })
 
 const procedure = <const Name extends string>(name: Name) =>
-  Stdb.StdbFn.procedure(name, {
+  Stdb.Fn.procedure(name, {
     params: ScaleParams,
     returns: ScaleText,
   })
@@ -26,7 +26,7 @@ const group42 = <const Id extends string, const Prefix extends string>(
   id: Id,
   prefix: Prefix,
 ) =>
-  Stdb.StdbGroup.make(id).add(
+  Stdb.Group.make(id).add(
     reducer(scaleName(prefix, "00")),
     reducer(scaleName(prefix, "01")),
     reducer(scaleName(prefix, "02")),
@@ -103,22 +103,22 @@ const ScaleScheduledB = Stdb.scheduledTable("scaleScheduledB", {
   },
 })
 
-const WideScaleScheduled = Stdb.StdbGroup.make("WideScaleScheduled").add(
-  Stdb.StdbFn.scheduledReducer("scaleScheduledReducer", {
+const WideScaleScheduled = Stdb.Group.make("WideScaleScheduled").add(
+  Stdb.Fn.scheduledReducer("scaleScheduledReducer", {
     table: ScaleScheduledA,
   }),
-  Stdb.StdbFn.scheduledProcedure("scaleScheduledProcedure", {
+  Stdb.Fn.scheduledProcedure("scaleScheduledProcedure", {
     table: ScaleScheduledB,
   }),
 )
 
-const MixedSectionGroup = Stdb.StdbGroup.make("MixedSection").add(
+const MixedSectionGroup = Stdb.Group.make("MixedSection").add(
   reducer("mixedReducer"),
   procedure("mixedProcedure"),
-  Stdb.StdbFn.anonymousView("mixedView", { returns: ScaleText }),
+  Stdb.Fn.anonymousView("mixedView", { returns: ScaleText }),
 )
 
-const WideScaleModule = Stdb.StdbModule.make("wide_scale_probe", {})
+const WideScaleModule = Stdb.Module.make("wide_scale_probe", {})
   .addTables(ScaleScheduledA, ScaleScheduledB)
   .add(
     WideScaleGroup00,
@@ -144,7 +144,7 @@ const WideScaleModule = Stdb.StdbModule.make("wide_scale_probe", {})
     MixedSectionGroup,
   )
 
-const ModuleChainArm = Stdb.StdbModule.make("wide_scale_chain_probe", {})
+const ModuleChainArm = Stdb.Module.make("wide_scale_chain_probe", {})
   .addTables(ScaleScheduledA, ScaleScheduledB)
   .add(WideScaleGroup00)
   .add(WideScaleGroup01)
@@ -168,7 +168,7 @@ const ModuleChainArm = Stdb.StdbModule.make("wide_scale_chain_probe", {})
   .add(WideScaleScheduled)
   .add(MixedSectionGroup)
 
-const ChainedSingleAddGroup = Stdb.StdbGroup.make("ChainedSingleAdd")
+const ChainedSingleAddGroup = Stdb.Group.make("ChainedSingleAdd")
   .add(reducer(scaleName("chained", "00")))
   .add(reducer(scaleName("chained", "01")))
   .add(reducer(scaleName("chained", "02")))
@@ -220,30 +220,28 @@ const ChainedSingleAddGroup = Stdb.StdbGroup.make("ChainedSingleAdd")
   .add(reducer(scaleName("chained", "48")))
   .add(reducer(scaleName("chained", "49")))
 
-const ChainedSingleAddModule = Stdb.StdbModule.make(
+const ChainedSingleAddModule = Stdb.Module.make(
   "chained_single_add_probe",
   {},
 ).add(ChainedSingleAddGroup)
 
-const SharedScaleGroup = Stdb.StdbGroup.make("SharedScale").add(
+const SharedScaleGroup = Stdb.Group.make("SharedScale").add(
   reducer("sharedScaleWrite"),
 )
 
-const SharedScaleModuleA = Stdb.StdbModule.make("shared_scale_a", {}).add(
+const SharedScaleModuleA = Stdb.Module.make("shared_scale_a", {}).add(
   SharedScaleGroup,
 )
-const SharedScaleModuleB = Stdb.StdbModule.make("shared_scale_b", {}).add(
+const SharedScaleModuleB = Stdb.Module.make("shared_scale_b", {}).add(
   SharedScaleGroup,
 )
 
-const DualLifecycleGroup = Stdb.StdbGroup.make("DualLifecycle").add(
-  Stdb.StdbFn.init(),
-)
+const DualLifecycleGroup = Stdb.Group.make("DualLifecycle").add(Stdb.Fn.init())
 
-const DualLifecycleModule = Stdb.StdbModule.make("dual_lifecycle_probe", {
+const DualLifecycleModule = Stdb.Module.make("dual_lifecycle_probe", {
   lifecycle: {
-    init: Stdb.StdbFn.init(),
-    clientConnected: Stdb.StdbFn.clientConnected(),
+    init: Stdb.Fn.init(),
+    clientConnected: Stdb.Fn.clientConnected(),
   },
 }).add(DualLifecycleGroup)
 
@@ -255,18 +253,18 @@ const HttpResponse = Schema.Struct({
   ok: Schema.Boolean,
 })
 
-const MergedHttpGroup = Stdb.StdbHttpGroup.make("MergedHttp")
-  .add(Stdb.StdbHttp.post("rawScaleHttp", "/raw"))
+const MergedHttpGroup = Stdb.HttpGroup.make("MergedHttp")
+  .add(Stdb.Http.post("rawScaleHttp", "/raw"))
   .merge(
-    Stdb.StdbHttpGroup.make("NestedHttp").add(
-      Stdb.StdbHttp.post("typedScaleHttp", "/typed", {
+    Stdb.HttpGroup.make("NestedHttp").add(
+      Stdb.Http.post("typedScaleHttp", "/typed", {
         request: HttpRequest,
         response: HttpResponse,
       }),
     ),
   )
 
-const HttpScaleModule = Stdb.StdbModule.make("http_scale_probe", {}).add(
+const HttpScaleModule = Stdb.Module.make("http_scale_probe", {}).add(
   MergedHttpGroup,
 )
 
@@ -466,14 +464,14 @@ type _AnyGroupHttpAssignable = Assert<
 type _LegacyCallableShapeAssignable = Assert<
   IsAssignable<
     typeof ChainedSingleAddGroup,
-    Stdb.StdbGroup<string, Stdb.AnyCallableDecl>
+    Stdb.Group<string, Stdb.AnyCallableDecl>
   >
 >
 
 type _LegacyHttpShapeAssignable = Assert<
   IsAssignable<
     typeof MergedHttpGroup,
-    Stdb.StdbHttpGroup<string, Stdb.AnyHttpRouteDecl>
+    Stdb.HttpGroup<string, Stdb.AnyHttpRouteDecl>
   >
 >
 

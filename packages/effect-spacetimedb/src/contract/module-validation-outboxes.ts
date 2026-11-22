@@ -1,4 +1,4 @@
-import type { StdbDiagnostic } from "./diagnostic.ts"
+import type { Diagnostic } from "./diagnostic.ts"
 import type { AnyModuleSpec } from "./module.ts"
 import { pushDiagnostic } from "./module-validation-common.ts"
 import { OutboxResultValue } from "./outbox-result.ts"
@@ -13,7 +13,7 @@ import type { AnyTableSpec } from "./table.ts"
 import { structFields } from "./type.ts"
 
 const validateOutboxTable = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   tableKey: string,
   table: AnyTableSpec,
 ): void => {
@@ -85,7 +85,7 @@ const validateOutboxTable = (
 }
 
 const validateSettleParams = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   key: string,
   spec: { readonly params: unknown },
   table: AnyTableSpec,
@@ -101,7 +101,7 @@ const validateSettleParams = (
       diagnostics,
       "InvalidOutboxResult",
       ["reducers", key, "params"],
-      `Settle reducer ${key} params must be exactly the outbox row and its OutboxResult; declare it with StdbFn.outboxResult(...).`,
+      `Settle reducer ${key} params must be exactly the outbox row and its OutboxResult; declare it with Fn.outboxResult(...).`,
     )
   }
 }
@@ -113,7 +113,7 @@ const validateSettleParams = (
  * registered outbox, and takes exactly that outbox's row and its outcome.
  */
 export const validateOutboxes = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   module: AnyModuleSpec,
 ): void => {
   const outboxKeys = new Map<AnyTableSpec, string>()
@@ -143,14 +143,6 @@ export const validateOutboxes = (
       )
       continue
     }
-    if (reducer.public !== false) {
-      pushDiagnostic(
-        diagnostics,
-        "InvalidOutboxResult",
-        [...path, "public"],
-        `Settle reducer ${key} must be private: only the host settles an outbox row.`,
-      )
-    }
     if (
       isReceiverSpec(reducer) ||
       (reducer as { readonly scheduled?: unknown }).scheduled !== undefined
@@ -176,7 +168,7 @@ export const validateOutboxes = (
         diagnostics,
         "OutboxWithoutResult",
         ["tables", tableKey, "outbox"],
-        `Outbox ${tableKey} must have a settle reducer declared with StdbFn.outboxResult(...); an unsettled refusal would be lost.`,
+        `Outbox ${tableKey} must have a settle reducer declared with Fn.outboxResult(...); an unsettled refusal would be lost.`,
       )
     } else if (keys.length > 1) {
       pushDiagnostic(

@@ -1,169 +1,103 @@
-import { make as makeServer } from "../../src/server/bind.ts"
 import * as Effect from "effect/Effect"
-import * as StdbTesting from "effect-spacetimedb/testing"
-import type { Handlers } from "effect-spacetimedb/server"
-import { FullModule, FullModuleHttpHandlers } from "../fixtures/full-module"
-import { TestSyncRunner } from "../helpers/sync-runner"
+import * as Stdb from "effect-spacetimedb"
+import { FullStdbModule } from "../fixtures/full-module"
 
-const server = makeServer({
-  module: FullModule,
-  runtime: TestSyncRunner,
-})
-type UserUpsertArgs = StdbTesting.TypeOf<
-  typeof FullModule.reducers.userUpsert.params
->
-type UserRequireArgs = StdbTesting.TypeOf<
-  typeof FullModule.reducers.userRequire.params
->
-type UserGetArgs = StdbTesting.TypeOf<
-  typeof FullModule.procedures.userGet.params
->
-type ReminderFireArgs = StdbTesting.TypeOf<
-  typeof FullModule.procedures.reminderFire.params
->
+const { From } = FullStdbModule
 
-const canonicalHandlers = server.handlers({
-  reducers: {
-    userUpsert: Effect.fn(function* ({ userId, name }: UserUpsertArgs) {
-      void userId
-      void name
-    }),
-    userRequire: Effect.fn(function* ({ userId }: UserRequireArgs) {
-      void userId
-    }),
-  },
-  procedures: {
-    userGet: Effect.fn(function* ({ userId }: UserGetArgs) {
-      void userId
-      return undefined
-    }),
-    reminderFire: Effect.fn(function* ({ data }: ReminderFireArgs) {
-      void data.id
-      return undefined
-    }),
-  },
-  httpHandlers: FullModuleHttpHandlers,
-  views: {
-    allUsers: Effect.fn(function* () {
-      return []
-    }),
-  },
-  lifecycle: {
-    init: () => Effect.void,
-    clientConnected: () => Effect.void,
-    clientDisconnected: () => Effect.void,
-  },
+const CanonicalLive = Stdb.Builder.group(FullStdbModule, "FullCallables", {
+  userUpsert: Effect.fn(function* ({ userId, name }) {
+    void userId
+    void name
+  }),
+  userRequire: Effect.fn(function* ({ userId }) {
+    void userId
+  }),
+  userGet: Effect.fn(function* ({ userId }) {
+    void userId
+    return undefined
+  }),
+  reminderFire: Effect.fn(function* ({ data }) {
+    void data.id
+    return undefined
+  }),
+  allUsers: () => Effect.succeed([]),
+  init: () => Effect.void,
+  clientConnected: () => Effect.void,
+  clientDisconnected: () => Effect.void,
 })
 
-declare const brandedHandlers: Handlers<typeof FullModule>
-void brandedHandlers
-
-const invalidReducerArgs = server.handlers({
-  reducers: {
+const InvalidReducerArgsLive = Stdb.Builder.group(
+  FullStdbModule,
+  "FullCallables",
+  {
     // @ts-expect-error handler params must match reducer contract
     userUpsert: Effect.fn(function* ({ missing }) {
       void missing
     }),
-    userRequire: Effect.fn(function* (_args: UserRequireArgs) {}),
-  },
-  procedures: {
-    userGet: Effect.fn(function* (_args: UserGetArgs) {
+    userRequire: () => Effect.void,
+    userGet: Effect.fn(function* () {
       return undefined
     }),
-    reminderFire: Effect.fn(function* (_args: ReminderFireArgs) {
-      return undefined
-    }),
-  },
-  httpHandlers: FullModuleHttpHandlers,
-  views: {
-    allUsers: Effect.fn(function* () {
-      return []
-    }),
-  },
-  lifecycle: {
+    reminderFire: () => Effect.void,
+    allUsers: () => Effect.succeed([]),
     init: () => Effect.void,
     clientConnected: () => Effect.void,
     clientDisconnected: () => Effect.void,
   },
-})
-
-const invalidReducerFrom = server.handlers({
-  // @ts-expect-error reducers must not depend on the view query root
-  reducers: {
-    userUpsert: Effect.fn(function* ({ userId, name }: UserUpsertArgs) {
-      void userId
-      void name
-      const from = yield* server.from
-      void from
-    }),
-    userRequire: Effect.fn(function* (_args: UserRequireArgs) {}),
-  },
-  procedures: {
-    userGet: Effect.fn(function* (_args: UserGetArgs) {
-      return undefined
-    }),
-    reminderFire: Effect.fn(function* (_args: ReminderFireArgs) {
-      return undefined
-    }),
-  },
-  httpHandlers: FullModuleHttpHandlers,
-  views: {
-    allUsers: Effect.fn(function* () {
-      return []
-    }),
-  },
-  lifecycle: {
-    init: () => Effect.void,
-    clientConnected: () => Effect.void,
-    clientDisconnected: () => Effect.void,
-  },
-})
-
-const missingSections = server.handlers({
-  // @ts-expect-error modules with reducers/procedures/views/lifecycle require those sections
-  reducers: {
-    userUpsert: Effect.fn(function* (_args: UserUpsertArgs) {}),
-    userRequire: Effect.fn(function* (_args: UserRequireArgs) {}),
-  },
-})
-
-const extraReducerKey = server.handlers({
-  // @ts-expect-error handler maps must not accept unknown reducer keys
-  reducers: {
-    userUpsert: Effect.fn(function* (_args: UserUpsertArgs) {}),
-    userRequire: Effect.fn(function* (_args: UserRequireArgs) {}),
-    user_delete: Effect.fn(function* () {}),
-  },
-  procedures: {
-    userGet: Effect.fn(function* (_args: UserGetArgs) {
-      return undefined
-    }),
-    reminderFire: Effect.fn(function* (_args: ReminderFireArgs) {
-      return undefined
-    }),
-  },
-  httpHandlers: FullModuleHttpHandlers,
-  views: {
-    allUsers: Effect.fn(function* () {
-      return []
-    }),
-  },
-  lifecycle: {
-    init: () => Effect.void,
-    clientConnected: () => Effect.void,
-    clientDisconnected: () => Effect.void,
-  },
-})
-
-const oldKeyedReducerHelper = server.reducer(
-  "userUpsert",
-  // @ts-expect-error reducer helper no longer accepts a repeated key argument
-  Effect.fn(function* (_args: UserUpsertArgs) {}),
 )
 
-void canonicalHandlers
-void invalidReducerArgs
-void invalidReducerFrom
-void missingSections
-void extraReducerKey
-void oldKeyedReducerHelper
+const InvalidReducerFromLive = Stdb.Builder.group(
+  FullStdbModule,
+  "FullCallables",
+  // @ts-expect-error reducers must not depend on the view query root
+  {
+    userUpsert: Effect.fn(function* () {
+      const from = yield* From
+      void from
+    }),
+    userRequire: () => Effect.void,
+    userGet: Effect.fn(function* () {
+      return undefined
+    }),
+    reminderFire: () => Effect.void,
+    allUsers: () => Effect.succeed([]),
+    init: () => Effect.void,
+    clientConnected: () => Effect.void,
+    clientDisconnected: () => Effect.void,
+  },
+)
+
+const MissingHandlersLive = Stdb.Builder.group(
+  FullStdbModule,
+  "FullCallables",
+  // @ts-expect-error a group must implement every endpoint it declares
+  {
+    userUpsert: () => Effect.void,
+    userRequire: () => Effect.void,
+  },
+)
+
+const ExtraReducerKeyLive = Stdb.Builder.group(
+  FullStdbModule,
+  "FullCallables",
+  {
+    userUpsert: () => Effect.void,
+    userRequire: () => Effect.void,
+    userGet: Effect.fn(function* () {
+      return undefined
+    }),
+    reminderFire: () => Effect.void,
+    allUsers: () => Effect.succeed([]),
+    init: () => Effect.void,
+    clientConnected: () => Effect.void,
+    clientDisconnected: () => Effect.void,
+    // @ts-expect-error handler maps must not accept unknown keys
+    user_delete: () => Effect.void,
+  },
+)
+
+void CanonicalLive
+void InvalidReducerArgsLive
+void InvalidReducerFromLive
+void MissingHandlersLive
+void ExtraReducerKeyLive

@@ -14,6 +14,7 @@ import {
 import { narrowSchema } from "./contract/type/wire-schema.ts"
 import type * as Type from "./contract/type.ts"
 import * as ValueType from "./contract/type.ts"
+import { isScheduledFunction } from "./module-projection.ts"
 
 export type CallableKind = "reducer" | "procedure" | "httpHandler"
 
@@ -119,7 +120,7 @@ type ProcedureResponseTypeInput =
   | ProcedureCallableDescriptor<ProcedureSpec>
 
 const unexpectedEnvelope = (value: unknown): ParseResult.ParseIssue =>
-  new ParseResult.Type(value, "Expected procedure result envelope")
+  ParseResult.invalidValueIssue(value, "Expected procedure result envelope")
 
 const decodeEnvelopeValue = <A, Encoded>(
   schema: Schema.Codec<A, Encoded, never, never>,
@@ -137,9 +138,15 @@ const encodeEnvelopeValue = <A, Encoded>(
     Effect.mapError((error) => error.issue),
   )
 
+/**
+ * The `err` arm of a procedure that declares no errors. The arm is always the
+ * versioned string carrier, so it only ever holds an undeclared failure.
+ */
+const undeclaredFailureArm = { type: ValueType.string() }
+
 export const procedureEnvelope = <
   Returns extends Type.AnyValueType,
-  Definition extends ErrorCodec.AnyErrorDefinition,
+  Definition extends Pick<ErrorCodec.AnyErrorDefinition, "type">,
 >(
   returns: Returns,
   definition: Definition,
@@ -310,11 +317,17 @@ const procedureSpecFromInput = (
   input: ProcedureResponseTypeInput,
 ): ProcedureSpec => ("spec" in input ? input.spec : input)
 
+/**
+ * What a procedure answers on the wire: a result, so that no failure has to
+ * escape as an exception, which the host answers by rebuilding the isolate. A
+ * scheduled procedure answers no caller and the host requires it to return
+ * unit, so it keeps its declared return type.
+ */
 export const procedureResponseType = (
   input: ProcedureResponseTypeInput,
 ): Type.AnyValueType => {
   const spec = procedureSpecFromInput(input)
-  if (spec.errors == null) {
+  if (isScheduledFunction(spec)) {
     return spec.returns
   }
 
@@ -323,7 +336,10 @@ export const procedureResponseType = (
     return cached
   }
 
-  const responseType = procedureEnvelope(spec.returns, spec.errors)
+  const responseType = procedureEnvelope(
+    spec.returns,
+    spec.errors ?? undeclaredFailureArm,
+  )
   procedureResponseTypeCache.set(spec, responseType)
   return responseType
 }

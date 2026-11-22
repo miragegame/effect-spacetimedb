@@ -12,12 +12,15 @@ import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as TestClock from "effect/testing/TestClock"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Stdb from "effect-spacetimedb"
-import { WsUnsupportedBuilderFeatureError } from "effect-spacetimedb/client"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import {
+  connectDurationMaxDefault,
+  WsUnsupportedBuilderFeatureError,
+} from "effect-spacetimedb/client"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import {
   WsConnectError,
   WsConnectTimeoutError,
-} from "effect-spacetimedb/testing"
+} from "effect-spacetimedb/testing/internal"
 import { Identity } from "spacetimedb"
 import { FullModule } from "../fixtures/full-module"
 import { TestLayer } from "../helpers/test-layer"
@@ -27,16 +30,16 @@ import { fixtureConnectTimeoutMillis } from "../helpers/transport-bounds"
 const { expect } = EffectVitest
 const describe = EffectVitest.layer(TestLayer)
 
-const plan = StdbTesting.makeModulePlan(FullModule)
+const plan = StdbInternal.makeModulePlan(FullModule)
 const uri = "ws://localhost:3000"
 const databaseName = "test"
-const EmptyModule = Stdb.StdbModule.make("empty", {}).spec
+const EmptyModule = Stdb.Module.make("empty", {}).spec
 
-type FullBuilder = StdbTesting.GeneratedWsBuilderLike<
+type FullBuilder = StdbInternal.GeneratedWsBuilderLike<
   typeof FullModule,
   unknown
 >
-type FullConnection = StdbTesting.ManagedWsConnection<
+type FullConnection = StdbInternal.ManagedWsConnection<
   typeof FullModule,
   unknown
 >
@@ -143,13 +146,13 @@ describe("ws resource fault injection", (it) => {
             return connection
           },
         })
-        const session = yield* StdbTesting.makeScopedFromModulePlan({
+        const session = yield* StdbInternal.makeScopedFromModulePlan({
           plan,
           config: {
             builder: () => fault.builder,
             uri,
             databaseName,
-            connectTimeoutMillis: fixtureConnectTimeoutMillis,
+            connectDurationMax: fixtureConnectTimeoutMillis,
           },
         })
         const awaitingInvalidation = yield* session
@@ -181,12 +184,12 @@ describe("ws resource fault injection", (it) => {
         const inFlightProcedureError = yield* Fiber.join(procedureFiber).pipe(
           Effect.flip,
         )
-        expect(StdbTesting.ConnectionLostError.is(inFlightReducerError)).toBe(
+        expect(StdbInternal.ConnectionLostError.is(inFlightReducerError)).toBe(
           true,
         )
-        expect(StdbTesting.ConnectionLostError.is(inFlightProcedureError)).toBe(
-          true,
-        )
+        expect(
+          StdbInternal.ConnectionLostError.is(inFlightProcedureError),
+        ).toBe(true)
 
         const subsequentReducerError = yield* session.reducers
           .userUpsert({
@@ -197,11 +200,11 @@ describe("ws resource fault injection", (it) => {
         const subsequentProcedureError = yield* session.procedures
           .userGet({ userId: "user-2" as never })
           .pipe(Effect.flip)
-        expect(StdbTesting.ConnectionLostError.is(subsequentReducerError)).toBe(
-          true,
-        )
         expect(
-          StdbTesting.ConnectionLostError.is(subsequentProcedureError),
+          StdbInternal.ConnectionLostError.is(subsequentReducerError),
+        ).toBe(true)
+        expect(
+          StdbInternal.ConnectionLostError.is(subsequentProcedureError),
         ).toBe(true)
         expect(reducerCallCount).toBe(1)
         expect(procedureCallCount).toBe(1)
@@ -209,7 +212,7 @@ describe("ws resource fault injection", (it) => {
         const streamError = yield* session
           .tableGroup(["user"] as const)
           .changes.pipe(Stream.runHead, Effect.flip)
-        expect(StdbTesting.SubscriptionInvalidatedError.is(streamError)).toBe(
+        expect(StdbInternal.SubscriptionInvalidatedError.is(streamError)).toBe(
           true,
         )
 
@@ -222,7 +225,7 @@ describe("ws resource fault injection", (it) => {
         if (Option.isSome(tableRefValue)) {
           expect(
             Option.getOrUndefined(AsyncResult.error(tableRefValue.value)),
-          ).toBeInstanceOf(StdbTesting.SubscriptionInvalidatedError)
+          ).toBeInstanceOf(StdbInternal.SubscriptionInvalidatedError)
         }
       }).pipe(Effect.scoped),
   )
@@ -242,18 +245,18 @@ describe("ws resource fault injection", (it) => {
         })
 
         const error = yield* Effect.flip(
-          StdbTesting.project(FullModule)
+          StdbInternal.project(FullModule)
             .client.ws.scopedGenerated({
               DbConnection: { builder: () => fault.builder },
               uri,
               databaseName,
-              connectTimeoutMillis: fixtureConnectTimeoutMillis,
+              connectDurationMax: fixtureConnectTimeoutMillis,
             })
             .pipe(Effect.scoped),
         )
 
-        expect(StdbTesting.GeneratedArtifactShapeError.is(error)).toBe(true)
-        if (StdbTesting.GeneratedArtifactShapeError.is(error)) {
+        expect(StdbInternal.GeneratedArtifactShapeError.is(error)).toBe(true)
+        if (StdbInternal.GeneratedArtifactShapeError.is(error)) {
           expect(error.missingKeys).toEqual(["user"])
           expect(error.moduleName).toBe(FullModule.name)
         }
@@ -275,18 +278,18 @@ describe("ws resource fault injection", (it) => {
         })
 
         const error = yield* Effect.flip(
-          StdbTesting.project(FullModule)
+          StdbInternal.project(FullModule)
             .client.ws.scopedGenerated({
               DbConnection: { builder: () => fault.builder },
               uri,
               databaseName,
-              connectTimeoutMillis: fixtureConnectTimeoutMillis,
+              connectDurationMax: fixtureConnectTimeoutMillis,
             })
             .pipe(Effect.scoped),
         )
 
-        expect(StdbTesting.GeneratedArtifactShapeError.is(error)).toBe(true)
-        if (StdbTesting.GeneratedArtifactShapeError.is(error)) {
+        expect(StdbInternal.GeneratedArtifactShapeError.is(error)).toBe(true)
+        if (StdbInternal.GeneratedArtifactShapeError.is(error)) {
           expect(error.missingKeys).toEqual(["user.id.find"])
           expect(error.unsupportedIndexes).toEqual([])
         }
@@ -307,18 +310,18 @@ describe("ws resource fault injection", (it) => {
       })
 
       const error = yield* Effect.flip(
-        StdbTesting.project(FullModule)
+        StdbInternal.project(FullModule)
           .client.ws.scopedGenerated({
             DbConnection: { builder: () => fault.builder },
             uri,
             databaseName,
-            connectTimeoutMillis: fixtureConnectTimeoutMillis,
+            connectDurationMax: fixtureConnectTimeoutMillis,
           })
           .pipe(Effect.scoped),
       )
 
-      expect(StdbTesting.GeneratedArtifactShapeError.is(error)).toBe(true)
-      if (StdbTesting.GeneratedArtifactShapeError.is(error)) {
+      expect(StdbInternal.GeneratedArtifactShapeError.is(error)).toBe(true)
+      if (StdbInternal.GeneratedArtifactShapeError.is(error)) {
         expect(error.missingKeys).toEqual(["presenceEvent"])
       }
     }),
@@ -342,12 +345,12 @@ describe("ws resource fault injection", (it) => {
         })
 
         const error = yield* Effect.flip(
-          StdbTesting.project(FullModule)
+          StdbInternal.project(FullModule)
             .client.ws.scopedGenerated({
               DbConnection: { builder: () => fault.builder },
               uri,
               databaseName,
-              connectTimeoutMillis: fixtureConnectTimeoutMillis,
+              connectDurationMax: fixtureConnectTimeoutMillis,
             })
             .pipe(Effect.scoped),
         )
@@ -370,18 +373,18 @@ describe("ws resource fault injection", (it) => {
         })
 
         const error = yield* Effect.flip(
-          StdbTesting.project(FullModule)
+          StdbInternal.project(FullModule)
             .client.ws.scopedGenerated({
               DbConnection: { builder: () => fault.builder },
               uri,
               databaseName,
-              connectTimeoutMillis: fixtureConnectTimeoutMillis,
+              connectDurationMax: fixtureConnectTimeoutMillis,
             })
             .pipe(Effect.scoped),
         )
 
-        expect(StdbTesting.GeneratedArtifactShapeError.is(error)).toBe(true)
-        if (StdbTesting.GeneratedArtifactShapeError.is(error)) {
+        expect(StdbInternal.GeneratedArtifactShapeError.is(error)).toBe(true)
+        if (StdbInternal.GeneratedArtifactShapeError.is(error)) {
           expect(error.missingKeys).toEqual([
             "user",
             "presenceEvent",
@@ -393,17 +396,17 @@ describe("ws resource fault injection", (it) => {
 
   it.effect("generated acquisition requires db for a table-free module", () =>
     Effect.gen(function* () {
-      type EmptyConnection = StdbTesting.ManagedWsConnection<
+      type EmptyConnection = StdbInternal.ManagedWsConnection<
         typeof EmptyModule,
         unknown
       >
-      type EmptyBuilder = StdbTesting.GeneratedWsBuilderLike<
+      type EmptyBuilder = StdbInternal.GeneratedWsBuilderLike<
         typeof EmptyModule,
         unknown
       >
-      type EmptyQueryRoot = StdbTesting.ClientQueryRoot<typeof EmptyModule>
+      type EmptyQueryRoot = StdbInternal.ClientQueryRoot<typeof EmptyModule>
 
-      const subscriptionBuilder: StdbTesting.SubscriptionBuilderLike<
+      const subscriptionBuilder: StdbInternal.SubscriptionBuilderLike<
         unknown,
         EmptyQueryRoot
       > = {
@@ -433,18 +436,18 @@ describe("ws resource fault injection", (it) => {
       }
 
       const error = yield* Effect.flip(
-        StdbTesting.project(EmptyModule)
+        StdbInternal.project(EmptyModule)
           .client.ws.scopedGenerated({
             DbConnection: { builder: () => builder },
             uri,
             databaseName,
-            connectTimeoutMillis: fixtureConnectTimeoutMillis,
+            connectDurationMax: fixtureConnectTimeoutMillis,
           })
           .pipe(Effect.scoped),
       )
 
-      expect(StdbTesting.GeneratedArtifactShapeError.is(error)).toBe(true)
-      if (StdbTesting.GeneratedArtifactShapeError.is(error)) {
+      expect(StdbInternal.GeneratedArtifactShapeError.is(error)).toBe(true)
+      if (StdbInternal.GeneratedArtifactShapeError.is(error)) {
         expect(error.missingKeys).toEqual([])
       }
     }),
@@ -462,13 +465,13 @@ describe("ws resource fault injection", (it) => {
       })
 
       const error = yield* Effect.flip(
-        StdbTesting.makeScopedFromModulePlan({
+        StdbInternal.makeScopedFromModulePlan({
           plan,
           config: {
             builder: () => fault.builder,
             uri,
             databaseName,
-            connectTimeoutMillis: fixtureConnectTimeoutMillis,
+            connectDurationMax: fixtureConnectTimeoutMillis,
           },
         }).pipe(Effect.scoped),
       )
@@ -492,13 +495,13 @@ describe("ws resource fault injection", (it) => {
       })
 
       const error = yield* Effect.flip(
-        StdbTesting.makeScopedFromModulePlan({
+        StdbInternal.makeScopedFromModulePlan({
           plan,
           config: {
             builder: () => fault.builder,
             uri,
             databaseName,
-            connectTimeoutMillis: fixtureConnectTimeoutMillis,
+            connectDurationMax: fixtureConnectTimeoutMillis,
           },
         }).pipe(Effect.scoped),
       )
@@ -516,13 +519,13 @@ describe("ws resource fault injection", (it) => {
           build: ({ makeConnection }) => makeConnection(),
         })
 
-        const fiber = yield* StdbTesting.makeScopedFromModulePlan({
+        const fiber = yield* StdbInternal.makeScopedFromModulePlan({
           plan,
           config: {
             builder: () => fault.builder,
             uri,
             databaseName,
-            connectTimeoutMillis: 10,
+            connectDurationMax: "10 millis",
           },
         }).pipe(Effect.scoped, Effect.forkChild)
         yield* Effect.yieldNow
@@ -535,6 +538,54 @@ describe("ws resource fault injection", (it) => {
         }
         expect(fault.disconnectCount()).toBe(1)
       }),
+  )
+
+  it.effect("keeps a pending handshake open with Duration.infinity", () =>
+    Effect.gen(function* () {
+      const fault = makeFaultBuilder({
+        build: ({ makeConnection }) => makeConnection(),
+      })
+      const fiber = yield* StdbInternal.makeScopedFromModulePlan({
+        plan,
+        config: {
+          builder: () => fault.builder,
+          uri,
+          databaseName,
+          connectDurationMax: Duration.infinity,
+        },
+      }).pipe(Effect.scoped, Effect.forkChild)
+      yield* TestClock.adjust(Duration.minutes(1))
+      expect(fiber.pollUnsafe()).toBeUndefined()
+      yield* Fiber.interrupt(fiber)
+      expect(fault.disconnectCount()).toBe(1)
+    }),
+  )
+
+  it.effect("bounds a connection that sets no timeout by the default", () =>
+    Effect.gen(function* () {
+      const fault = makeFaultBuilder({
+        build: ({ makeConnection }) => makeConnection(),
+      })
+
+      const fiber = yield* StdbInternal.makeScopedFromModulePlan({
+        plan,
+        config: { builder: () => fault.builder, uri, databaseName },
+      }).pipe(Effect.scoped, Effect.forkChild)
+      yield* Effect.yieldNow
+      yield* TestClock.adjust(
+        Duration.subtract(connectDurationMaxDefault, Duration.millis(1)),
+      )
+      expect(fiber.pollUnsafe()).toBeUndefined()
+      yield* TestClock.adjust(Duration.millis(1))
+      const error = yield* Fiber.join(fiber).pipe(Effect.flip)
+
+      expect(WsConnectError.is(error)).toBe(true)
+      if (WsConnectError.is(error)) {
+        expect(error.cause).toMatchObject({
+          timeoutMillis: Duration.toMillis(connectDurationMaxDefault),
+        })
+      }
+    }),
   )
 
   it.effect("keeps a late onConnect terminal after timeout", () =>
@@ -551,13 +602,13 @@ describe("ws resource fault injection", (it) => {
         },
       })
 
-      const fiber = yield* StdbTesting.makeScopedFromModulePlan({
+      const fiber = yield* StdbInternal.makeScopedFromModulePlan({
         plan,
         config: {
           builder: () => fault.builder,
           uri,
           databaseName,
-          connectTimeoutMillis: 10,
+          connectDurationMax: 10,
         },
       }).pipe(Effect.scoped, Effect.forkChild)
       yield* Effect.yieldNow
@@ -585,6 +636,35 @@ describe("ws resource fault injection", (it) => {
     }),
   )
 
+  it.effect("disconnects a session the SDK reported as over", () =>
+    Effect.gen(function* () {
+      const fault = makeFaultBuilder({
+        build: ({ onConnect, makeConnection }) => {
+          const connection = makeConnection()
+          onConnect?.(connection, Identity.zero(), "token")
+          return connection
+        },
+      })
+
+      yield* Effect.gen(function* () {
+        const session = yield* StdbInternal.makeScopedFromModulePlan({
+          plan,
+          config: {
+            builder: () => fault.builder,
+            uri,
+            databaseName,
+            connectDurationMax: fixtureConnectTimeoutMillis,
+          },
+        })
+
+        fault.disconnectTransport(makeNativeDisconnectContext())
+        expect(session.isInvalidated()).toBe(true)
+      }).pipe(Effect.scoped)
+
+      expect(fault.disconnectCount()).toBe(1)
+    }),
+  )
+
   it.effect("settles acquisition when an onConnect callback body defects", () =>
     Effect.gen(function* () {
       const fault = makeFaultBuilder({
@@ -601,13 +681,13 @@ describe("ws resource fault injection", (it) => {
       })
 
       const error = yield* Effect.flip(
-        StdbTesting.makeScopedFromModulePlan({
+        StdbInternal.makeScopedFromModulePlan({
           plan,
           config: {
             builder: () => fault.builder,
             uri,
             databaseName,
-            connectTimeoutMillis: 100,
+            connectDurationMax: 100,
           },
         }).pipe(Effect.scoped),
       )
@@ -631,13 +711,13 @@ describe("ws resource fault injection", (it) => {
         },
       })
 
-      const exit = yield* StdbTesting.makeScopedFromModulePlan({
+      const exit = yield* StdbInternal.makeScopedFromModulePlan({
         plan,
         config: {
           builder: () => fault.builder,
           uri,
           databaseName,
-          connectTimeoutMillis: fixtureConnectTimeoutMillis,
+          connectDurationMax: fixtureConnectTimeoutMillis,
         },
       }).pipe(Effect.andThen(Effect.interrupt), Effect.scoped, Effect.exit)
 
@@ -670,13 +750,13 @@ describe("ws resource fault injection", (it) => {
           },
         })
         const sessionScope = yield* Scope.make()
-        const session = yield* StdbTesting.makeScopedFromModulePlan({
+        const session = yield* StdbInternal.makeScopedFromModulePlan({
           plan,
           config: {
             builder: () => fault.builder,
             uri,
             databaseName,
-            connectTimeoutMillis: fixtureConnectTimeoutMillis,
+            connectDurationMax: fixtureConnectTimeoutMillis,
           },
         }).pipe(Scope.provide(sessionScope))
         const reducerFiber = yield* session.reducers
@@ -691,14 +771,14 @@ describe("ws resource fault injection", (it) => {
         yield* Scope.close(sessionScope, Exit.void)
 
         const inFlightError = yield* Fiber.join(reducerFiber).pipe(Effect.flip)
-        expect(StdbTesting.ConnectionLostError.is(inFlightError)).toBe(true)
+        expect(StdbInternal.ConnectionLostError.is(inFlightError)).toBe(true)
         const laterError = yield* session.reducers
           .userUpsert({
             userId: "user-2" as never,
             name: "Grace" as never,
           })
           .pipe(Effect.flip)
-        expect(StdbTesting.ConnectionLostError.is(laterError)).toBe(true)
+        expect(StdbInternal.ConnectionLostError.is(laterError)).toBe(true)
         expect(reducerCallCount).toBe(1)
         expect(fault.disconnectCount()).toBe(1)
       }).pipe(Effect.scoped),
@@ -713,13 +793,13 @@ describe("ws resource fault injection", (it) => {
         })
 
         const error = yield* Effect.flip(
-          StdbTesting.makeScopedFromModulePlan({
+          StdbInternal.makeScopedFromModulePlan({
             plan,
             config: {
               builder: () => fault.builder,
               uri,
               databaseName,
-              connectTimeoutMillis: fixtureConnectTimeoutMillis,
+              connectDurationMax: fixtureConnectTimeoutMillis,
               createWebSocket: () => ({}),
             },
           }).pipe(Effect.scoped),
@@ -745,13 +825,13 @@ describe("ws resource fault injection", (it) => {
           },
         })
 
-        const session = yield* StdbTesting.makeScopedFromModulePlan({
+        const session = yield* StdbInternal.makeScopedFromModulePlan({
           plan,
           config: {
             builder: () => fault.builder,
             uri,
             databaseName,
-            connectTimeoutMillis: fixtureConnectTimeoutMillis,
+            connectDurationMax: fixtureConnectTimeoutMillis,
           },
         })
         const awaitingInvalidation = yield* session
@@ -769,7 +849,7 @@ describe("ws resource fault injection", (it) => {
             name: "Ada" as never,
           })
           .pipe(Effect.flip)
-        expect(StdbTesting.ConnectionLostError.is(reducerError)).toBe(true)
+        expect(StdbInternal.ConnectionLostError.is(reducerError)).toBe(true)
       }).pipe(Effect.scoped),
   )
 
@@ -787,13 +867,13 @@ describe("ws resource fault injection", (it) => {
         })
 
         const error = yield* Effect.flip(
-          StdbTesting.makeScopedFromModulePlan({
+          StdbInternal.makeScopedFromModulePlan({
             plan,
             config: {
               builder: () => fault.builder,
               uri,
               databaseName,
-              connectTimeoutMillis: fixtureConnectTimeoutMillis,
+              connectDurationMax: fixtureConnectTimeoutMillis,
             },
           }).pipe(Effect.scoped),
         )
@@ -818,13 +898,13 @@ describe("ws resource fault injection", (it) => {
         })
 
         const error = yield* Effect.flip(
-          StdbTesting.makeScopedFromModulePlan({
+          StdbInternal.makeScopedFromModulePlan({
             plan,
             config: {
               builder: () => fault.builder,
               uri,
               databaseName,
-              connectTimeoutMillis: fixtureConnectTimeoutMillis,
+              connectDurationMax: fixtureConnectTimeoutMillis,
             },
           }).pipe(Effect.scoped),
         )

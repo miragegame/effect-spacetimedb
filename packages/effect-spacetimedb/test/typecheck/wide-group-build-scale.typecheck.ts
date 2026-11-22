@@ -7,7 +7,7 @@ const WideText = Stdb.string(Schema.String)
 const WideParams = Stdb.struct({ value: WideText })
 
 const reducer = <const Name extends string>(name: Name) =>
-  Stdb.StdbFn.reducer(name, { params: WideParams })
+  Stdb.Fn.reducer(name, { params: WideParams })
 
 // Exercises a single wide group at 59 endpoints — the widest per-group handler
 // record this fixture pins the type-instantiation budget against.
@@ -73,11 +73,9 @@ const wideReducers = [
   reducer("auth_width_58"),
 ] as const
 
-const WideGroup = Stdb.StdbGroup.make("ObservedWidth").add(...wideReducers)
+const WideGroup = Stdb.Group.make("ObservedWidth").add(...wideReducers)
 
-const WideModule = Stdb.StdbModule.make("wide_group_build_scale", {}).add(
-  WideGroup,
-)
+const WideModule = Stdb.Module.make("wide_group_build_scale", {}).add(WideGroup)
 
 const handler = () => Effect.void
 
@@ -146,7 +144,7 @@ const WideHandlers: Stdb.GroupCheckedHandlers<
   auth_width_58: handler,
 }
 
-const WideLive = Stdb.StdbBuilder.groupPrechecked(
+const WideLive = Stdb.Builder.groupPrechecked(
   WideModule,
   "ObservedWidth",
   WideHandlers,

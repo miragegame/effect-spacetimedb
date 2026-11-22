@@ -29,10 +29,16 @@ bounded to the current call.
 
 At the host boundary, each reducer, procedure, view, HTTP handler, and lifecycle
 handler is executed with the sync runner and `Scheduler.PreventSchedulerYield`.
-Anything that suspends the fiber surfaces as `ReducerAsyncNotAllowedError`.
-`Effect.sleep` fails with the same error in all modes. Guarded development runs
-also replace timer and microtask globals with throwing stubs so accidental use
-fails before a module is published.
+Anything that suspends the fiber surfaces as `HandlerAsyncNotAllowedDefect`.
+`Effect.sleep` dies with the same error in all modes, so no `catch` can swallow
+it. A zero-length sleep passes, so `retry` and `repeat` without a delay work.
+Guarded development runs also replace timer and microtask globals with throwing
+stubs so accidental use fails before a module is published.
+
+The body of `Tx.run` runs in a fiber of its own, because the host takes it as a
+synchronous callback. That fiber keeps its caller's context: services provided
+around the call, log annotations and the current span all carry over. The
+transaction's own services, its clock and its randomness replace the caller's.
 
 ## Determinism
 
@@ -68,21 +74,19 @@ their own status rows and cleanup process.
 
 ## Host Call Failures
 
-Host ABI calls can fail before user code gets a normal return value. Generic or
-unrecognized host failures surface as `StdbHostCallError` with the operation
-label and original cause. Four native SpaceTimeDB host errors are split out so
-handlers can branch without string-sniffing causes:
+Table reads and deletes return Effects with error type `never`. This includes
+index lookups and streams. A broken host operation or an undecodable stored row
+dies with `StdbTableOperationDefect`. Its `table`, `op` and `cause` identify
+the failing operation. A missing row is a normal result. `findOrFail` uses the
+error its caller supplies for that result.
 
-- `StdbUniqueAlreadyExistsError`
-- `StdbAutoIncOverflowError`
-- `StdbNoSuchRowError`
-- `StdbScheduleDelayTooLongError`
-
-Each carries `{ op, cause }`, matching `StdbHostCallError`. Branch on a specific
-tag only when a handler has a real recovery path, such as translating a unique
-constraint collision into a declared domain error. Otherwise let the error
-propagate so the host-boundary throw keeps the operation label and original
-cause.
+Inserts and updates can fail with `StdbUniqueAlreadyExistsError` on a unique
+constraint, `StdbAutoIncOverflowError` on a sequence, or
+`StdbScheduleDelayTooLongError` on a scheduled table. Updating a missing row
+fails with `StdbNoSuchRowError`. Each carries the operation and original cause.
+An oversized outbox insert can also fail with `OutboxRowTooLargeError`.
+Outside table operations, a host call such as a transaction can still fail with
+`StdbHostCallError`. A transaction propagates the typed errors from its body.
 
 The classifier uses native error class names rather than `instanceof`, because
 ordinary server runtime files cannot value-import `spacetimedb/server` without

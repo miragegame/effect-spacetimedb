@@ -9,6 +9,7 @@ import {
 } from "./connection-state.ts"
 import {
   type GeneratedWsBuilderLike,
+  type ManagedWsConnection,
   WsUnsupportedBuilderFeatureError,
 } from "./generated-ws-adapter.ts"
 import { disconnectMessage } from "./ws-resource-lifecycle.ts"
@@ -17,25 +18,19 @@ import { disconnectMessage } from "./ws-resource-lifecycle.ts"
  * Puts a connection into recovery for a drop or a failed reconnect attempt
  * the SDK reported together with the attempt it scheduled next, and answers
  * whether it did: only a connection whose recovery is enabled (its session
- * went live) recovers. Any other report ends the connection.
+ * went live) and that has not ended recovers. Any other report ends it.
  */
 export const beginReportedRecovery = (
   connection: object,
   error: Error | undefined,
   reconnectAttempt: number,
   reconnectDelayMillis: number | undefined,
-): boolean => {
-  const state = connectionStateFor(connection)
-  if (!state.isRecoverable()) {
-    return false
-  }
-  state.beginRecovery({
+): boolean =>
+  connectionStateFor(connection).beginRecovery({
     reason: disconnectMessage(error),
     reconnectAttempt,
     reconnectDelayMillis: reconnectDelayMillis ?? 0,
   })
-  return true
-}
 
 /**
  * Registers the native `onAutomaticReconnect` callback. The SDK fires it on
@@ -51,15 +46,16 @@ export const awaitReplayOnAutomaticReconnect = <
   RelationContext,
 >(
   builder: GeneratedWsBuilderLike<Module, ErrorContext, RelationContext>,
+  beginReplay: (
+    connection: ManagedWsConnection<Module, ErrorContext, RelationContext>,
+  ) => void,
 ): GeneratedWsBuilderLike<Module, ErrorContext, RelationContext> => {
   if (builder.onAutomaticReconnect == null) {
     throw new WsUnsupportedBuilderFeatureError({
       feature: "onAutomaticReconnect",
     })
   }
-  return builder.onAutomaticReconnect((connection) => {
-    connectionStateFor(connection).beginReplay()
-  })
+  return builder.onAutomaticReconnect(beginReplay)
 }
 
 /**
@@ -67,15 +63,16 @@ export const awaitReplayOnAutomaticReconnect = <
  * connection. The SDK reports each scheduled attempt with its delay and has
  * no handshake timeout of its own, so an attempt whose token exchange or
  * handshake never finishes would hold the session in recovery forever. An
- * attempt still unresolved `connectTimeoutMillis` after its scheduled start
+ * attempt still unresolved `connectDurationMax` after its scheduled start
  * ends the connection: it is invalidated and disconnected, so its owner (a
  * session supervisor) replaces it.
  */
 export const watchReconnectAttempts = (
   state: WsConnectionState,
-  connectTimeoutMillis: number,
+  connectMillis: number,
   endConnection: (message: string) => Effect.Effect<void>,
 ): Effect.Effect<void> => {
+  if (!Number.isFinite(connectMillis)) return Effect.void
   const watch = (snapshot: ConnectionRecoverySnapshot): Effect.Effect<void> => {
     const { recovery } = snapshot
     if (recovery.status === "connected") {
@@ -83,7 +80,7 @@ export const watchReconnectAttempts = (
         .awaitRecoveryAfter(snapshot.version)
         .pipe(Effect.flatMap(watch))
     }
-    const boundMillis = recovery.reconnectDelayMillis + connectTimeoutMillis
+    const boundMillis = recovery.reconnectDelayMillis + connectMillis
     // Attempt 0 is a socket found closed that the SDK never noticed.
     const overrun =
       recovery.reconnectAttempt > 0

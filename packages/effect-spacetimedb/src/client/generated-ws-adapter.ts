@@ -1,4 +1,6 @@
+import { finiteDelayMillis } from "./call-duration.ts"
 import * as Data from "effect/Data"
+import type * as Duration from "effect/Duration"
 import type * as Effect from "effect/Effect"
 import type { Identity } from "spacetimedb"
 import type { AnyModuleSpec } from "../contract/module.ts"
@@ -26,16 +28,15 @@ export type ManagedWsConnection<
  * Opts a WebSocket connection into the SDK's automatic reconnect: after an
  * established connection drops, the SDK reopens it with exponential, jittered
  * backoff and keeps the same connection object, client cache, subscription
- * handles and callbacks. The SDK raises `delayMillisMin` below 500 ms and
- * `delayMillisMax` below 1 s (or below `delayMillisMin`) to those floors; its
- * defaults are 1 s and 30 s. Both must be finite, non-negative numbers of
- * milliseconds: a client built with any other value throws a `TypeError`.
+ * handles and callbacks. The SDK raises `delayMin` below 500 ms and
+ * `delayMax` below 1 s (or below `delayMin`) to those floors; its
+ * defaults are 1 s and 30 s. Both must be finite, non-negative durations: a client built with any other value throws a `TypeError`.
  */
 export type WsAutomaticReconnect = {
   /** The delay before the first reconnect attempt, and the floor for every later one. */
-  readonly delayMillisMin?: number | undefined
+  readonly delayMin?: Duration.Input | undefined
   /** The cap on the delay between reconnect attempts. */
-  readonly delayMillisMax?: number | undefined
+  readonly delayMax?: Duration.Input | undefined
 }
 
 /**
@@ -43,7 +44,7 @@ export type WsAutomaticReconnect = {
  * Effect evaluated before every connection attempt. An Effect is run again for
  * each acquisition (every supervisor reconnect included) and, with automatic
  * reconnect, whenever the SDK refreshes a token that is close to expiry or was
- * rejected. An acquisition's evaluation is bounded by `connectTimeoutMillis`,
+ * rejected. An acquisition's evaluation is bounded by `connectDurationMax`,
  * and its failure (any `Error`, so any tagged error) fails that attempt with
  * `WsConnectError` carrying it as `cause`. A refresh is bounded by its
  * reconnect attempt, and one that fails, dies or overruns ends the session.
@@ -147,20 +148,32 @@ export type GeneratedWsBuilderConfig<
    * Opts into the SDK's automatic reconnect. The session then outlives a
    * dropped socket: it stays valid while the SDK reconnects, and is
    * invalidated only when the SDK gives up (no retry scheduled), the identity
-   * changes, or a reconnect attempt overruns `connectTimeoutMillis`.
+   * changes, or a reconnect attempt overruns `connectDurationMax`.
    */
   readonly automaticReconnect?: WsAutomaticReconnect | undefined
   /**
    * The longest connection acquisition may take, from resolving the token and
    * building the native connection to its connect callback. Acquisition still
    * unfinished at this bound fails with `WsConnectError` whose `cause` is
-   * `WsConnectTimeoutError`. Required: a native builder that never invokes a
-   * connect callback would otherwise strand acquisition forever. Session
-   * supervisors also use it as the bound on each whole activation attempt
+   * `WsConnectTimeoutError`. Defaults to `connectDurationMaxDefault`, 30
+   * seconds: a native builder can omit its connect callback. Use
+   * `Duration.infinity` to disable this deadline. Session supervisors also
+   * use it as the bound on each whole activation attempt
    * (connect, subscribe, setup). With automatic reconnect it also bounds each
    * reconnect attempt past its scheduled delay, and each token refresh.
    */
-  readonly connectTimeoutMillis: number
+  readonly connectDurationMax?: Duration.Input | undefined
+  /**
+   * The longest a reducer or procedure call may wait for its answer. An
+   * unanswered call on a socket that looks open is the only evidence a client
+   * gets of a half-open connection, so a call still unanswered at this bound
+   * fails with `ConnectionLostError` (outcome unknown), and the connection ends
+   * with it: every other call on it fails the same way, and a session supervisor
+   * replaces it. Defaults to `callDurationMaxDefault`, 30 seconds. Raise it for a
+   * procedure that may legitimately take longer, because one overrun costs the
+   * whole connection. Use `Duration.infinity` to disable the call deadline.
+   */
+  readonly callDurationMax?: Duration.Input | undefined
   readonly createWebSocket?: unknown | undefined
   readonly configureBuilder?:
     | ((
@@ -201,7 +214,7 @@ export type GeneratedConnectionClassLike = {
   readonly builder: () => unknown
 }
 
-export const generatedConnection = <Module extends AnyModuleSpec>(
+export const wsGeneratedConnection = <Module extends AnyModuleSpec>(
   _module: Module,
   connectionClass: GeneratedConnectionClassLike,
 ): GeneratedConnectionOf<Module> =>
@@ -215,7 +228,7 @@ type DiagnosticRecord<Keys extends string> = [Keys] extends [never]
       readonly [Key in Keys]: never
     }
 
-type ErrorContextFromBuilder<Builder> = IsAny<Builder> extends true
+export type ErrorContextFromBuilder<Builder> = IsAny<Builder> extends true
   ? never
   : Builder extends {
         readonly onConnectError: (
@@ -235,24 +248,25 @@ type ErrorContextFromBuilder<Builder> = IsAny<Builder> extends true
         : ErrorContext
       : never
 
-type ErrorContextFromConnectionInstance<Connection> = Connection extends {
-  readonly db: infer Db
-  readonly reducers: infer Reducers
-  readonly isActive: infer IsActive
-  readonly subscriptionBuilder: infer SubscriptionBuilder
-  readonly disconnect: infer Disconnect
-}
-  ? {
-      readonly db: Db
-      readonly reducers: Reducers
-      readonly isActive: IsActive
-      readonly subscriptionBuilder: SubscriptionBuilder
-      readonly disconnect: Disconnect
-      readonly event?: Error
-    }
-  : never
+export type ErrorContextFromConnectionInstance<Connection> =
+  Connection extends {
+    readonly db: infer Db
+    readonly reducers: infer Reducers
+    readonly isActive: infer IsActive
+    readonly subscriptionBuilder: infer SubscriptionBuilder
+    readonly disconnect: infer Disconnect
+  }
+    ? {
+        readonly db: Db
+        readonly reducers: Reducers
+        readonly isActive: IsActive
+        readonly subscriptionBuilder: SubscriptionBuilder
+        readonly disconnect: Disconnect
+        readonly event?: Error
+      }
+    : never
 
-type ErrorContextFromConnectionPrototype<ConnectionClass> =
+export type ErrorContextFromConnectionPrototype<ConnectionClass> =
   ConnectionClass extends {
     readonly prototype: infer Connection
   }
@@ -354,7 +368,8 @@ export const generatedConfig = <
   ...optionalProperty("lightMode", config.lightMode),
   ...optionalProperty("confirmedReads", config.confirmedReads),
   ...optionalProperty("automaticReconnect", config.automaticReconnect),
-  connectTimeoutMillis: config.connectTimeoutMillis,
+  ...optionalProperty("connectDurationMax", config.connectDurationMax),
+  ...optionalProperty("callDurationMax", config.callDurationMax),
   ...optionalProperty("createWebSocket", config.createWebSocket),
   ...optionalProperty("configureBuilder", config.configureBuilder),
   // The one sanctioned narrowing for the native-generated ↔ spec-typed seam: the
@@ -382,12 +397,31 @@ export type WsAttemptCredentials = {
   readonly refreshToken: (() => Promise<string>) | undefined
 }
 
-const nativeAutomaticReconnectOptions = (
-  options: WsAutomaticReconnect,
-): NativeAutomaticReconnectOptions => ({
-  ...optionalProperty("minDelayMs", options.delayMillisMin),
-  ...optionalProperty("maxDelayMs", options.delayMillisMax),
-})
+export const nativeAutomaticReconnectOptions = (
+  options: WsAutomaticReconnect | undefined,
+): NativeAutomaticReconnectOptions | undefined =>
+  options === undefined
+    ? undefined
+    : {
+        ...optionalProperty(
+          "minDelayMs",
+          options.delayMin === undefined
+            ? undefined
+            : finiteDelayMillis(
+                "WebSocket automaticReconnect.delayMin",
+                options.delayMin,
+              ),
+        ),
+        ...optionalProperty(
+          "maxDelayMs",
+          options.delayMax === undefined
+            ? undefined
+            : finiteDelayMillis(
+                "WebSocket automaticReconnect.delayMax",
+                options.delayMax,
+              ),
+        ),
+      }
 
 export const configureGeneratedWsBuilder = <
   Module extends AnyModuleSpec,
@@ -396,6 +430,9 @@ export const configureGeneratedWsBuilder = <
 >(
   config: GeneratedWsBuilderConfig<Module, ErrorContext, RelationContext>,
   credentials: WsAttemptCredentials,
+  automaticReconnect = nativeAutomaticReconnectOptions(
+    config.automaticReconnect,
+  ),
 ): GeneratedWsBuilderLike<Module, ErrorContext, RelationContext> => {
   let builder = config.builder()
   builder = builder.withUri(config.uri).withDatabaseName(config.databaseName)
@@ -435,15 +472,13 @@ export const configureGeneratedWsBuilder = <
     builder = builder.withWSFn(config.createWebSocket)
   }
 
-  if (config.automaticReconnect !== undefined) {
+  if (automaticReconnect !== undefined) {
     if (builder.withAutomaticReconnect == null) {
       throw new WsUnsupportedBuilderFeatureError({
         feature: "withAutomaticReconnect",
       })
     }
-    builder = builder.withAutomaticReconnect(
-      nativeAutomaticReconnectOptions(config.automaticReconnect),
-    )
+    builder = builder.withAutomaticReconnect(automaticReconnect)
     if (credentials.refreshToken !== undefined) {
       if (builder.withTokenProvider == null) {
         throw new WsUnsupportedBuilderFeatureError({

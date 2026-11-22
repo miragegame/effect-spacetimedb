@@ -1,3 +1,4 @@
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
@@ -116,24 +117,23 @@ const generatedLayer = Full.client.ws.layerGenerated({
   DbConnection,
   uri: "ws://localhost:3000",
   databaseName: "example",
-  connectTimeoutMillis: fixtureConnectTimeoutMillis,
+  connectDurationMax: fixtureConnectTimeoutMillis,
 })
 const generatedSession = Full.client.ws.tag<PublicGeneratedErrorContext>()
 void generatedLayer
 void generatedSession
-// @ts-expect-error a WebSocket connection must state its connect timeout.
+// Both time bounds are optional: each has a library default.
 void Full.client.ws.layerGenerated({
   DbConnection,
   uri: "ws://localhost:3000",
   databaseName: "example",
 })
-// @ts-expect-error an HTTP client must state its per-call bound.
 void Full.client.http.make({
   uri: "http://localhost:3000",
   databaseName: "full",
 })
 
-const PublicApiRequire = Stdb.StdbFn.reducer("public_api_require", {
+const PublicApiRequire = Stdb.Fn.reducer("public_api_require", {
   params: Stdb.struct({
     userId: UserId,
     tenantId: TenantId,
@@ -145,9 +145,9 @@ const PublicApiRequire = Stdb.StdbFn.reducer("public_api_require", {
   ],
 })
 
-const PublicApiFunctions = Stdb.StdbGroup.make("PublicApi")
+const PublicApiFunctions = Stdb.Group.make("PublicApi")
   .add(
-    Stdb.StdbFn.reducer("public_api_upsert", {
+    Stdb.Fn.reducer("public_api_upsert", {
       params: Stdb.struct({
         userId: UserId,
         tenantId: TenantId,
@@ -157,7 +157,7 @@ const PublicApiFunctions = Stdb.StdbGroup.make("PublicApi")
   )
   .add(PublicApiRequire)
   .add(
-    Stdb.StdbFn.procedure("public_api_get", {
+    Stdb.Fn.procedure("public_api_get", {
       params: Stdb.struct({
         userId: UserId,
       }),
@@ -175,7 +175,7 @@ type _arrayErrorsMatchMergedInstances = Assert<
   >
 >
 
-const PublicApiModule = Stdb.StdbModule.make("public_api", {})
+const PublicApiModule = Stdb.Module.make("public_api", {})
   .addTables(PublicApiTable)
   .add(PublicApiFunctions)
 
@@ -185,16 +185,16 @@ const UtilityHttpRequest = Schema.Struct({
 const UtilityHttpResponse = Schema.Struct({
   ok: Schema.Boolean,
 })
-const UtilityFunctions = Stdb.StdbGroup.make("Utility")
+const UtilityFunctions = Stdb.Group.make("Utility")
   .add(
-    Stdb.StdbFn.reducer("utility_reduce", {
+    Stdb.Fn.reducer("utility_reduce", {
       params: Stdb.struct({
         userId: UserId,
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("utility_read", {
+    Stdb.Fn.procedure("utility_read", {
       params: Stdb.struct({
         userId: UserId,
       }),
@@ -203,17 +203,17 @@ const UtilityFunctions = Stdb.StdbGroup.make("Utility")
     }),
   )
   .add(
-    Stdb.StdbFn.view("utility_view", {
+    Stdb.Fn.view("utility_view", {
       returns: PublicApiTable.row,
     }),
   )
-const UtilityHttp = Stdb.StdbHttpGroup.make("UtilityHttp").add(
-  Stdb.StdbHttp.post("utility_http", "/utility", {
+const UtilityHttp = Stdb.HttpGroup.make("UtilityHttp").add(
+  Stdb.Http.post("utility_http", "/utility", {
     request: UtilityHttpRequest,
     response: UtilityHttpResponse,
   }),
 )
-const UtilityModule = Stdb.StdbModule.make("public_api_utilities", {})
+const UtilityModule = Stdb.Module.make("public_api_utilities", {})
   .addTables(PublicApiTable)
   .add(UtilityFunctions, UtilityHttp)
 
@@ -281,7 +281,10 @@ type _UtilityViewSuccess = Assert<
   >
 >
 
-const utilityReduceDecl = Stdb.declOf(UtilityFunctions, "utility_reduce")
+const utilityReduceDecl = StdbInternal.declOf(
+  UtilityFunctions,
+  "utility_reduce",
+)
 type UtilityReduceDeclSpec = Stdb.DeclSpecOf<
   typeof UtilityFunctions,
   "utility_reduce"
@@ -292,20 +295,20 @@ type _UtilityReduceDeclParams = Assert<
     { readonly userId: string }
   >
 >
-const utilityReduceWireName = Stdb.wireNameForDecl(utilityReduceDecl)
-const utilityReduceModuleWireName = Stdb.wireNameOf(
+const utilityReduceWireName = StdbInternal.wireNameForDecl(utilityReduceDecl)
+const utilityReduceModuleWireName = StdbInternal.wireNameOf(
   UtilityModule.spec,
   "utility_reduce",
 )
-const encodedUtilityReduceArgs = Stdb.encodeCallArgs(
+const encodedUtilityReduceArgs = StdbInternal.encodeCallArgs(
   utilityReduceDecl.spec.params,
   { userId: "user_1" },
 )
 // @ts-expect-error declOf only accepts endpoint names from the selected group.
-Stdb.declOf(UtilityFunctions, "missing")
+StdbInternal.declOf(UtilityFunctions, "missing")
 // @ts-expect-error wireNameOf only accepts callable function keys, not views.
-Stdb.wireNameOf(UtilityModule.spec, "utility_view")
-const invalidEncodedUtilityReduceArgs = Stdb.encodeCallArgs(
+StdbInternal.wireNameOf(UtilityModule.spec, "utility_view")
+const invalidEncodedUtilityReduceArgs = StdbInternal.encodeCallArgs(
   utilityReduceDecl.spec.params,
   // @ts-expect-error encodeCallArgs validates values against the params type.
   {},
@@ -322,7 +325,7 @@ const utilityReduceHandler: Stdb.HandlerFor<
 > = Effect.fn(function* ({ userId }) {
   void userId
 })
-const UtilityLive = Stdb.StdbBuilder.group(UtilityModule, "Utility", {
+const UtilityLive = Stdb.Builder.group(UtilityModule, "Utility", {
   utility_reduce: utilityReduceHandler,
   utility_read: Effect.fn(function* ({ userId }) {
     return { id: userId, tenantId: "tenant_1", email: "user@example.com" }
@@ -331,7 +334,7 @@ const UtilityLive = Stdb.StdbBuilder.group(UtilityModule, "Utility", {
     return { id: "user_1", tenantId: "tenant_1", email: "user@example.com" }
   }),
 })
-const utilityHandlers = Stdb.StdbBuilder.handlersOf(UtilityModule, UtilityLive)
+const utilityHandlers = Stdb.Builder.handlersOf(UtilityModule, UtilityLive)
 void utilityHandlers.utility_reduce({ userId: "user_1" })
 
 type _projectBuilderAndSpecReturnEqual = Assert<
@@ -354,15 +357,16 @@ const utilityClient = utilityProject.client.http.make({
   databaseName: "public_api_utilities",
   callDurationMax: fixtureCallDurationMax,
 })
-const groupedUtilityReducerCall = utilityClient.Utility.reducers.utility_reduce(
-  {
+const groupedUtilityReducerCall =
+  utilityClient.groups.Utility.reducers.utility_reduce({
     userId: "user_1",
-  },
-)
+  })
 const groupedUtilityProcedureCall =
-  utilityClient.Utility.procedures.utility_read({ userId: "user_1" })
+  utilityClient.groups.Utility.procedures.utility_read({ userId: "user_1" })
 const groupedUtilityHttpCall =
-  utilityClient.UtilityHttp.httpHandlers.utility_http({ userId: "user_1" })
+  utilityClient.groups.UtilityHttp.httpHandlers.utility_http({
+    userId: "user_1",
+  })
 const scopedUtilityClient = utilityProject.client.http.group("Utility", {
   uri: "http://localhost:3000",
   databaseName: "public_api_utilities",
@@ -372,7 +376,7 @@ const scopedUtilityReducerCall = scopedUtilityClient.reducers.utility_reduce({
   userId: "user_1",
 })
 // @ts-expect-error utility_read belongs to Utility, not UtilityHttp.
-utilityClient.UtilityHttp.procedures.utility_read({ userId: "user_1" })
+utilityClient.groups.UtilityHttp.procedures.utility_read({ userId: "user_1" })
 // @ts-expect-error scoped Utility clients do not expose UtilityHttp handlers.
 scopedUtilityClient.httpHandlers.utility_http({ userId: "user_1" })
 const rootHandledHttpCall = utilityHttpCall.pipe(
@@ -420,10 +424,10 @@ void declaredHttpHandlerCall
 
 const { Db, Http, ProcedureCtx, Tx } = PublicApiModule
 
-const PublicApiLive = Stdb.StdbBuilder.group(PublicApiModule, "PublicApi", {
+const PublicApiLive = Stdb.Builder.group(PublicApiModule, "PublicApi", {
   public_api_upsert: Effect.fn(function* ({ userId, tenantId, email }) {
     const db = yield* Db
-    yield* db.public_api_user.id.replace({ id: userId, tenantId, email })
+    yield* db.public_api_user.id.update({ id: userId, tenantId, email })
   }),
   public_api_require: Effect.fn(function* ({ tenantId }) {
     return yield* PublicApiTenantErrors.TenantMissing.make({ tenantId })

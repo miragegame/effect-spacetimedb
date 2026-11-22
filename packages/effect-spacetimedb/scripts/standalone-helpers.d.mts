@@ -6,9 +6,10 @@ export type ModuleProject = {
   readonly version?: string
 }
 
-export const requiredSpacetimeCliVersion: "2.14.0"
+export const requiredSpacetimeCliVersion: "2.16.1"
 export const packageRoot: string
 export const exampleModuleRoot: string
+export const mountedModuleRoot: string
 export const exampleBundlePath: string
 export const exampleGeneratedClientDir: string
 export const exampleModuleProject: ModuleProject

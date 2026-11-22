@@ -7,14 +7,14 @@ import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { StdbDecodeError } from "../decode-error.ts"
 import { errorTypeId, hasErrorTypeId } from "../error-identity.ts"
-import type {
-  ConnectionInvalidation,
-  WsConnectionState,
+import {
+  type ConnectionInvalidation,
+  subscriptionInvalidated,
+  type WsConnectionState,
 } from "./connection-state.ts"
 import type { InsertEvent, RelationHandle } from "./relation.ts"
 import {
   type SubscriptionFailure,
-  SubscriptionInvalidatedError,
   SubscriptionTransportError,
 } from "./ws-subscription.ts"
 
@@ -127,11 +127,6 @@ const snapshotStreamBuffer = (
 ): Required<RuntimeSessionStreamBufferOptions> =>
   buffer === undefined ? SNAPSHOT_STREAM_BUFFER : normalizeStreamBuffer(buffer)
 
-const DELTA_STREAM_BUFFER = {
-  bufferSize: 1024,
-  strategy: "suspend",
-} satisfies Required<RuntimeSessionStreamBufferOptions>
-
 const tableOverflowOptions = (
   strategy: Required<RuntimeSessionStreamBufferOptions>["strategy"],
 ) =>
@@ -150,19 +145,16 @@ const tableOverflowOptions = (
 const deltaStreamBuffer = (
   buffer: SessionStreamBufferOptions | undefined,
 ): Required<RuntimeSessionStreamBufferOptions> => ({
-  bufferSize: buffer?.bufferSize ?? DELTA_STREAM_BUFFER.bufferSize,
-  strategy: buffer?.strategy ?? DELTA_STREAM_BUFFER.strategy,
+  bufferSize:
+    buffer?.bufferSize ??
+    (buffer?.strategy ? SNAPSHOT_STREAM_BUFFER.bufferSize : Infinity),
+  strategy: buffer?.strategy ?? "suspend",
 })
-
-const EVENT_TABLE_STREAM_BUFFER = {
-  bufferSize: 1024,
-  strategy: "suspend",
-} satisfies Required<RuntimeSessionStreamBufferOptions>
 
 const eventTableStreamBuffer = (
   buffer: EventTableStreamBufferOptions | undefined,
 ): Required<RuntimeSessionStreamBufferOptions> => ({
-  bufferSize: buffer?.bufferSize ?? EVENT_TABLE_STREAM_BUFFER.bufferSize,
+  bufferSize: buffer?.bufferSize ?? Infinity,
   strategy: "suspend",
 })
 
@@ -175,13 +167,6 @@ type CallbackRegistration<Args extends ReadonlyArray<unknown>, A> = {
   readonly unregister: (callback: (...args: Args) => void) => void
   readonly mapEvent: (...args: Args) => A
 }
-
-const invalidationFailure = (
-  invalidation: ConnectionInvalidation,
-): SubscriptionInvalidatedError =>
-  new SubscriptionInvalidatedError({
-    raw: invalidation.message,
-  })
 
 const registerCallback =
   <A, Args extends ReadonlyArray<unknown>>(
@@ -255,7 +240,7 @@ const sessionStream = <A>(options: {
       },
     }
     const onInvalidation = (invalidation: ConnectionInvalidation) => {
-      emit.fail(invalidationFailure(invalidation))
+      emit.fail(subscriptionInvalidated(invalidation))
     }
 
     return options.connectionState.assertActive().pipe(

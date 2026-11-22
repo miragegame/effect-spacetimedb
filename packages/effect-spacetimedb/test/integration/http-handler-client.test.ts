@@ -4,7 +4,7 @@ import * as HttpClient from "effect/http/HttpClient"
 import * as Schema from "effect/Schema"
 import { fixtureCallDurationMax } from "../helpers/transport-bounds"
 const { expect } = EffectVitest
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { FullModule, UserMissing } from "../fixtures/full-module"
 import {
   moduleFromSections,
@@ -65,7 +65,7 @@ describe("HTTP handler client", (it) => {
     "builds typed route requests with normalized URL and bearer token",
     () =>
       Effect.gen(function* () {
-        const client = StdbTesting.ClientHttp.make({
+        const client = StdbInternal.ClientHttp.make({
           module: FullModule,
           uri: "http://stdb.test/",
           databaseName: "full",
@@ -102,7 +102,7 @@ describe("HTTP handler client", (it) => {
 
   it.effect("requires an explicit concrete method for any handlers", () =>
     Effect.gen(function* () {
-      const client = StdbTesting.ClientHttp.make({
+      const client = StdbInternal.ClientHttp.make({
         module: AnyModule,
         uri: "http://stdb.test",
         databaseName: "any",
@@ -132,7 +132,7 @@ describe("HTTP handler client", (it) => {
     "passes raw route request bodies and options without JSON coercion",
     () =>
       Effect.gen(function* () {
-        const client = StdbTesting.ClientHttp.make({
+        const client = StdbInternal.ClientHttp.make({
           module: FullModule,
           uri: "http://stdb.test",
           databaseName: "full",
@@ -171,7 +171,7 @@ describe("HTTP handler client", (it) => {
 
   it.effect("allows any raw handlers to omit the body", () =>
     Effect.gen(function* () {
-      const client = StdbTesting.ClientHttp.make({
+      const client = StdbInternal.ClientHttp.make({
         module: AnyRawModule,
         uri: "http://stdb.test",
         databaseName: "any-raw",
@@ -199,7 +199,7 @@ describe("HTTP handler client", (it) => {
 
   it.effect("sends and accepts undefined typed route bodies as empty", () =>
     Effect.gen(function* () {
-      const client = StdbTesting.ClientHttp.make({
+      const client = StdbInternal.ClientHttp.make({
         module: EmptyBodyModule,
         uri: "http://stdb.test",
         databaseName: "empty",
@@ -228,7 +228,7 @@ describe("HTTP handler client", (it) => {
 
   it.effect("validates non-empty void route responses", () =>
     Effect.gen(function* () {
-      const client = StdbTesting.ClientHttp.make({
+      const client = StdbInternal.ClientHttp.make({
         module: EmptyBodyModule,
         uri: "http://stdb.test",
         databaseName: "empty",
@@ -243,7 +243,7 @@ describe("HTTP handler client", (it) => {
         ),
       )
 
-      expect(failure).toBeInstanceOf(StdbTesting.StdbDecodeError)
+      expect(failure).toBeInstanceOf(StdbInternal.StdbDecodeError)
       expect(failure.message).toContain("callable=void_response")
       expect(failure.message).toContain("op=decodeHttpResponse")
     }),
@@ -253,7 +253,7 @@ describe("HTTP handler client", (it) => {
     "adds callable context to typed route request decode failures",
     () =>
       Effect.gen(function* () {
-        const client = StdbTesting.ClientHttp.make({
+        const client = StdbInternal.ClientHttp.make({
           module: FullModule,
           uri: "http://stdb.test",
           databaseName: "full",
@@ -269,7 +269,7 @@ describe("HTTP handler client", (it) => {
           ),
         )
 
-        expect(failure).toBeInstanceOf(StdbTesting.StdbDecodeError)
+        expect(failure).toBeInstanceOf(StdbInternal.StdbDecodeError)
         expect(failure.message).toContain("callable=rotate_token")
         expect(failure.message).toContain("op=encodeHttpRequest")
       }),
@@ -277,7 +277,7 @@ describe("HTTP handler client", (it) => {
 
   it.effect("surfaces non-2xx route responses as opaque bodies", () =>
     Effect.gen(function* () {
-      const client = StdbTesting.ClientHttp.make({
+      const client = StdbInternal.ClientHttp.make({
         module: FullModule,
         uri: "http://stdb.test",
         databaseName: "full",
@@ -297,14 +297,14 @@ describe("HTTP handler client", (it) => {
         ),
       )
 
-      expect(failure).toBeInstanceOf(StdbTesting.RemoteRejectedError)
+      expect(failure).toBeInstanceOf(StdbInternal.RemoteRejectedError)
       expect(failure).toMatchObject({ raw: "missing", status: 404 })
     }),
   )
 
   it.effect("decodes status-matched declared route errors", () =>
     Effect.gen(function* () {
-      const client = StdbTesting.ClientHttp.make({
+      const client = StdbInternal.ClientHttp.make({
         module: FullModule,
         uri: "http://stdb.test",
         databaseName: "full",
@@ -314,9 +314,9 @@ describe("HTTP handler client", (it) => {
         userId: "user-1" as never,
       }).pipe(
         Effect.fail,
-        StdbTesting.encodeHttpResult(FullModule.httpHandlers.rotateToken),
+        StdbInternal.encodeHttpResult(FullModule.httpHandlers.rotateToken),
         Effect.runSyncExit,
-        StdbTesting.toHttpResponse,
+        StdbInternal.toHttpResponse,
       )
       const encoded = serverResponse.text()
 
@@ -337,7 +337,7 @@ describe("HTTP handler client", (it) => {
           () => Effect.succeed({ status: 409, body: encoded }),
         ),
       )
-      expect(mismatched).toBeInstanceOf(StdbTesting.RemoteRejectedError)
+      expect(mismatched).toBeInstanceOf(StdbInternal.RemoteRejectedError)
       expect(mismatched).toMatchObject({ status: 409, raw: encoded })
     }),
   )

@@ -3,7 +3,7 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { TestLayer } from "../helpers/test-layer"
 import { typeBuilder } from "../helpers/type-builder"
 
@@ -11,7 +11,7 @@ const { expect } = EffectVitest
 const describe = EffectVitest.layer(TestLayer)
 
 const { annotateValueTypeSchema, applyFieldOptions, tableFieldOptions } =
-  StdbTesting.ContractType
+  StdbInternal.ContractType
 
 /**
  * The exact global key and payload published `effect-spacetimedb@0.6.0` writes
@@ -82,9 +82,9 @@ describe("field options annotation version boundary", (it) => {
           tableFieldOptions(legacyAnnotatedValue()),
         )
 
-        expect(failure).toBeInstanceOf(Stdb.StdbFieldOptionsVersionError)
+        expect(failure).toBeInstanceOf(Stdb.StdbFieldOptionsVersionDefect)
         expect(
-          Predicate.isTagged("StdbFieldOptionsVersionError")(failure),
+          Predicate.isTagged("StdbFieldOptionsVersionDefect")(failure),
         ).toBe(true)
         const message = messageOf(failure)
         expect(message).toContain("annotation payload version 1")
@@ -99,10 +99,10 @@ describe("field options annotation version boundary", (it) => {
   it.effect("rejects a 0.6.0 annotation from struct field reads", () =>
     Effect.gen(function* () {
       const failure = yield* failureOf(() =>
-        StdbTesting.ContractType.structFieldOptions(legacyAnnotatedValue()),
+        StdbInternal.ContractType.structFieldOptions(legacyAnnotatedValue()),
       )
 
-      expect(failure).toBeInstanceOf(Stdb.StdbFieldOptionsVersionError)
+      expect(failure).toBeInstanceOf(Stdb.StdbFieldOptionsVersionDefect)
     }),
   )
 
@@ -114,7 +114,7 @@ describe("field options annotation version boundary", (it) => {
         }),
       )
 
-      expect(failure).toBeInstanceOf(Stdb.StdbFieldOptionsVersionError)
+      expect(failure).toBeInstanceOf(Stdb.StdbFieldOptionsVersionDefect)
       expect(messageOf(failure)).toContain("annotation payload version 1")
     }),
   )
@@ -123,7 +123,7 @@ describe("field options annotation version boundary", (it) => {
     "surfaces the version boundary when a struct lowers a 0.6.0 field to SATS",
     () =>
       Effect.gen(function* () {
-        // Lowering wraps authoring throws in StdbTypeLoweringError, which
+        // Lowering wraps authoring throws in StdbTypeLoweringDefect, which
         // interpolates the cause's message; the boundary stays visible.
         const failure = yield* failureOf(() => {
           typeBuilder(Stdb.struct({ legacy: legacyAnnotatedValue() }))
@@ -142,7 +142,7 @@ describe("field options annotation version boundary", (it) => {
         tableFieldOptions(futureAnnotatedValue()),
       )
 
-      expect(failure).toBeInstanceOf(Stdb.StdbFieldOptionsVersionError)
+      expect(failure).toBeInstanceOf(Stdb.StdbFieldOptionsVersionDefect)
       const message = messageOf(failure)
       expect(message).toContain("annotation payload version 99")
       expect(message).toContain("annotation payload version 2")
@@ -160,7 +160,7 @@ describe("field options annotation version boundary", (it) => {
         ),
       )
 
-      expect(failure).toBeInstanceOf(Stdb.StdbFieldOptionsVersionError)
+      expect(failure).toBeInstanceOf(Stdb.StdbFieldOptionsVersionDefect)
       expect(messageOf(failure)).toContain("annotation payload version unknown")
     }),
   )
@@ -236,12 +236,12 @@ describe("field options annotation version boundary", (it) => {
   it.effect("round-trips struct field optionality at the current version", () =>
     Effect.gen(function* () {
       expect(
-        StdbTesting.ContractType.structFieldOptions(
+        StdbInternal.ContractType.structFieldOptions(
           Stdb.optional(Stdb.string()),
         ),
       ).toStrictEqual({ optional: true })
       expect(
-        StdbTesting.ContractType.structFieldOptions(Stdb.string()),
+        StdbInternal.ContractType.structFieldOptions(Stdb.string()),
       ).toStrictEqual({ optional: false })
     }),
   )

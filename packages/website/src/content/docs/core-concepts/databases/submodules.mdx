@@ -1,0 +1,128 @@
+---
+draft: false
+title: Submodules
+description: Mount an Effect module or a native SDK library under a namespace in the same database.
+sidebar:
+  order: 5
+---
+
+A mount embeds a library's tables and functions in the parent database under a name prefix. A reducer can write to both modules in one transaction. If the reducer fails, both writes roll back. The namespace separates names only. It provides no security boundary. Table visibility and the checks in callable handlers still govern access.
+
+Use a **module mount** for a library with an effect-spacetimedb contract. Server table handles, handler capabilities and the client projection all know that contract. Use a **native mount** for an SDK module such as `@spacetimedb/files`. The server runs its native helpers with a scoped SDK context.
+
+## Declare the namespace
+
+This inventory library gives its caller both a table and a reusable operation. The parent pins the canonical namespace to `stock`.
+
+```ts title="inventory.ts"
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+
+const item = Stdb.table("storedItem", {
+  public: true,
+  columns: { id: Stdb.u32().primaryKey() },
+})
+
+export const Inventory = Stdb.Module.make("inventory")
+  .addTables(item)
+  .add(Stdb.Group.make("Stock").add(
+    Stdb.Fn.reducer("receiveItem", {
+      params: Stdb.struct({ id: Stdb.u32() }),
+    }),
+  ))
+
+export const receive = (id: number) =>
+  Effect.flatMap(Inventory.Db, (db) => db.storedItem.insert({ id }))
+```
+
+```ts title="warehouse.ts"
+import * as Stdb from "effect-spacetimedb"
+import { Inventory } from "./inventory"
+
+export const Warehouse = Stdb.Module.make("warehouse")
+  .mount("stockRoom", Inventory, { name: "stock" })
+```
+
+## Implement the mount
+
+Pass the same module object and its implementations to the parent's build. The parent compiles a fresh child schema. This keeps a library's registrations, schedules, outboxes and table policies local to that instance.
+
+```ts title="server.ts"
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+import { build } from "effect-spacetimedb/server-compiler"
+import { Inventory, receive } from "./inventory"
+import { Warehouse } from "./warehouse"
+
+const stock = Stdb.Builder.group(Inventory, "Stock", {
+  receiveItem: ({ id }) => receive(id).pipe(Effect.asVoid),
+})
+const compiled = build(Warehouse, [
+  Stdb.Builder.mount(Warehouse, "stockRoom", {
+    module: Inventory,
+    implementations: [stock],
+  }),
+])
+export const ModuleExports = compiled.exportGroup()
+export default compiled.schema
+```
+
+From a parent reducer or transaction, use `Db` for direct table access or `mounts.stockRoom.run` to reuse the library's operation. Both effects below use the caller's transaction.
+
+```ts
+import * as Effect from "effect/Effect"
+import { receive } from "./inventory"
+import { Warehouse } from "./warehouse"
+
+const writePair = (first: number, second: number) =>
+  Effect.gen(function* () {
+    const db = yield* Warehouse.Db
+    yield* db.stockRoom.storedItem.insert({ id: first })
+    yield* Warehouse.mounts.stockRoom.run(receive(second))
+  })
+```
+
+A procedure can run `Warehouse.withTx(writePair(1, 2))`. A root view can read `Warehouse.ReadonlyDb` or run an effect using `Inventory.From`. Running a library effect preserves handler-kind restrictions. A directly dispatched mounted view sees only its own tables through its database handles. To query a descendant from that view, run the descendant's `From` effect through its mount.
+
+For a native library, declare `mountNative<typeof import("…")>()("files")` in the contract. Import the library as a namespace in the server entry and pass it to `Builder.mountNative`. Both packages must resolve the same copy of `spacetimedb/server`. Choose the native alias for the current handler when calling a synchronous helper:
+
+| Where the helper runs | Parent accessor |
+| --- | --- |
+| Reducer or transaction body, including an HTTP transaction | `mounts.files.use(fn)` or `use("mutation", fn)` |
+| Procedure outside a transaction | `mounts.files.use("procedure", fn)` |
+| HTTP handler outside a transaction | `mounts.files.use("http", fn)` |
+
+The callback receives the scoped native context. Procedure and HTTP aliases open a transaction with `ctx.withTx` for table access. Views have no native alias. A native sender error becomes a typed sender failure, a known host error becomes a host failure, and other exceptions remain defects. See [File Storage](/core-concepts/tables/file-storage) for a complete native mount.
+
+## Read and call from a client
+
+Project the parent contract and generate bindings for the parent database. The same WebSocket session reaches every typed mount.
+
+| Operation | Inventory example |
+| --- | --- |
+| Call a reducer | `session.reducers.stockRoom.receiveItem({ id: 1 })` |
+| Subscribe to a table | `session.subscribe(projected.targets.tables.stockRoom.storedItem)` |
+| Read the subscribed cache | `session.cache.tables.stockRoom.storedItem.id.find(1)` |
+| Observe rows by path | `session.subscribeTableRef("stockRoom.storedItem")` or `session.streamTable("stockRoom.storedItem")` |
+| Call over HTTP | `projected.client.http.make(config).reducers.stockRoom.receiveItem({ id: 1 })` |
+
+Procedures follow the same namespace under `procedures` on both transports. Public event tables and views appear under `targets.eventTables` and `targets.views`. Filter a table target with `.where(...)` or pass a parameterized view its declared arguments. The root supervisor accepts the same targets. Private tables stay off the client, scheduled functions and outbox settle reducers stay off the callable facade, and native mounts have no typed Effect client. Their generated members remain accessible on the raw SDK connection. Table refs, streams and table, row and group atoms take dotted **accessor paths**, including every mount key.
+
+## Names and migrations
+
+Here `stockRoom.storedItem` is the TypeScript accessor path. The SQL relation is `"stock"."stored_item"`, and the reducer's wire name is `stock.receive_item`. Without an explicit `name`, the parent module's case policy determines the namespace. The library's own policy determines its members. Nested mounts apply those rules one segment at a time.
+
+To rename `stockRoom` to `inventory` while keeping rows and wire names, retain `{ name: "stock" }`, update your accessor paths and regenerate client bindings. Changing the canonical namespace drops the old tables and creates new ones. A data-preserving publish refuses to remove a table while it holds rows. Plan the data migration before publishing that change.
+
+## What belongs at the root
+
+- Declare environment variables on the root. Mounted aliases have no environment reader. Pass required values to library functions.
+- Declare lifecycle hooks on the root. The host rejects hooks inside a mount. The root hook can run a library effect.
+- Declare HTTP routes on the root. The host serves only the root router. Implement a root route with `mounts.stockRoom.run(...)` when the library owns the logic.
+- Declare inter-database receivers on the root. Receiver wire names are fixed and the CLI emits receiver bindings only for root reducers. A library may own an outbox and its local settle handler.
+
+The package supports four levels of mounts and one mount of a given Effect module per parent. These limits bound TypeScript inference and keep each mount associated with one compiled instance. The host accepts deeper graphs and repeated libraries.
+
+## Test the parent and child together
+
+Create one harness with `makeTestModuleHarness(Warehouse.spec)` and bind the parent's implementations with `bindCallables`. Inspect `harness.db.stockRoom.storedItem` after invoking a handler. Root and mounted writes commit or roll back together. For a native mount, pass `nativeMounts` with a factory keyed by the dotted accessor path. It receives the current parent context and returns the alias your native helper expects. Supply a stand-in only for mounts the test calls. See [Testing](/core-concepts/testing).

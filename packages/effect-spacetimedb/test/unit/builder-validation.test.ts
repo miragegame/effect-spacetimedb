@@ -1,3 +1,4 @@
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
@@ -16,9 +17,9 @@ class UnexpectedBuilderAssemblyError extends Data.TaggedError(
   readonly cause: unknown
 }> {}
 
-const BuilderErrorModule = Stdb.StdbModule.make("builder_errors", {}).add(
-  Stdb.StdbGroup.make("Runtime").add(
-    Stdb.StdbFn.reducer("ping", {
+const BuilderErrorModule = Stdb.Module.make("builder_errors", {}).add(
+  Stdb.Group.make("Runtime").add(
+    Stdb.Fn.reducer("ping", {
       params: Stdb.struct({}),
     }),
   ),
@@ -27,13 +28,13 @@ const BuilderErrorModule = Stdb.StdbModule.make("builder_errors", {}).add(
 type BuilderErrorModuleType = typeof BuilderErrorModule
 type RuntimeImpl = Stdb.GroupImpl<"Runtime", unknown>
 
-const groupFromRecord = Stdb.StdbBuilder.group as unknown as (
+const groupFromRecord = Stdb.Builder.group as unknown as (
   module: BuilderErrorModuleType,
   name: "Runtime",
   handlers: Record<string, unknown>,
 ) => RuntimeImpl
 
-const groupWithArbitraryNameFromRecord = Stdb.StdbBuilder.group as unknown as (
+const groupWithArbitraryNameFromRecord = Stdb.Builder.group as unknown as (
   module: BuilderErrorModuleType,
   name: string,
   handlers: Record<string, unknown>,
@@ -45,20 +46,19 @@ const buildFromImpls = build as unknown as (
 ) => unknown
 
 const buildIgnoringModuleBrandRaw = build as unknown as (
-  module: Stdb.AnyStdbModule,
+  module: Stdb.AnyModule,
   impls: ReadonlyArray<Stdb.AnyBuilderImpl>,
 ) => unknown
 
 const buildIgnoringModuleBrand = (
-  module: Stdb.AnyStdbModule,
+  module: Stdb.AnyModule,
   impls: ReadonlyArray<Stdb.AnyBuilderImpl>,
 ): void => {
   void buildIgnoringModuleBrandRaw(module, impls)
 }
 
-const handlersOfIgnoringModuleBrand = Stdb.StdbBuilder
-  .handlersOf as unknown as (
-  module: Stdb.AnyStdbModule,
+const handlersOfIgnoringModuleBrand = Stdb.Builder.handlersOf as unknown as (
+  module: Stdb.AnyModule,
   impl: Stdb.AnyBuilderImpl,
 ) => Readonly<Record<string, unknown>>
 
@@ -83,27 +83,27 @@ const tryAssembly = <A>(
   evaluate: () => A,
 ): Effect.Effect<
   A,
-  Stdb.StdbValidationError | UnexpectedBuilderAssemblyError
+  Stdb.StdbValidationDefect | UnexpectedBuilderAssemblyError
 > =>
   Effect.try({
     try: evaluate,
     catch: (error) =>
-      error instanceof Stdb.StdbValidationError
+      error instanceof Stdb.StdbValidationDefect
         ? error
         : new UnexpectedBuilderAssemblyError({ cause: error }),
   })
 
 describe("builder validation diagnostics", (it) => {
   it.effect(
-    "throws StdbValidationError with diagnostics for incomplete group assembly",
+    "throws StdbValidationDefect with diagnostics for incomplete group assembly",
     () =>
       Effect.gen(function* () {
         const failure = yield* tryAssembly(() =>
           groupFromRecord(BuilderErrorModule, "Runtime", {}),
         ).pipe(Effect.flip)
 
-        expect(failure).toBeInstanceOf(Stdb.StdbValidationError)
-        if (failure instanceof Stdb.StdbValidationError) {
+        expect(failure).toBeInstanceOf(Stdb.StdbValidationDefect)
+        if (failure instanceof Stdb.StdbValidationDefect) {
           expect(failure.message).toBe(
             "[EndpointNotHandled] groups.Runtime.ping: Group Runtime is missing a handler for endpoint ping. Available endpoints: ping",
           )
@@ -128,8 +128,8 @@ describe("builder validation diagnostics", (it) => {
           groupWithArbitraryNameFromRecord(BuilderErrorModule, "Missing", {}),
         ).pipe(Effect.flip)
 
-        expect(failure).toBeInstanceOf(Stdb.StdbValidationError)
-        if (failure instanceof Stdb.StdbValidationError) {
+        expect(failure).toBeInstanceOf(Stdb.StdbValidationDefect)
+        if (failure instanceof Stdb.StdbValidationDefect) {
           expect(failure.message).toBe(
             "[UnknownGroup] groups.Missing: Module builder_errors has no group named Missing. Available groups: Runtime",
           )
@@ -156,8 +156,8 @@ describe("builder validation diagnostics", (it) => {
           }),
         ).pipe(Effect.flip)
 
-        expect(failure).toBeInstanceOf(Stdb.StdbValidationError)
-        if (failure instanceof Stdb.StdbValidationError) {
+        expect(failure).toBeInstanceOf(Stdb.StdbValidationDefect)
+        if (failure instanceof Stdb.StdbValidationDefect) {
           expect(failure.message).toBe(
             "[UnknownEndpoint] groups.Runtime.missing: Group Runtime has no endpoint named missing. Available endpoints: ping",
           )
@@ -176,13 +176,9 @@ describe("builder validation diagnostics", (it) => {
 
   it.effect("recovers builder assembly failures with Effect.catchTag", () =>
     Effect.gen(function* () {
-      const runtimeLive = Stdb.StdbBuilder.group(
-        BuilderErrorModule,
-        "Runtime",
-        {
-          ping: pingHandler,
-        },
-      )
+      const runtimeLive = Stdb.Builder.group(BuilderErrorModule, "Runtime", {
+        ping: pingHandler,
+      })
 
       const recovered = yield* tryAssembly(() =>
         buildFromImpls(BuilderErrorModule, [runtimeLive, runtimeLive]),
@@ -190,7 +186,7 @@ describe("builder validation diagnostics", (it) => {
         Effect.as({
           recovered: false as const,
         }),
-        Effect.catchTag("StdbValidationError", (error) =>
+        Effect.catchTag("StdbValidationDefect", (error) =>
           Effect.succeed({
             recovered: true as const,
             code: error.diagnostics[0]?.code,
@@ -211,37 +207,31 @@ describe("builder validation diagnostics", (it) => {
   )
 
   it("builds first-class lifecycle impls with legacy group-equivalent lifecycle definitions", () => {
-    const LegacyLifecycleModule = Stdb.StdbModule.make(
-      "legacy_lifecycle",
-      {},
-    ).add(
-      Stdb.StdbGroup.make(LegacyLifecycleGroupName).add(
-        Stdb.StdbFn.clientDisconnected(),
+    const LegacyLifecycleModule = Stdb.Module.make("legacy_lifecycle", {}).add(
+      Stdb.Group.make(LegacyLifecycleGroupName).add(
+        Stdb.Fn.clientDisconnected(),
       ),
     )
-    const FirstClassLifecycleModule = Stdb.StdbModule.make(
+    const FirstClassLifecycleModule = Stdb.Module.make(
       "first_class_lifecycle",
       {},
     )
 
-    const legacyImpl = Stdb.StdbBuilder.group(
+    const legacyImpl = Stdb.Builder.group(
       LegacyLifecycleModule,
       LegacyLifecycleGroupName,
       {
         clientDisconnected: lifecycleHandler,
       },
     )
-    const firstClassImpl = Stdb.StdbBuilder.lifecycle(
-      FirstClassLifecycleModule,
-      {
-        clientDisconnected: lifecycleHandler,
-      },
-    )
+    const firstClassImpl = Stdb.Builder.lifecycle(FirstClassLifecycleModule, {
+      clientDisconnected: lifecycleHandler,
+    })
 
-    const legacyPlan = Stdb.StdbBuilder.plan(LegacyLifecycleModule, [
+    const legacyPlan = StdbInternal.planModule(LegacyLifecycleModule, [
       legacyImpl,
     ])
-    const firstClassPlan = Stdb.StdbBuilder.plan(FirstClassLifecycleModule, [
+    const firstClassPlan = StdbInternal.planModule(FirstClassLifecycleModule, [
       firstClassImpl,
     ])
 
@@ -252,27 +242,27 @@ describe("builder validation diagnostics", (it) => {
   })
 
   it("builds declared lifecycle hooks implemented by first-class lifecycle impls", () => {
-    const CallableGroup = Stdb.StdbGroup.make("Callable").add(
-      Stdb.StdbFn.reducer("ping", {
+    const CallableGroup = Stdb.Group.make("Callable").add(
+      Stdb.Fn.reducer("ping", {
         params: Stdb.struct({}),
       }),
     )
-    const DeclaredLifecycleModule = Stdb.StdbModule.make(
+    const DeclaredLifecycleModule = Stdb.Module.make(
       "declared_first_class_lifecycle",
       {
         lifecycle: {
-          clientDisconnected: Stdb.StdbFn.clientDisconnected(),
+          clientDisconnected: Stdb.Fn.clientDisconnected(),
         },
       },
     ).add(CallableGroup)
-    const callableLive = Stdb.StdbBuilder.group(
+    const callableLive = Stdb.Builder.group(
       DeclaredLifecycleModule,
       "Callable",
       {
         ping: pingHandler,
       },
     )
-    const lifecycleLive = Stdb.StdbBuilder.lifecycle(DeclaredLifecycleModule, {
+    const lifecycleLive = Stdb.Builder.lifecycle(DeclaredLifecycleModule, {
       clientDisconnected: lifecycleHandler,
     })
 
@@ -292,21 +282,21 @@ describe("builder validation diagnostics", (it) => {
 
   it.effect("rejects declared lifecycle hooks with no implementation", () =>
     Effect.gen(function* () {
-      const DeclaredOnlyModule = Stdb.StdbModule.make(
+      const DeclaredOnlyModule = Stdb.Module.make(
         "declared_lifecycle_without_impl",
         {
           lifecycle: {
-            init: Stdb.StdbFn.init(),
+            init: Stdb.Fn.init(),
           },
         },
       )
 
       const failure = yield* tryAssembly(() =>
-        Stdb.StdbBuilder.plan(DeclaredOnlyModule, []),
+        StdbInternal.planModule(DeclaredOnlyModule, []),
       ).pipe(Effect.flip)
 
-      expect(failure).toBeInstanceOf(Stdb.StdbValidationError)
-      if (failure instanceof Stdb.StdbValidationError) {
+      expect(failure).toBeInstanceOf(Stdb.StdbValidationDefect)
+      if (failure instanceof Stdb.StdbValidationDefect) {
         expect(failure.diagnostics).toEqual([
           expect.objectContaining({
             code: "LifecycleNotImplemented",
@@ -320,19 +310,19 @@ describe("builder validation diagnostics", (it) => {
   )
 
   it("builds declared lifecycle hooks implemented only by legacy grouped endpoints", () => {
-    const DeclaredGroupedLifecycleModule = Stdb.StdbModule.make(
+    const DeclaredGroupedLifecycleModule = Stdb.Module.make(
       "declared_grouped_lifecycle",
       {
         lifecycle: {
-          clientDisconnected: Stdb.StdbFn.clientDisconnected(),
+          clientDisconnected: Stdb.Fn.clientDisconnected(),
         },
       },
     ).add(
-      Stdb.StdbGroup.make(LegacyLifecycleGroupName).add(
-        Stdb.StdbFn.clientDisconnected(),
+      Stdb.Group.make(LegacyLifecycleGroupName).add(
+        Stdb.Fn.clientDisconnected(),
       ),
     )
-    const legacyLive = Stdb.StdbBuilder.group(
+    const legacyLive = Stdb.Builder.group(
       DeclaredGroupedLifecycleModule,
       LegacyLifecycleGroupName,
       {
@@ -340,7 +330,7 @@ describe("builder validation diagnostics", (it) => {
       },
     )
 
-    const plan = Stdb.StdbBuilder.plan(DeclaredGroupedLifecycleModule, [
+    const plan = StdbInternal.planModule(DeclaredGroupedLifecycleModule, [
       legacyLive,
     ])
 
@@ -355,21 +345,21 @@ describe("builder validation diagnostics", (it) => {
 
   it.effect("rejects lifecycle declaration key/hook mismatches", () =>
     Effect.gen(function* () {
-      const MismatchedLifecycleModule = Stdb.StdbModule.make(
+      const MismatchedLifecycleModule = Stdb.Module.make(
         "declared_lifecycle_mismatch",
         {
           lifecycle: {
-            clientDisconnected: Stdb.StdbFn.init(),
+            clientDisconnected: Stdb.Fn.init(),
           },
         } as never,
       )
 
       const failure = yield* tryAssembly(() =>
-        Stdb.StdbBuilder.plan(MismatchedLifecycleModule, []),
+        StdbInternal.planModule(MismatchedLifecycleModule, []),
       ).pipe(Effect.flip)
 
-      expect(failure).toBeInstanceOf(Stdb.StdbValidationError)
-      if (failure instanceof Stdb.StdbValidationError) {
+      expect(failure).toBeInstanceOf(Stdb.StdbValidationDefect)
+      if (failure instanceof Stdb.StdbValidationDefect) {
         expect(failure.diagnostics).toEqual([
           expect.objectContaining({
             code: "LifecycleHookMismatch",
@@ -384,9 +374,9 @@ describe("builder validation diagnostics", (it) => {
   )
 
   it("keeps empty lifecycle declarations empty", () => {
-    const EmptyModule = Stdb.StdbModule.make("empty_lifecycle", {})
-    const emptyLifecycle = Stdb.StdbBuilder.lifecycle(EmptyModule, {})
-    const plan = Stdb.StdbBuilder.plan(EmptyModule, [emptyLifecycle])
+    const EmptyModule = Stdb.Module.make("empty_lifecycle", {})
+    const emptyLifecycle = Stdb.Builder.lifecycle(EmptyModule, {})
+    const plan = StdbInternal.planModule(EmptyModule, [emptyLifecycle])
 
     expect(EmptyModule.spec.lifecycle).toEqual({})
     expect(plan.module.lifecycle).toEqual({})
@@ -397,22 +387,22 @@ describe("builder validation diagnostics", (it) => {
     "rejects duplicate lifecycle hooks across legacy groups and first-class impls",
     () =>
       Effect.gen(function* () {
-        const DuplicateLifecycleSurfaceModule = Stdb.StdbModule.make(
+        const DuplicateLifecycleSurfaceModule = Stdb.Module.make(
           "duplicate_lifecycle_surface",
           {},
         ).add(
-          Stdb.StdbGroup.make(LegacyLifecycleGroupName).add(
-            Stdb.StdbFn.clientDisconnected(),
+          Stdb.Group.make(LegacyLifecycleGroupName).add(
+            Stdb.Fn.clientDisconnected(),
           ),
         )
-        const legacyLive = Stdb.StdbBuilder.group(
+        const legacyLive = Stdb.Builder.group(
           DuplicateLifecycleSurfaceModule,
           LegacyLifecycleGroupName,
           {
             clientDisconnected: lifecycleHandler,
           },
         )
-        const firstClassLive = Stdb.StdbBuilder.lifecycle(
+        const firstClassLive = Stdb.Builder.lifecycle(
           DuplicateLifecycleSurfaceModule,
           {
             clientDisconnected: lifecycleHandler,
@@ -426,11 +416,11 @@ describe("builder validation diagnostics", (it) => {
           ] as const,
           Effect.fn(function* (impls) {
             const failure = yield* tryAssembly(() =>
-              Stdb.StdbBuilder.plan(DuplicateLifecycleSurfaceModule, impls),
+              StdbInternal.planModule(DuplicateLifecycleSurfaceModule, impls),
             ).pipe(Effect.flip)
 
-            expect(failure).toBeInstanceOf(Stdb.StdbValidationError)
-            if (failure instanceof Stdb.StdbValidationError) {
+            expect(failure).toBeInstanceOf(Stdb.StdbValidationDefect)
+            if (failure instanceof Stdb.StdbValidationDefect) {
               expect(failure.diagnostics).toEqual([
                 expect.objectContaining({
                   code: "DuplicateCallableName",
@@ -451,47 +441,36 @@ describe("builder validation diagnostics", (it) => {
     () =>
       Effect.try({
         try: () => {
-          const LifecycleHttpModule = Stdb.StdbModule.make(
+          const LifecycleHttpModule = Stdb.Module.make(
             "lifecycle_http_groups",
             {},
           ).add(
-            Stdb.StdbGroup.make("Calls")
-              .add(Stdb.StdbFn.reducer("refreshToken", {}))
+            Stdb.Group.make("Calls")
+              .add(Stdb.Fn.reducer("refreshToken", {}))
               .add(
-                Stdb.StdbFn.procedure("readToken", {
+                Stdb.Fn.procedure("readToken", {
                   returns: Stdb.unit(),
                 }),
               ),
-            Stdb.StdbHttpGroup.make("Webhooks").add(
-              Stdb.StdbHttp.post("rotateToken", "/server-tokens/rotate", {
+            Stdb.HttpGroup.make("Webhooks").add(
+              Stdb.Http.post("rotateToken", "/server-tokens/rotate", {
                 request: LifecycleHttpRequest,
                 response: LifecycleHttpResponse,
               }),
             ),
           )
-          const callsLive = Stdb.StdbBuilder.group(
-            LifecycleHttpModule,
-            "Calls",
-            {
-              refreshToken: lifecycleHandler,
-              readToken: lifecycleHandler,
-            },
-          )
-          const httpLive = Stdb.StdbBuilder.group(
-            LifecycleHttpModule,
-            "Webhooks",
-            {
-              rotateToken: lifecycleHttpHandler,
-            },
-          )
-          const lifecycleLive = Stdb.StdbBuilder.lifecycle(
-            LifecycleHttpModule,
-            {
-              init: lifecycleHandler,
-            },
-          )
+          const callsLive = Stdb.Builder.group(LifecycleHttpModule, "Calls", {
+            refreshToken: lifecycleHandler,
+            readToken: lifecycleHandler,
+          })
+          const httpLive = Stdb.Builder.group(LifecycleHttpModule, "Webhooks", {
+            rotateToken: lifecycleHttpHandler,
+          })
+          const lifecycleLive = Stdb.Builder.lifecycle(LifecycleHttpModule, {
+            init: lifecycleHandler,
+          })
 
-          const plan = Stdb.StdbBuilder.plan(LifecycleHttpModule, [
+          const plan = StdbInternal.planModule(LifecycleHttpModule, [
             callsLive,
             httpLive,
             lifecycleLive,
@@ -511,8 +490,12 @@ describe("builder validation diagnostics", (it) => {
             databaseName: "lifecycle_http_groups",
             callDurationMax: fixtureCallDurationMax,
           })
-          expect(Object.keys(client.Calls.reducers)).toEqual(["refreshToken"])
-          expect(Object.keys(client.Calls.procedures)).toEqual(["readToken"])
+          expect(Object.keys(client.groups.Calls.reducers)).toEqual([
+            "refreshToken",
+          ])
+          expect(Object.keys(client.groups.Calls.procedures)).toEqual([
+            "readToken",
+          ])
           expect(() => Stdb.toHttpApi(plan.module)).not.toThrow()
         },
         catch: (error) => new UnexpectedBuilderAssemblyError({ cause: error }),
@@ -523,14 +506,14 @@ describe("builder validation diagnostics", (it) => {
     "rejects duplicate first-class lifecycle hook implementations",
     () =>
       Effect.gen(function* () {
-        const DuplicateLifecycleModule = Stdb.StdbModule.make(
+        const DuplicateLifecycleModule = Stdb.Module.make(
           "duplicate_lifecycle_impl",
           {},
         )
-        const first = Stdb.StdbBuilder.lifecycle(DuplicateLifecycleModule, {
+        const first = Stdb.Builder.lifecycle(DuplicateLifecycleModule, {
           init: lifecycleHandler,
         })
-        const second = Stdb.StdbBuilder.lifecycle(DuplicateLifecycleModule, {
+        const second = Stdb.Builder.lifecycle(DuplicateLifecycleModule, {
           init: lifecycleHandler,
         })
 
@@ -538,8 +521,8 @@ describe("builder validation diagnostics", (it) => {
           build(DuplicateLifecycleModule, [first, second]),
         ).pipe(Effect.flip)
 
-        expect(failure).toBeInstanceOf(Stdb.StdbValidationError)
-        if (failure instanceof Stdb.StdbValidationError) {
+        expect(failure).toBeInstanceOf(Stdb.StdbValidationDefect)
+        if (failure instanceof Stdb.StdbValidationDefect) {
           expect(failure.diagnostics).toEqual([
             expect.objectContaining({
               code: "DuplicateCallableName",
@@ -554,30 +537,26 @@ describe("builder validation diagnostics", (it) => {
 
   it.effect("rejects group impls built for another module", () =>
     Effect.gen(function* () {
-      const OtherBuilderErrorModule = Stdb.StdbModule.make(
+      const OtherBuilderErrorModule = Stdb.Module.make(
         "other_builder_errors",
         {},
       ).add(
-        Stdb.StdbGroup.make("Runtime").add(
-          Stdb.StdbFn.reducer("ping", {
+        Stdb.Group.make("Runtime").add(
+          Stdb.Fn.reducer("ping", {
             params: Stdb.struct({}),
           }),
         ),
       )
-      const runtimeLive = Stdb.StdbBuilder.group(
-        BuilderErrorModule,
-        "Runtime",
-        {
-          ping: pingHandler,
-        },
-      )
+      const runtimeLive = Stdb.Builder.group(BuilderErrorModule, "Runtime", {
+        ping: pingHandler,
+      })
 
       const failure = yield* tryAssembly(() =>
         buildIgnoringModuleBrand(OtherBuilderErrorModule, [runtimeLive]),
       ).pipe(Effect.flip)
 
-      expect(failure).toBeInstanceOf(Stdb.StdbValidationError)
-      if (failure instanceof Stdb.StdbValidationError) {
+      expect(failure).toBeInstanceOf(Stdb.StdbValidationDefect)
+      if (failure instanceof Stdb.StdbValidationDefect) {
         expect(failure.diagnostics).toEqual([
           expect.objectContaining({
             code: "UndeclaredGroupImpl",
@@ -592,32 +571,22 @@ describe("builder validation diagnostics", (it) => {
   )
 
   it("exposes sealed group handlers through a typed accessor", () => {
-    const HandlerAccessorModule = Stdb.StdbModule.make(
-      "handler_accessor",
-      {},
-    ).add(
-      Stdb.StdbGroup.make("Runtime").add(
-        Stdb.StdbFn.reducer("ping", {
+    const HandlerAccessorModule = Stdb.Module.make("handler_accessor", {}).add(
+      Stdb.Group.make("Runtime").add(
+        Stdb.Fn.reducer("ping", {
           params: Stdb.struct({}),
         }),
-        Stdb.StdbFn.procedure("value", {
+        Stdb.Fn.procedure("value", {
           returns: Stdb.string(),
         }),
       ),
     )
-    const runtimeLive = Stdb.StdbBuilder.group(
-      HandlerAccessorModule,
-      "Runtime",
-      {
-        ping: pingHandler,
-        value: valueHandler,
-      },
-    )
+    const runtimeLive = Stdb.Builder.group(HandlerAccessorModule, "Runtime", {
+      ping: pingHandler,
+      value: valueHandler,
+    })
 
-    const handlers = Stdb.StdbBuilder.handlersOf(
-      HandlerAccessorModule,
-      runtimeLive,
-    )
+    const handlers = Stdb.Builder.handlersOf(HandlerAccessorModule, runtimeLive)
 
     expect(Object.keys(handlers)).toEqual(["ping", "value"])
     expect(handlers.ping).toBe(pingHandler)
@@ -625,15 +594,15 @@ describe("builder validation diagnostics", (it) => {
   })
 
   it("exposes sealed lifecycle handlers through a typed accessor", () => {
-    const HandlerAccessorModule = Stdb.StdbModule.make(
+    const HandlerAccessorModule = Stdb.Module.make(
       "lifecycle_handler_accessor",
       {},
     )
-    const lifecycleLive = Stdb.StdbBuilder.lifecycle(HandlerAccessorModule, {
+    const lifecycleLive = Stdb.Builder.lifecycle(HandlerAccessorModule, {
       init: lifecycleHandler,
     })
 
-    const handlers = Stdb.StdbBuilder.handlersOf(
+    const handlers = Stdb.Builder.handlersOf(
       HandlerAccessorModule,
       lifecycleLive,
     )
@@ -648,14 +617,14 @@ describe("builder validation diagnostics", (it) => {
         build(BuilderErrorModule, [{ groupName: "Runtime" }] as never),
       ).pipe(Effect.flip)
 
-      expect(failure).toBeInstanceOf(Stdb.StdbValidationError)
-      if (failure instanceof Stdb.StdbValidationError) {
+      expect(failure).toBeInstanceOf(Stdb.StdbValidationDefect)
+      if (failure instanceof Stdb.StdbValidationDefect) {
         expect(failure.diagnostics).toEqual([
           expect.objectContaining({
             code: "InvalidBuilderImpl",
             path: ["groups", "Runtime"],
             message:
-              "Builder implementation at impls[0] must be created by StdbBuilder.group, StdbBuilder.groupChecked, StdbBuilder.groupPrechecked, or StdbBuilder.lifecycle",
+              "Builder implementation at impls[0] must be created by Builder.group, Builder.groupPrechecked, or Builder.lifecycle",
             severity: "error",
           }),
         ])
@@ -666,19 +635,19 @@ describe("builder validation diagnostics", (it) => {
   it.effect("rejects unbranded impl values through handlersOf", () =>
     Effect.gen(function* () {
       const failure = yield* tryAssembly(() =>
-        Stdb.StdbBuilder.handlersOf(BuilderErrorModule, {
+        Stdb.Builder.handlersOf(BuilderErrorModule, {
           groupName: "Runtime",
         } as never),
       ).pipe(Effect.flip)
 
-      expect(failure).toBeInstanceOf(Stdb.StdbValidationError)
-      if (failure instanceof Stdb.StdbValidationError) {
+      expect(failure).toBeInstanceOf(Stdb.StdbValidationDefect)
+      if (failure instanceof Stdb.StdbValidationDefect) {
         expect(failure.diagnostics).toEqual([
           expect.objectContaining({
             code: "InvalidBuilderImpl",
             path: ["groups", "Runtime"],
             message:
-              "Builder implementation at impls[0] must be created by StdbBuilder.group, StdbBuilder.groupChecked, StdbBuilder.groupPrechecked, or StdbBuilder.lifecycle",
+              "Builder implementation at impls[0] must be created by Builder.group, Builder.groupPrechecked, or Builder.lifecycle",
             severity: "error",
           }),
         ])
@@ -688,30 +657,26 @@ describe("builder validation diagnostics", (it) => {
 
   it.effect("rejects handlersOf impls built for another module", () =>
     Effect.gen(function* () {
-      const OtherBuilderErrorModule = Stdb.StdbModule.make(
+      const OtherBuilderErrorModule = Stdb.Module.make(
         "handler_accessor_other_builder_errors",
         {},
       ).add(
-        Stdb.StdbGroup.make("Runtime").add(
-          Stdb.StdbFn.reducer("ping", {
+        Stdb.Group.make("Runtime").add(
+          Stdb.Fn.reducer("ping", {
             params: Stdb.struct({}),
           }),
         ),
       )
-      const runtimeLive = Stdb.StdbBuilder.group(
-        BuilderErrorModule,
-        "Runtime",
-        {
-          ping: pingHandler,
-        },
-      )
+      const runtimeLive = Stdb.Builder.group(BuilderErrorModule, "Runtime", {
+        ping: pingHandler,
+      })
 
       const failure = yield* tryAssembly(() =>
         handlersOfIgnoringModuleBrand(OtherBuilderErrorModule, runtimeLive),
       ).pipe(Effect.flip)
 
-      expect(failure).toBeInstanceOf(Stdb.StdbValidationError)
-      if (failure instanceof Stdb.StdbValidationError) {
+      expect(failure).toBeInstanceOf(Stdb.StdbValidationDefect)
+      if (failure instanceof Stdb.StdbValidationDefect) {
         expect(failure.diagnostics).toEqual([
           expect.objectContaining({
             code: "UndeclaredGroupImpl",
@@ -727,9 +692,9 @@ describe("builder validation diagnostics", (it) => {
 
   it.effect("rejects lifecycle impls built for another module", () =>
     Effect.gen(function* () {
-      const OwnerModule = Stdb.StdbModule.make("lifecycle_owner", {})
-      const TargetModule = Stdb.StdbModule.make("lifecycle_target", {})
-      const lifecycleLive = Stdb.StdbBuilder.lifecycle(OwnerModule, {
+      const OwnerModule = Stdb.Module.make("lifecycle_owner", {})
+      const TargetModule = Stdb.Module.make("lifecycle_target", {})
+      const lifecycleLive = Stdb.Builder.lifecycle(OwnerModule, {
         init: lifecycleHandler,
       })
 
@@ -737,8 +702,8 @@ describe("builder validation diagnostics", (it) => {
         buildIgnoringModuleBrand(TargetModule, [lifecycleLive]),
       ).pipe(Effect.flip)
 
-      expect(failure).toBeInstanceOf(Stdb.StdbValidationError)
-      if (failure instanceof Stdb.StdbValidationError) {
+      expect(failure).toBeInstanceOf(Stdb.StdbValidationDefect)
+      if (failure instanceof Stdb.StdbValidationDefect) {
         expect(failure.diagnostics).toEqual([
           expect.objectContaining({
             code: "UndeclaredLifecycleImpl",

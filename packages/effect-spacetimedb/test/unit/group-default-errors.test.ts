@@ -31,15 +31,15 @@ describe("group default errors", (it) => {
     () => {
       const GroupErrors = Stdb.errors(GroupFailure, SharedFailure)
       const EndpointErrors = Stdb.errors(SharedFailure, EndpointFailure)
-      const FromDefault = Stdb.StdbFn.reducer("fromDefault", {
+      const FromDefault = Stdb.Fn.reducer("fromDefault", {
         params: Stdb.struct({}),
       })
-      const WithEndpointErrors = Stdb.StdbFn.procedure("withEndpointErrors", {
+      const WithEndpointErrors = Stdb.Fn.procedure("withEndpointErrors", {
         params: Stdb.struct({}),
         returns: Stdb.unit(),
         errors: EndpointErrors,
       })
-      const Group = Stdb.StdbGroup.make("Calls", {
+      const Group = Stdb.Group.make("Calls", {
         errors: GroupErrors,
       }).add(FromDefault, WithEndpointErrors)
 
@@ -49,9 +49,7 @@ describe("group default errors", (it) => {
         EndpointFailure,
       ])
 
-      const spec = Stdb.StdbModule.make("group_default_errors", {}).add(
-        Group,
-      ).spec
+      const spec = Stdb.Module.make("group_default_errors", {}).add(Group).spec
       expect(spec.reducers.fromDefault.errors.errors).toEqual([
         GroupFailure,
         SharedFailure,
@@ -69,25 +67,25 @@ describe("group default errors", (it) => {
   it.effect(
     "excludes raw HTTP members and composes merged group defaults",
     () => {
-      const Left = Stdb.StdbHttpGroup.make("Http", {
+      const Left = Stdb.HttpGroup.make("Http", {
         errors: Stdb.errors(GroupFailure),
       }).add(
-        Stdb.StdbHttp.get("rawStatus", "/raw"),
-        Stdb.StdbHttp.post("leftTyped", "/left", {
+        Stdb.Http.get("rawStatus", "/raw"),
+        Stdb.Http.post("leftTyped", "/left", {
           request: Schema.Struct({}),
           response: Schema.Struct({}),
         }),
       )
-      const Right = Stdb.StdbHttpGroup.make("Nested", {
+      const Right = Stdb.HttpGroup.make("Nested", {
         errors: Stdb.errors(EndpointFailure),
       }).add(
-        Stdb.StdbHttp.post("rightTyped", "/right", {
+        Stdb.Http.post("rightTyped", "/right", {
           request: Schema.Struct({}),
           response: Schema.Struct({}),
         }),
       )
 
-      const spec = Stdb.StdbModule.make("http_group_default_errors", {}).add(
+      const spec = Stdb.Module.make("http_group_default_errors", {}).add(
         Left.merge(Right),
       ).spec
 
@@ -117,22 +115,22 @@ describe("group default errors", (it) => {
       "Collision",
       {},
     ) {}
-    const Module = Stdb.StdbModule.make("group_error_collision", {}).add(
-      Stdb.StdbGroup.make("Calls", {
+    const Module = Stdb.Module.make("group_error_collision", {}).add(
+      Stdb.Group.make("Calls", {
         errors: Stdb.errors(GroupCollision),
       }).add(
-        Stdb.StdbFn.reducer("collides", {
+        Stdb.Fn.reducer("collides", {
           errors: Stdb.errors(EndpointCollision),
         }),
       ),
     )
 
-    expect(() => Module.spec).toThrowError(Stdb.StdbValidationError)
+    expect(() => Module.spec).toThrowError(Stdb.StdbValidationDefect)
     try {
       void Module.spec
     } catch (error) {
-      expect(error).toBeInstanceOf(Stdb.StdbValidationError)
-      if (error instanceof Stdb.StdbValidationError) {
+      expect(error).toBeInstanceOf(Stdb.StdbValidationDefect)
+      if (error instanceof Stdb.StdbValidationDefect) {
         expect(error.diagnostics).toEqual([
           expect.objectContaining({
             code: "DuplicateDeclaredErrorTag",
@@ -150,23 +148,23 @@ describe("group default errors", (it) => {
       "StatuslessFailure",
       {},
     ) {}
-    const Module = Stdb.StdbModule.make("http_group_status_validation", {}).add(
-      Stdb.StdbHttpGroup.make("Http", {
+    const Module = Stdb.Module.make("http_group_status_validation", {}).add(
+      Stdb.HttpGroup.make("Http", {
         errors: Stdb.errors(StatuslessFailure),
       }).add(
-        Stdb.StdbHttp.post("typedStatus", "/typed", {
+        Stdb.Http.post("typedStatus", "/typed", {
           request: Schema.Struct({}),
           response: Schema.Struct({}),
         }),
       ),
     )
 
-    expect(() => Module.spec).toThrowError(Stdb.StdbValidationError)
+    expect(() => Module.spec).toThrowError(Stdb.StdbValidationDefect)
     try {
       void Module.spec
     } catch (error) {
-      expect(error).toBeInstanceOf(Stdb.StdbValidationError)
-      if (error instanceof Stdb.StdbValidationError) {
+      expect(error).toBeInstanceOf(Stdb.StdbValidationDefect)
+      if (error instanceof Stdb.StdbValidationDefect) {
         expect(error.diagnostics).toEqual([
           expect.objectContaining({
             code: "HttpRouteMissingErrorStatus",

@@ -8,13 +8,17 @@
   },
   "scripts": {
     "build": "spacetime build --module-path .",
-    "generate-client": "spacetime generate --lang typescript --js-path ./dist/bundle.js --out-dir ./src/generated --yes",
+    "generate-client": "spacetime generate --lang typescript --js-path ./dist/bundle.js --out-dir ./src/module_bindings --yes",
     "smoke:client-import": "bun -e 'await import(\"./src/client.ts\")'",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "effect": "4.1.1",
-    "effect-spacetimedb": "workspace:*"
+    "effect-spacetimedb": "0.9.0",
+    "spacetimedb": "2.16.1"
+  },
+  "patchedDependencies": {
+    "spacetimedb@2.16.1": "patches/spacetimedb@2.16.1.patch"
   },
   "devDependencies": {
     "@types/node": "22.10.1",

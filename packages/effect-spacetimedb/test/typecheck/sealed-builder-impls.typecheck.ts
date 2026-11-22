@@ -13,9 +13,9 @@ class ExternalProbe extends Context.Service<
   "effect-spacetimedb/test/typecheck/sealed-builder-impls.typecheck/ExternalProbe",
 ) {}
 
-const SealedModule = Stdb.StdbModule.make("sealed_builder_impls", {}).add(
-  Stdb.StdbGroup.make("Runtime").add(
-    Stdb.StdbFn.reducer("ping", {
+const SealedModule = Stdb.Module.make("sealed_builder_impls", {}).add(
+  Stdb.Group.make("Runtime").add(
+    Stdb.Fn.reducer("ping", {
       params: Stdb.struct({}),
     }),
   ),
@@ -23,7 +23,7 @@ const SealedModule = Stdb.StdbModule.make("sealed_builder_impls", {}).add(
 
 const { Db } = SealedModule
 
-const RuntimeLive = Stdb.StdbBuilder.group(SealedModule, "Runtime", {
+const RuntimeLive = Stdb.Builder.group(SealedModule, "Runtime", {
   ping: () =>
     Effect.gen(function* () {
       const probe = yield* ExternalProbe
@@ -64,7 +64,7 @@ const CheckedServerContextOnly: Stdb.GroupCheckedHandlers<
     }),
 }
 
-const CheckedServerContextOnlyLive = Stdb.StdbBuilder.groupPrechecked(
+const CheckedServerContextOnlyLive = Stdb.Builder.groupPrechecked(
   SealedModule,
   "Runtime",
   {
@@ -98,12 +98,10 @@ const CheckedMixedExternal: Stdb.GroupCheckedHandlers<
 }
 void CheckedMixedExternal
 
-const LifecycleGroupModule = Stdb.StdbModule.make(
+const LifecycleGroupModule = Stdb.Module.make(
   "sealed_lifecycle_group_impls",
   {},
-).add(
-  Stdb.StdbGroup.make("LifecycleRuntime").add(Stdb.StdbFn.clientDisconnected()),
-)
+).add(Stdb.Group.make("LifecycleRuntime").add(Stdb.Fn.clientDisconnected()))
 
 const { Db: LifecycleDb } = LifecycleGroupModule
 
@@ -118,7 +116,7 @@ const CheckedLifecycleServerContextOnly: Stdb.GroupCheckedHandlers<
     }),
 }
 
-const CheckedLifecycleServerContextOnlyLive = Stdb.StdbBuilder.groupPrechecked(
+const CheckedLifecycleServerContextOnlyLive = Stdb.Builder.groupPrechecked(
   LifecycleGroupModule,
   "LifecycleRuntime",
   {

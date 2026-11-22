@@ -28,7 +28,7 @@ Scheduled tables default to `public: false`, the same local default as
 spread directly into the table shape after the injected scheduler columns; there
 is no `{ data }` wrapper in the table row shape.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -38,17 +38,18 @@ const reminderSchedule = Stdb.scheduledTable("reminderSchedule", {
   },
 })
 
-const Reminders = Stdb.StdbGroup.make("Reminders").add(
-  Stdb.StdbFn.scheduledProcedure("reminderFire", {
+const Reminders = Stdb.Group.make("Reminders").add(
+  Stdb.Fn.scheduledProcedure("reminderFire", {
     table: reminderSchedule,
   }),
 )
 
-const Module = Stdb.StdbModule.make("app")
+const Module = Stdb.Module.make("app")
   .addTables(reminderSchedule)
   .add(Reminders)
+const { Db } = Module
 
-const RemindersLive = Stdb.StdbBuilder.group(Module, "Reminders", {
+const RemindersLive = Stdb.Builder.group(Module, "Reminders", {
   reminderFire: Effect.fn(function* ({ data }) {
     yield* Effect.log(`reminder: ${data.note}`)
   }),
@@ -59,6 +60,7 @@ To seed schedule rows inside a reducer or transaction body, use the generated
 `.schedule(...)` helper. It fills the auto-increment sentinel for you.
 
 ```ts
+const db = yield* Db
 yield* db.reminderSchedule.schedule({
   scheduledAt: Stdb.ScheduleAt.interval("5 minutes"),
   note: "wake up",
@@ -76,8 +78,8 @@ express: handle a `Time` row, insert the next one with
 `Stdb.ScheduleAt.nextCron(cron, ctx.timestamp)` or `at(...)`, then return.
 
 `Stdb.scheduledTable(...)` creates the reserved
-`scheduled_id`/`scheduled_at` columns and `StdbFn.scheduledReducer(...)` or
-`StdbFn.scheduledProcedure(...)` binds exactly one typed handler to the table.
+`scheduled_id`/`scheduled_at` columns and `Fn.scheduledReducer(...)` or
+`Fn.scheduledProcedure(...)` binds exactly one typed handler to the table.
 The binding is registered on the function, which is where SpacetimeDB expects
 it; the table itself carries no schedule option.
 
@@ -152,7 +154,7 @@ requiring opaque value types. Cross-object module invariants are validated by
 | Duplicate table/view relation names | No | `DuplicateRelationName` |
 | Duplicate reducer/procedure/HTTP/view/lifecycle export names | No | `DuplicateCallableName` |
 | Reserved `__http_router__` export name | No | `DuplicateCallableName` |
-| Non-canonical declared names under canonical naming policy | No | `NonCanonicalDeclaredName` |
+| Declared names without a representable generated accessor | No | `NonCanonicalDeclaredName` |
 | Reserved declared error tags | No | `ReservedDeclaredErrorTag` |
 | Duplicate declared error tags | No | `DuplicateDeclaredErrorTag` |
 | String literal authored/generated-client tag collisions | No | `LiteralTagCollision` |

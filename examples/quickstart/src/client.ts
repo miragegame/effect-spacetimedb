@@ -1,6 +1,6 @@
 import * as Stdb from "effect-spacetimedb"
 import type * as StdbClient from "effect-spacetimedb/client"
-import { type MessageId, QuickstartModule } from "./contract.ts"
+import { QuickstartModule } from "./contract.ts"
 
 const Quickstart = Stdb.project(QuickstartModule.spec)
 
@@ -8,7 +8,7 @@ const Quickstart = Stdb.project(QuickstartModule.spec)
 const clientExample = (
   http: StdbClient.ProjectedHttpClient<typeof QuickstartModule.spec>,
   session: StdbClient.WsSession<typeof QuickstartModule.spec>,
-  messageId: MessageId,
+  messageId: string,
 ) => ({
   call: http.procedures.messageList({}),
   subscribe: session.subscribe(

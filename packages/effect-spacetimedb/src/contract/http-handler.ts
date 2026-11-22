@@ -92,7 +92,6 @@ type RawHttpHandlerDefineOptions<
   readonly response?: undefined
   readonly errors?: undefined
   readonly successStatus?: number
-  readonly public?: never
 }
 
 type TypedHttpHandlerDefineOptions<
@@ -108,7 +107,6 @@ type TypedHttpHandlerDefineOptions<
   readonly response: Response
   readonly errors?: Errors
   readonly successStatus?: number
-  readonly public?: never
 }
 
 export function define<

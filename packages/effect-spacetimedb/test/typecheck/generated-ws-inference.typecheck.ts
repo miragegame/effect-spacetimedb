@@ -27,7 +27,7 @@ declare const REMOTE_MODULE: RemoteModule<
   GeneratedSchema,
   GeneratedReducers,
   GeneratedProcedures,
-  "2.14.0"
+  "2.16.1"
 >
 type ErrorContext = ErrorContextInterface<typeof REMOTE_MODULE>
 
@@ -60,7 +60,7 @@ void Full.client.ws.layerGenerated({
   DbConnection,
   uri: "ws://localhost:3000",
   databaseName: "generated-inference",
-  connectTimeoutMillis: fixtureConnectTimeoutMillis,
+  connectDurationMax: fixtureConnectTimeoutMillis,
 })
 
 declare const ErasedDbConnection: {
@@ -73,12 +73,12 @@ void Full.client.ws.layerGenerated({
   databaseName: "generated-erased",
 })
 
-const FullFacade = StdbClient.generatedConnection(
+const FullFacade = StdbClient.wsGeneratedConnection(
   FullModule,
   ErasedDbConnection,
 )
 
-// @ts-expect-error the real committed artifact is erased and must go through generatedConnection.
+// @ts-expect-error the real committed artifact is erased and must go through wsGeneratedConnection.
 void Full.client.ws.layerGenerated({
   DbConnection: RawArtifactDbConnection,
   uri: "ws://localhost:3000",
@@ -101,7 +101,7 @@ const generatedScoped = Full.client.ws.scopedGenerated({
   DbConnection: FullFacade,
   uri: "ws://localhost:3000",
   databaseName: "generated-facade",
-  connectTimeoutMillis: fixtureConnectTimeoutMillis,
+  connectDurationMax: fixtureConnectTimeoutMillis,
 })
 type _generatedScopedFailureIsTyped = Assert<
   IsEqual<
@@ -120,7 +120,7 @@ const rawScoped = StdbClient.wsScoped({
     builder: () => FullBuilder,
     uri: "ws://localhost:3000",
     databaseName: "raw-scoped",
-    connectTimeoutMillis: fixtureConnectTimeoutMillis,
+    connectDurationMax: fixtureConnectTimeoutMillis,
   },
 })
 type _rawScopedFailureUnchanged = Assert<
@@ -133,7 +133,7 @@ const rawLayer = StdbClient.wsLayer({
     builder: () => FullBuilder,
     uri: "ws://localhost:3000",
     databaseName: "raw-layer",
-    connectTimeoutMillis: fixtureConnectTimeoutMillis,
+    connectDurationMax: fixtureConnectTimeoutMillis,
   },
 })
 type _rawLayerFailureUnchanged = Assert<
@@ -159,7 +159,7 @@ void Minimal.client.ws.layerGenerated({
   DbConnection,
   uri: "ws://localhost:3000",
   databaseName: "native-minimal",
-  connectTimeoutMillis: fixtureConnectTimeoutMillis,
+  connectDurationMax: fixtureConnectTimeoutMillis,
 })
 
 void StdbClient.wsScopedGenerated({
@@ -190,7 +190,7 @@ const configForFreeModule = <Module extends Stdb.AnyModuleSpec>(
     DbConnection: FullFacade,
     uri: "ws://localhost:3000",
     databaseName: "free-module-config",
-    connectTimeoutMillis: fixtureConnectTimeoutMillis,
+    connectDurationMax: fixtureConnectTimeoutMillis,
   }
 }
 void configForFreeModule

@@ -77,13 +77,13 @@ const tableWithColumns = (tableName: string, columnNames: readonly string[]) =>
 
 const addReducers = (
   names: readonly string[],
-): Stdb.StdbGroup<string, Stdb.AnyCallableDecl> => {
-  let group: Stdb.StdbGroup<string, Stdb.AnyCallableDecl> =
-    Stdb.StdbGroup.make("Endpoints")
+): Stdb.Group<string, Stdb.AnyCallableDecl> => {
+  let group: Stdb.Group<string, Stdb.AnyCallableDecl> =
+    Stdb.Group.make("Endpoints")
 
   for (const name of names) {
     group = group.add(
-      Stdb.StdbFn.reducer(name, {
+      Stdb.Fn.reducer(name, {
         params: Stdb.struct({}),
       }),
     )
@@ -94,13 +94,13 @@ const addReducers = (
 
 const addProcedures = (
   names: readonly string[],
-): Stdb.StdbGroup<string, Stdb.AnyCallableDecl> => {
-  let group: Stdb.StdbGroup<string, Stdb.AnyCallableDecl> =
-    Stdb.StdbGroup.make("Endpoints")
+): Stdb.Group<string, Stdb.AnyCallableDecl> => {
+  let group: Stdb.Group<string, Stdb.AnyCallableDecl> =
+    Stdb.Group.make("Endpoints")
 
   for (const name of names) {
     group = group.add(
-      Stdb.StdbFn.procedure(name, {
+      Stdb.Fn.procedure(name, {
         params: Stdb.struct({}),
         returns: Stdb.unit(),
       }),
@@ -114,10 +114,8 @@ describe("builder canonicalization", () => {
   it("reducer declaration order is name-canonicalized", () => {
     FastCheck.assert(
       FastCheck.property(endpointNameList, (names) => {
-        const forward = Stdb.StdbModule.make("m", {}).add(
-          addReducers(names),
-        ).spec
-        const backward = Stdb.StdbModule.make("m", {}).add(
+        const forward = Stdb.Module.make("m", {}).add(addReducers(names)).spec
+        const backward = Stdb.Module.make("m", {}).add(
           addReducers(reversed(names)),
         ).spec
 
@@ -133,10 +131,8 @@ describe("builder canonicalization", () => {
   it("procedure declaration order is name-canonicalized", () => {
     FastCheck.assert(
       FastCheck.property(endpointNameList, (names) => {
-        const forward = Stdb.StdbModule.make("m", {}).add(
-          addProcedures(names),
-        ).spec
-        const backward = Stdb.StdbModule.make("m", {}).add(
+        const forward = Stdb.Module.make("m", {}).add(addProcedures(names)).spec
+        const backward = Stdb.Module.make("m", {}).add(
           addProcedures(reversed(names)),
         ).spec
 
@@ -173,10 +169,10 @@ describe("builder canonicalization", () => {
             tableWithColumns(name, ["id"]),
           )
           const reversedTables = reversed(tables)
-          const forwardModule = Stdb.StdbModule.make("m", {}).addTables(
+          const forwardModule = Stdb.Module.make("m", {}).addTables(
             ...tables,
           ).spec
-          const backwardModule = Stdb.StdbModule.make("m", {}).addTables(
+          const backwardModule = Stdb.Module.make("m", {}).addTables(
             ...reversedTables,
           ).spec
 

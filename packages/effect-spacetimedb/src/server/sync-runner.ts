@@ -6,7 +6,7 @@ import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Scheduler from "effect/Scheduler"
-import { RuntimeLayerAsyncError } from "./services.ts"
+import { RuntimeLayerAsyncDefect } from "./services.ts"
 
 export type SyncRunner<RuntimeR = never> = {
   readonly runSync: <A, E, R extends RuntimeR>(
@@ -15,13 +15,6 @@ export type SyncRunner<RuntimeR = never> = {
   readonly runSyncExit: <A, E, R extends RuntimeR>(
     effect: Effect.Effect<A, E, R>,
   ) => Exit.Exit<A, E>
-  readonly dispose?: Effect.Effect<void>
-}
-
-export type SyncRunnerLike<RuntimeR = never> = {
-  readonly runSync: SyncRunner<RuntimeR>["runSync"]
-  readonly runSyncExit: SyncRunner<RuntimeR>["runSyncExit"]
-  readonly dispose?: SyncRunner<RuntimeR>["dispose"]
 }
 
 const preventSchedulerYield = <A, E, R>(
@@ -35,9 +28,9 @@ const preventSchedulerYield = <A, E, R>(
     EffectRuntime.provideService(Scheduler.PreventSchedulerYield, true),
   )
 
-export const isSyncRunnerLike = <RuntimeR>(
+export const isSyncRunner = <RuntimeR>(
   value: unknown,
-): value is SyncRunnerLike<RuntimeR> =>
+): value is SyncRunner<RuntimeR> =>
   typeof value === "object" &&
   value !== null &&
   "runSync" in value &&
@@ -46,19 +39,13 @@ export const isSyncRunnerLike = <RuntimeR>(
   typeof value.runSyncExit === "function"
 
 export const from = <R>(
-  value: SyncRunner<R> | Context.Context<R> | SyncRunnerLike<R>,
+  value: SyncRunner<R> | Context.Context<R>,
 ): SyncRunner<R> => {
-  if (isSyncRunnerLike<R>(value)) {
-    return value.dispose != null
-      ? {
-          runSync: value.runSync,
-          runSyncExit: value.runSyncExit,
-          dispose: value.dispose,
-        }
-      : {
-          runSync: value.runSync,
-          runSyncExit: value.runSyncExit,
-        }
+  if (isSyncRunner<R>(value)) {
+    return {
+      runSync: value.runSync,
+      runSyncExit: value.runSyncExit,
+    }
   }
 
   const context = Context.add(
@@ -100,7 +87,7 @@ export const fromManagedRuntime = <R>(
       .find(Cause.isAsyncFiberError)
     if (asyncFailure != null) {
       asyncFailure.fiber.interruptUnsafe()
-      throw new RuntimeLayerAsyncError()
+      throw new RuntimeLayerAsyncDefect()
     }
 
     return exit.cause
@@ -121,7 +108,6 @@ export const fromManagedRuntime = <R>(
       }
       return runtime.runSyncExit(preventSchedulerYield(effect))
     },
-    dispose: runtime.disposeEffect,
   }
 }
 

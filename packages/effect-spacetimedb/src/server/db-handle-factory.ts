@@ -10,7 +10,7 @@ import type { OutboxSendContext } from "./outbox.ts"
 import {
   type EffectDbView,
   type ReadonlyEffectDbView,
-  StdbDbSchemaMismatchError,
+  StdbDbSchemaMismatchDefect,
 } from "./services.ts"
 
 import {
@@ -95,13 +95,43 @@ export const makeDbHandleFactory = <Module extends AnyModuleSpec>(
     } satisfies TablePlan
   })
 
+  const children = Object.entries(module.mounts ?? {}).flatMap(
+    ([key, mount]) =>
+      mount.kind === "moduleMount"
+        ? [[key, makeDbHandleFactory(mount.module, options)] as const]
+        : [],
+  )
+  const mountHandles = (
+    handle: Record<string, unknown>,
+    raw: Record<PropertyKey, unknown>,
+    readonly: boolean,
+    send?: OutboxSendContext,
+  ) => {
+    for (const [key, factory] of children) {
+      let nested: unknown
+      Object.defineProperty(handle, key, {
+        enumerable: true,
+        get: () => {
+          // A host-dispatched submodule receives its own tables in db and
+          // exposes descendants through its mutation aliases.
+          const alias = asRecord(asRecord(asRecord(send).as)[key])
+          const db = (raw[key] ?? alias.db) as Parameters<
+            typeof factory.readonly
+          >[0]
+          return (nested ??= readonly
+            ? factory.readonly(db)
+            : factory.readwrite(db, send))
+        },
+      })
+    }
+  }
   const validateRawDb = (rawDb: unknown): Record<PropertyKey, unknown> => {
     const dbRecord = asRecord(rawDb)
     const missingTables = tablePlans
       .map((tablePlan) => tablePlan.key)
       .filter((tableKey) => !(tableKey in dbRecord))
     if (missingTables.length > 0) {
-      throw new StdbDbSchemaMismatchError({
+      throw new StdbDbSchemaMismatchDefect({
         module: module.name,
         missingTables,
         availableTables: Object.keys(dbRecord),
@@ -137,6 +167,7 @@ export const makeDbHandleFactory = <Module extends AnyModuleSpec>(
         })
       }
 
+      mountHandles(dbHandle, dbRecord, false, send)
       return Object.freeze(dbHandle) as EffectDbView<Module>
     },
     readonly: (rawDb) => {
@@ -157,6 +188,7 @@ export const makeDbHandleFactory = <Module extends AnyModuleSpec>(
         })
       }
 
+      mountHandles(dbHandle, dbRecord, true)
       return Object.freeze(dbHandle) as ReadonlyEffectDbView<Module>
     },
   }

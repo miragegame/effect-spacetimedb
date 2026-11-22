@@ -6,7 +6,7 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 const { expect } = EffectVitest
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { rawHttpHandlerSpec } from "../helpers/module-builders"
 import { transform } from "../helpers/schema-transform"
 import { TestLayer } from "../helpers/test-layer"
@@ -61,9 +61,9 @@ describe("HTTP handler response projection", (it) => {
       const spec = httpHandler({ method: "post", path: "/raw" })
       const raw = new Stdb.SyncResponse("ok", { status: 202 })
       const response = Effect.succeed(raw).pipe(
-        StdbTesting.encodeHttpResult(spec),
+        StdbInternal.encodeHttpResult(spec),
         Effect.runSyncExit,
-        StdbTesting.toHttpResponse,
+        StdbInternal.toHttpResponse,
       )
 
       expect(response).toBe(raw)
@@ -78,9 +78,9 @@ describe("HTTP handler response projection", (it) => {
       const response = Effect.succeed({
         status: 200,
       } as unknown as Stdb.SyncResponse).pipe(
-        StdbTesting.encodeHttpResult(spec),
+        StdbInternal.encodeHttpResult(spec),
         Effect.runSyncExit,
-        StdbTesting.toHttpResponse,
+        StdbInternal.toHttpResponse,
       )
 
       expect(response.status).toBe(500)
@@ -100,9 +100,9 @@ describe("HTTP handler response projection", (it) => {
       })
 
       const response = Effect.succeed({ count: 42n }).pipe(
-        StdbTesting.encodeHttpResult(spec),
+        StdbInternal.encodeHttpResult(spec),
         Effect.runSyncExit,
-        StdbTesting.toHttpResponse,
+        StdbInternal.toHttpResponse,
       )
 
       expect(response.status).toBe(200)
@@ -122,9 +122,9 @@ describe("HTTP handler response projection", (it) => {
       })
 
       const response = Effect.void.pipe(
-        StdbTesting.encodeHttpResult(spec),
+        StdbInternal.encodeHttpResult(spec),
         Effect.runSyncExit,
-        StdbTesting.toHttpResponse,
+        StdbInternal.toHttpResponse,
       )
 
       expect(response.status).toBe(200)
@@ -145,10 +145,10 @@ describe("HTTP handler response projection", (it) => {
         })
 
         const exit = Effect.succeed("unexpected" as unknown as undefined).pipe(
-          StdbTesting.encodeHttpResult(spec),
+          StdbInternal.encodeHttpResult(spec),
           Effect.runSyncExit,
         )
-        const response = StdbTesting.toHttpResponse(exit)
+        const response = StdbInternal.toHttpResponse(exit)
 
         expect(Exit.isFailure(exit)).toBe(true)
         if (Exit.isFailure(exit)) {
@@ -156,7 +156,7 @@ describe("HTTP handler response projection", (it) => {
             Cause.findErrorOption,
             Option.getOrUndefined,
           )
-          expect(failure).toBeInstanceOf(StdbTesting.HttpResponseEncodeError)
+          expect(failure).toBeInstanceOf(StdbInternal.HttpResponseEncodeError)
           expect(failure).toEqual(
             expect.objectContaining({
               phase: "success",
@@ -182,9 +182,9 @@ describe("HTTP handler response projection", (it) => {
 
         const response = MissingThing.make({ id: "missing" }).pipe(
           Effect.fail,
-          StdbTesting.encodeHttpResult(spec),
+          StdbInternal.encodeHttpResult(spec),
           Effect.runSyncExit,
-          StdbTesting.toHttpResponse,
+          StdbInternal.toHttpResponse,
         )
 
         expect(response.status).toBe(404)
@@ -198,9 +198,9 @@ describe("HTTP handler response projection", (it) => {
 
   it.effect("maps request decode errors to empty 400 responses", () =>
     Effect.gen(function* () {
-      const response = new StdbTesting.HttpRequestDecodeError({
+      const response = new StdbInternal.HttpRequestDecodeError({
         cause: "bad json",
-      }).pipe(Effect.fail, Effect.runSyncExit, StdbTesting.toHttpResponse)
+      }).pipe(Effect.fail, Effect.runSyncExit, StdbInternal.toHttpResponse)
 
       expect(response.status).toBe(400)
       expect(response.text()).toBe("")
@@ -222,16 +222,16 @@ describe("HTTP handler response projection", (it) => {
 
         const encodeFailureExit = Effect.succeed({ value: 1 } as unknown as {
           value: string
-        }).pipe(StdbTesting.encodeHttpResult(spec), Effect.runSyncExit)
-        const encodeFailure = StdbTesting.toHttpResponse(encodeFailureExit)
+        }).pipe(StdbInternal.encodeHttpResult(spec), Effect.runSyncExit)
+        const encodeFailure = StdbInternal.toHttpResponse(encodeFailureExit)
         const asyncFailure = Effect.promise(() =>
           Promise.resolve({ value: "late" }),
         ).pipe(
-          StdbTesting.encodeHttpResult(spec),
+          StdbInternal.encodeHttpResult(spec),
           Effect.runSyncExit,
-          StdbTesting.toHttpResponse,
+          StdbInternal.toHttpResponse,
         )
-        const defect = StdbTesting.toHttpResponse(Exit.die("boom"))
+        const defect = StdbInternal.toHttpResponse(Exit.die("boom"))
 
         expect(Exit.isFailure(encodeFailureExit)).toBe(true)
         if (Exit.isFailure(encodeFailureExit)) {
@@ -239,7 +239,7 @@ describe("HTTP handler response projection", (it) => {
             Cause.findErrorOption,
             Option.getOrUndefined,
           )
-          expect(failure).toBeInstanceOf(StdbTesting.HttpResponseEncodeError)
+          expect(failure).toBeInstanceOf(StdbInternal.HttpResponseEncodeError)
           expect(failure).toEqual(
             expect.objectContaining({
               phase: "success",
@@ -267,10 +267,10 @@ describe("HTTP handler response projection", (it) => {
 
       const exit = DeclaredEncodeBroken.make({ code: "bad-encode" }).pipe(
         Effect.fail,
-        StdbTesting.encodeHttpResult(spec),
+        StdbInternal.encodeHttpResult(spec),
         Effect.runSyncExit,
       )
-      const response = StdbTesting.toHttpResponse(exit)
+      const response = StdbInternal.toHttpResponse(exit)
 
       expect(Exit.isFailure(exit)).toBe(true)
       if (Exit.isFailure(exit)) {
@@ -278,7 +278,7 @@ describe("HTTP handler response projection", (it) => {
           Cause.findErrorOption,
           Option.getOrUndefined,
         )
-        expect(failure).toBeInstanceOf(StdbTesting.HttpResponseEncodeError)
+        expect(failure).toBeInstanceOf(StdbInternal.HttpResponseEncodeError)
         expect(failure).toEqual(
           expect.objectContaining({
             phase: "declaredError",
@@ -307,10 +307,10 @@ describe("HTTP handler response projection", (it) => {
         }
 
         const exit = Effect.fail(malformedDeclaredError).pipe(
-          StdbTesting.encodeHttpResult(spec),
+          StdbInternal.encodeHttpResult(spec),
           Effect.runSyncExit,
         )
-        const response = StdbTesting.toHttpResponse(exit)
+        const response = StdbInternal.toHttpResponse(exit)
 
         expect(Exit.isFailure(exit)).toBe(true)
         if (Exit.isFailure(exit)) {

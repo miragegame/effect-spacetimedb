@@ -1,5 +1,5 @@
-import { make as makeServer } from "../../src/server/bind.ts"
-import { StdbSenderFailure } from "../../src/server/services.ts"
+import { makeServer } from "../helpers/module-server"
+import { StdbSenderError } from "../../src/server/services.ts"
 import * as Effect from "effect/Effect"
 import * as EffectVitest from "@effect/vitest"
 const { expect } = EffectVitest
@@ -37,24 +37,18 @@ describe("server lifecycle", (it) => {
         const seen = [] as Array<string>
 
         const lifecycle = server.lifecycle({
-          init: server.init(
-            Effect.fn(function* () {
-              const ctx = yield* server.reducerCtx
-              seen.push(`init:${String(ctx.connectionId)}`)
-            }),
-          ) as never,
-          clientConnected: server.clientConnected(
-            Effect.fn(function* () {
-              const ctx = yield* server.reducerCtx
-              seen.push(`connected:${String(ctx.connectionId)}`)
-            }),
-          ) as never,
-          clientDisconnected: server.clientDisconnected(
-            Effect.fn(function* () {
-              const ctx = yield* server.reducerCtx
-              seen.push(`disconnected:${String(ctx.connectionId)}`)
-            }),
-          ) as never,
+          init: Effect.fn(function* () {
+            const ctx = yield* server.ReducerCtx
+            seen.push(`init:${String(ctx.connectionId)}`)
+          }) as never,
+          clientConnected: Effect.fn(function* () {
+            const ctx = yield* server.ReducerCtx
+            seen.push(`connected:${String(ctx.connectionId)}`)
+          }) as never,
+          clientDisconnected: Effect.fn(function* () {
+            const ctx = yield* server.ReducerCtx
+            seen.push(`disconnected:${String(ctx.connectionId)}`)
+          }) as never,
         })
 
         const ctx = makeCtx()
@@ -80,11 +74,9 @@ describe("server lifecycle", (it) => {
         })
         const records: Array<CapturedLog> = []
         const lifecycle = server.lifecycle({
-          init: server.init(
-            Effect.fn(function* () {
-              yield* logWithCapturedLogger(records, "lifecycle log")
-            }),
-          ) as never,
+          init: Effect.fn(function* () {
+            yield* logWithCapturedLogger(records, "lifecycle log")
+          }) as never,
         })
 
         const ctx = makeCtx()
@@ -107,8 +99,8 @@ describe("server lifecycle", (it) => {
         // A refusing `clientConnected` must reach the host as its own
         // `SenderError`: SpacetimeDB refuses the connection with the message
         // only for that class, and reads anything else as a module fault.
-        const RefusingModule = Stdb.StdbModule.make("lifecycle_refusal", {
-          lifecycle: { clientConnected: Stdb.StdbFn.clientConnected() },
+        const RefusingModule = Stdb.Module.make("lifecycle_refusal", {
+          lifecycle: { clientConnected: Stdb.Fn.clientConnected() },
         }).spec
         const server = makeServer({
           module: RefusingModule,
@@ -120,7 +112,7 @@ describe("server lifecycle", (it) => {
             lifecycle: {
               clientConnected: () =>
                 Effect.fail(
-                  new StdbSenderFailure({ value: "connection refused" }),
+                  new StdbSenderError({ value: "connection refused" }),
                 ),
             },
           }),

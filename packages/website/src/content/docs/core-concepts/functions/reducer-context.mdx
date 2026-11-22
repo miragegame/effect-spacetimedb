@@ -10,7 +10,7 @@ sidebar:
 
 Reducer context is an Effect service yielded from the assembled module.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -22,17 +22,17 @@ const audit = Stdb.table("audit", {
   },
 })
 
-const Audit = Stdb.StdbGroup.make("Audit").add(
-  Stdb.StdbFn.reducer("audit_write", {
+const Audit = Stdb.Group.make("Audit").add(
+  Stdb.Fn.reducer("auditWrite", {
     params: Stdb.struct({ message: Stdb.string() }),
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").addTables(audit).add(Audit)
+const Module = Stdb.Module.make("app").addTables(audit).add(Audit)
 const { Db, ReducerCtx } = Module
 
-const AuditLive = Stdb.StdbBuilder.group(Module, "Audit", {
-  audit_write: Effect.fn(function* ({ message }) {
+const AuditLive = Stdb.Builder.group(Module, "Audit", {
+  auditWrite: Effect.fn(function* ({ message }) {
     const ctx = yield* ReducerCtx
     const db = yield* Db
     yield* db.audit.insert({

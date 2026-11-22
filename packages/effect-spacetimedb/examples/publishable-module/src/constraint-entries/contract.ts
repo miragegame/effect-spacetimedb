@@ -1,41 +1,41 @@
 import * as Stdb from "effect-spacetimedb"
-import { constraintEntry, String255, ThingId, U64 } from "../schema"
+import { constraintEntry, ThingId, U64 } from "../schema"
 
 const ConstraintEntryParams = Stdb.struct({
-  id: String255,
-  slug: String255,
-  tenantId: String255,
-  email: String255,
-  note: String255,
+  id: Stdb.string(),
+  slug: Stdb.string(),
+  tenantId: Stdb.string(),
+  email: Stdb.string(),
+  note: Stdb.string(),
 })
 
-export const ConstraintEntryFunctions = Stdb.StdbGroup.make("ConstraintEntries")
+export const ConstraintEntryFunctions = Stdb.Group.make("ConstraintEntries")
   .add(
-    Stdb.StdbFn.reducer("constraintEntryInsert", {
+    Stdb.Fn.reducer("constraintEntryInsert", {
       params: ConstraintEntryParams,
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("constraintEntryUpdate", {
+    Stdb.Fn.reducer("constraintEntryUpdate", {
       params: ConstraintEntryParams,
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("constraintEntryGet", {
-      params: Stdb.struct({ id: String255 }),
+    Stdb.Fn.procedure("constraintEntryGet", {
+      params: Stdb.struct({ id: Stdb.string() }),
       returns: Stdb.option(constraintEntry.row),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("constraintEntryConflictThenCommit", {
+    Stdb.Fn.procedure("constraintEntryConflictThenCommit", {
       params: Stdb.struct({
-        id: String255,
-        slug: String255,
-        tenantId: String255,
-        email: String255,
-        note: String255,
+        id: Stdb.string(),
+        slug: Stdb.string(),
+        tenantId: Stdb.string(),
+        email: Stdb.string(),
+        note: Stdb.string(),
         markerThingId: Stdb.string(ThingId),
-        markerLabel: String255,
+        markerLabel: Stdb.string(),
         markerCount: U64,
       }),
       returns: Stdb.unit(),

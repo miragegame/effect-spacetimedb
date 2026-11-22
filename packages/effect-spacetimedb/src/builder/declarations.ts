@@ -1,6 +1,9 @@
+import type { MountRecord } from "../contract/mount.ts"
+import type { MountAccessors } from "../server/mount-context.ts"
 import * as Effect from "effect/Effect"
 
 import type * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
 import type { AnyErrorDefinition } from "../contract/error.ts"
 import {
   type HttpHandlerMethod,
@@ -33,13 +36,12 @@ import {
   unit,
 } from "../contract/type.ts"
 import { type AnyViewSpec, type ViewSpec } from "../contract/view.ts"
-import type { StdbDecodeError } from "../decode-error.ts"
 
 import * as ServerContext from "../server/context.ts"
 
-import type { StdbHostFailure } from "../server/services.ts"
+import type { HostFailure } from "../server/services.ts"
 
-import type { StdbGroup, StdbHttpGroup } from "./http-builders.ts"
+import type { Group, HttpGroup } from "./http-builders.ts"
 
 import type {
   EndpointsOfGroup,
@@ -63,11 +65,10 @@ export type ReducerDecl<
   Errors extends AnyErrorDefinition | undefined =
     | AnyErrorDefinition
     | undefined,
-  Public extends boolean = boolean,
 > = {
   readonly declKind: "reducer"
   readonly name: Name
-  readonly spec: ReducerSpec<Params, Errors, Public>
+  readonly spec: ReducerSpec<Params, Errors>
 }
 
 export type ProcedureDecl<
@@ -77,11 +78,10 @@ export type ProcedureDecl<
   Errors extends AnyErrorDefinition | undefined =
     | AnyErrorDefinition
     | undefined,
-  Public extends boolean = boolean,
 > = {
   readonly declKind: "procedure"
   readonly name: Name
-  readonly spec: ProcedureSpec<Params, Returns, Errors, Public>
+  readonly spec: ProcedureSpec<Params, Returns, Errors>
 }
 
 export type ScheduledParams<Table extends AnyTableSpec> =
@@ -103,7 +103,7 @@ export type ScheduledReducerSpec<
   Errors extends AnyErrorDefinition | undefined =
     | AnyErrorDefinition
     | undefined,
-> = ReducerSpec<ScheduledParams<Table>, Errors, false> & {
+> = ReducerSpec<ScheduledParams<Table>, Errors> & {
   readonly scheduled: ScheduledCallableMetadata<Table>
 }
 
@@ -112,12 +112,7 @@ export type ScheduledProcedureSpec<
   Errors extends AnyErrorDefinition | undefined =
     | AnyErrorDefinition
     | undefined,
-> = ProcedureSpec<
-  ScheduledParams<Table>,
-  ReturnType<typeof unit>,
-  Errors,
-  false
-> & {
+> = ProcedureSpec<ScheduledParams<Table>, ReturnType<typeof unit>, Errors> & {
   readonly scheduled: ScheduledCallableMetadata<Table>
 }
 
@@ -127,7 +122,7 @@ export type ScheduledReducerDecl<
   Errors extends AnyErrorDefinition | undefined =
     | AnyErrorDefinition
     | undefined,
-> = ReducerDecl<Name, ScheduledParams<Table>, Errors, false> & {
+> = ReducerDecl<Name, ScheduledParams<Table>, Errors> & {
   readonly spec: ScheduledReducerSpec<Table, Errors>
 }
 
@@ -141,8 +136,7 @@ export type ScheduledProcedureDecl<
   Name,
   ScheduledParams<Table>,
   ReturnType<typeof unit>,
-  Errors,
-  false
+  Errors
 > & {
   readonly spec: ScheduledProcedureSpec<Table, Errors>
 }
@@ -153,7 +147,7 @@ export type ReceiverDecl<
   Errors extends AnyErrorDefinition | undefined =
     | AnyErrorDefinition
     | undefined,
-> = ReducerDecl<Name, Params, Errors, true> & {
+> = ReducerDecl<Name, Params, Errors> & {
   readonly spec: ReceiverSpec<Params, Errors>
 }
 
@@ -173,37 +167,35 @@ export type OutboxResultParams<Table extends AnyTableSpec> =
  */
 export type OutboxResultSpec<
   Table extends AnyOutboxTableSpec = AnyOutboxTableSpec,
-> = ReducerSpec<OutboxResultParams<Table>, undefined, false> & {
+> = ReducerSpec<OutboxResultParams<Table>, undefined> & {
   readonly outboxResult: OutboxResultMetadata<Table>
 }
 
 export type OutboxResultDecl<
   Name extends string = string,
   Table extends AnyOutboxTableSpec = AnyOutboxTableSpec,
-> = ReducerDecl<Name, OutboxResultParams<Table>, undefined, false> & {
+> = ReducerDecl<Name, OutboxResultParams<Table>, undefined> & {
   readonly spec: OutboxResultSpec<Table>
 }
 
 export type SenderViewDecl<
   Name extends string = string,
   Returns extends AnyValueType = AnyValueType,
-  Public extends boolean = boolean,
   Params extends StructLikeValueType = StructLikeValueType,
 > = {
   readonly declKind: "view"
   readonly name: Name
-  readonly spec: ViewSpec<"sender", Returns, Public, Params>
+  readonly spec: ViewSpec<"sender", Returns, Params>
 }
 
 export type AnonymousViewDecl<
   Name extends string = string,
   Returns extends AnyValueType = AnyValueType,
-  Public extends boolean = boolean,
   Params extends StructLikeValueType = StructLikeValueType,
 > = {
   readonly declKind: "view"
   readonly name: Name
-  readonly spec: ViewSpec<"anonymous", Returns, Public, Params>
+  readonly spec: ViewSpec<"anonymous", Returns, Params>
 }
 
 export type LifecycleDecl<Name extends LifecycleName = LifecycleName> = {
@@ -275,7 +267,7 @@ export type ModuleSpecFor<
 > & { readonly name: Id }
 
 export type AnyGroup =
-  | StdbGroup<
+  | Group<
       string,
       AnyCallableDecl,
       AnyErrorDefinition | undefined,
@@ -285,7 +277,7 @@ export type AnyGroup =
       {},
       LifecycleSpecs
     >
-  | StdbHttpGroup<
+  | HttpGroup<
       string,
       AnyHttpRouteDecl,
       AnyErrorDefinition | undefined,
@@ -293,6 +285,7 @@ export type AnyGroup =
     >
 
 export type RuntimeModuleState = {
+  readonly mountDeclarations?: MountRecord
   readonly id: string
   readonly settings: ModuleSettings
   readonly environment: EnvironmentDeclarations
@@ -309,6 +302,8 @@ type ModuleScopedRequirement<
   : Requirement & ModuleBrand<Spec["name"] & string>
 
 export type ModuleAccessors<Spec extends AnyModuleSpec> = {
+  /** Run library effects or call native helpers in the handler context for each declared mount. */
+  readonly mounts: MountAccessors<Spec>
   readonly Db: Effect.Effect<
     ServerContext.DbService<Spec>,
     never,
@@ -385,7 +380,9 @@ export type ModuleAccessors<Spec extends AnyModuleSpec> = {
    * The transaction body may execute more than once: SpacetimeDB re-runs it on
    * an optimistic commit conflict. Keep the body a pure function of database
    * state with no external or captured-state side effects; the transaction
-   * timestamp may differ between attempts.
+   * timestamp may differ between attempts. The body has a `Scope` of its own
+   * that closes before the commit, so a release can still use its `Db`, and a
+   * release that dies aborts the transaction.
    */
   readonly withTx: <A, E, R>(
     effect: ServerContext.EffectWithoutForbiddenRequirements<
@@ -394,8 +391,8 @@ export type ModuleAccessors<Spec extends AnyModuleSpec> = {
     >,
   ) => Effect.Effect<
     A,
-    E | StdbHostFailure | StdbDecodeError,
-    | Exclude<R, ServerContext.TxAllowedRequirementsFor<Spec>>
+    E | HostFailure,
+    | Exclude<R, ServerContext.TxAllowedRequirementsFor<Spec> | Scope.Scope>
     | ModuleScopedRequirement<Spec, ServerContext.TxRunner>
   >
   readonly HttpTx: Effect.Effect<
@@ -405,4 +402,4 @@ export type ModuleAccessors<Spec extends AnyModuleSpec> = {
   >
 }
 
-export type { StdbGroup, StdbHttpGroup, StdbModule } from "./http-builders.ts"
+export type { Group, HttpGroup, Module } from "./http-builders.ts"

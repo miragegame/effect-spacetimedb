@@ -58,14 +58,14 @@ const reminder = Stdb.scheduledTable("reminder", {
 
 const fullTables = [user, presenceEvent, reminder] as const
 
-const FullCallables = Stdb.StdbGroup.make("FullCallables")
+const FullCallables = Stdb.Group.make("FullCallables")
   .add(
-    Stdb.StdbFn.anonymousView("allUsers", {
+    Stdb.Fn.anonymousView("allUsers", {
       returns: Stdb.array(user.row, testViewRowsLength),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("userUpsert", {
+    Stdb.Fn.reducer("userUpsert", {
       params: Stdb.struct({
         userId: Stdb.string(UserId),
         name: Stdb.string(UserName),
@@ -73,7 +73,7 @@ const FullCallables = Stdb.StdbGroup.make("FullCallables")
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("userRequire", {
+    Stdb.Fn.reducer("userRequire", {
       params: Stdb.struct({
         userId: Stdb.string(UserId),
       }),
@@ -81,7 +81,7 @@ const FullCallables = Stdb.StdbGroup.make("FullCallables")
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("userGet", {
+    Stdb.Fn.procedure("userGet", {
       params: Stdb.struct({
         userId: Stdb.string(UserId),
       }),
@@ -90,25 +90,25 @@ const FullCallables = Stdb.StdbGroup.make("FullCallables")
     }),
   )
   .add(
-    Stdb.StdbFn.scheduledProcedure("reminderFire", {
+    Stdb.Fn.scheduledProcedure("reminderFire", {
       table: reminder,
     }),
   )
-  .add(Stdb.StdbFn.init())
-  .add(Stdb.StdbFn.clientConnected())
-  .add(Stdb.StdbFn.clientDisconnected())
+  .add(Stdb.Fn.init())
+  .add(Stdb.Fn.clientConnected())
+  .add(Stdb.Fn.clientDisconnected())
 
-const FullHttpHandlers = Stdb.StdbHttpGroup.make("FullHttp")
-  .add(Stdb.StdbHttp.post("stripeWebhook", "/webhooks/stripe"))
+const FullHttpHandlers = Stdb.HttpGroup.make("FullHttp")
+  .add(Stdb.Http.post("stripeWebhook", "/webhooks/stripe"))
   .add(
-    Stdb.StdbHttp.post("rotateToken", "/server-tokens/rotate", {
+    Stdb.Http.post("rotateToken", "/server-tokens/rotate", {
       request: RotateTokenInput,
       response: RotateTokenOutput,
       errors: ExampleErrors,
     }),
   )
 
-export const FullStdbModule = Stdb.StdbModule.make("example", {})
+export const FullStdbModule = Stdb.Module.make("example", {})
   .addTables(...fullTables)
   .add(FullCallables)
   .add(FullHttpHandlers)

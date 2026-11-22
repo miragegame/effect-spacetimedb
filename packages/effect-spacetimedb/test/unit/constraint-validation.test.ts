@@ -7,7 +7,7 @@ import { TestLayer } from "../helpers/test-layer"
 const describe = EffectVitest.layer(TestLayer)
 
 const makeModule = (membershipTable: ReturnType<typeof Stdb.table>) =>
-  Stdb.StdbModule.make("constraint_validation", {
+  Stdb.Module.make("constraint_validation", {
     settings: {
       caseConversionPolicy: "none",
     },

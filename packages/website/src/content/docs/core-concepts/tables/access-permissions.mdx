@@ -10,17 +10,17 @@ sidebar:
 
 effect-spacetimedb supports table-level public visibility:
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
-const publicUser = Stdb.table("public_user", {
+const publicUser = Stdb.table("publicUser", {
   public: true,
   columns: {
     id: Stdb.string().primaryKey(),
   },
 })
 
-const privateAudit = Stdb.table("private_audit", {
+const privateAudit = Stdb.table("privateAudit", {
   public: false,
   columns: {
     id: Stdb.u64().primaryKey().autoInc(),

@@ -6,7 +6,7 @@ import * as Layer from "effect/Layer"
 
 const { expect } = EffectVitest
 
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { readCapturedJson } from "../helpers/captured-event-codec"
 
 const describe = EffectVitest.layer(
@@ -17,16 +17,16 @@ const eventContextFixture = (name: string): URL =>
   new URL(`../fixtures/captured/event-contexts/${name}.json`, import.meta.url)
 
 const decodeFixture = Effect.fn(function* (name: string) {
-  return StdbTesting.decodeStdbEventContextSync(
+  return StdbInternal.decodeStdbEventContextSync(
     yield* readCapturedJson(eventContextFixture(name)),
   )
 })
 
 const expectReducer = (
-  value: StdbTesting.StdbEventContext,
-): Extract<StdbTesting.StdbEventContext, { readonly _tag: "Reducer" }> => {
-  expect(StdbTesting.StdbEventContext.$is("Reducer")(value)).toBe(true)
-  if (!StdbTesting.StdbEventContext.$is("Reducer")(value)) {
+  value: StdbInternal.StdbEventContext,
+): Extract<StdbInternal.StdbEventContext, { readonly _tag: "Reducer" }> => {
+  expect(StdbInternal.StdbEventContext.$is("Reducer")(value)).toBe(true)
+  if (!StdbInternal.StdbEventContext.$is("Reducer")(value)) {
     throw new Error("Expected captured fixture to decode as Reducer")
   }
   return value
@@ -37,7 +37,7 @@ describe("captured event-context replay", (it) => {
     Effect.gen(function* () {
       const decoded = expectReducer(yield* decodeFixture("reducer-ok"))
 
-      expect(StdbTesting.StdbReducerOutcome.$is("Ok")(decoded.outcome)).toBe(
+      expect(StdbInternal.StdbReducerOutcome.$is("Ok")(decoded.outcome)).toBe(
         true,
       )
     }),
@@ -48,7 +48,7 @@ describe("captured event-context replay", (it) => {
       const decoded = yield* decodeFixture("subscribe-applied")
 
       expect(
-        StdbTesting.StdbEventContext.$is("SubscribeApplied")(decoded),
+        StdbInternal.StdbEventContext.$is("SubscribeApplied")(decoded),
       ).toBe(true)
     }),
   )
@@ -58,7 +58,7 @@ describe("captured event-context replay", (it) => {
       const decoded = yield* decodeFixture("unsubscribe-applied")
 
       expect(
-        StdbTesting.StdbEventContext.$is("UnsubscribeApplied")(decoded),
+        StdbInternal.StdbEventContext.$is("UnsubscribeApplied")(decoded),
       ).toBe(true)
     }),
   )
@@ -68,7 +68,7 @@ describe("captured event-context replay", (it) => {
       ["relation-insert", "relation-update", "relation-delete"] as const,
       Effect.fn(function* (name) {
         const decoded = expectReducer(yield* decodeFixture(name))
-        expect(StdbTesting.StdbReducerOutcome.$is("Ok")(decoded.outcome)).toBe(
+        expect(StdbInternal.StdbReducerOutcome.$is("Ok")(decoded.outcome)).toBe(
           true,
         )
       }),

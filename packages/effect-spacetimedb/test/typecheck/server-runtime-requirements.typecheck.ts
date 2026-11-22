@@ -1,10 +1,9 @@
-import { make as makeServer } from "../../src/server/bind.ts"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import { fromLayer } from "effect-spacetimedb/server"
-import * as StdbTesting from "effect-spacetimedb/testing"
-import { CallableOnlyModule } from "../fixtures/callable-only-module"
+import * as Stdb from "effect-spacetimedb"
+import { CallableOnlyBuilder } from "../fixtures/callable-only-module"
 
 class ExtraService extends Context.Service<
   ExtraService,
@@ -15,10 +14,6 @@ class ExtraService extends Context.Service<
   "effect-spacetimedb/test/typecheck/server-runtime-requirements.typecheck/ExtraService",
 ) {}
 
-type EchoArgs = StdbTesting.TypeOf<
-  typeof CallableOnlyModule.procedures.echo.params
->
-
 const useExtraService: Effect.Effect<void, never, ExtraService> = Effect.gen(
   function* () {
     const extra = yield* ExtraService
@@ -26,63 +21,40 @@ const useExtraService: Effect.Effect<void, never, ExtraService> = Effect.gen(
   },
 )
 
-const serverDefault = makeServer({ module: CallableOnlyModule })
-
-const missingRuntimeService = serverDefault.handlers({
-  // @ts-expect-error ExtraService must be provided by the server runtime.
-  reducers: {
+const ExtraServiceLive = Stdb.Builder.group(
+  CallableOnlyBuilder,
+  "CallableOnly",
+  {
     ping: () => useExtraService,
-  },
-  procedures: {
-    echo: Effect.fn(function* (_args: EchoArgs) {
-      return "ok"
-    }),
-  },
-})
-
-void missingRuntimeService
-
-const missingSectionRuntimeService = serverDefault.reducers({
-  // @ts-expect-error section records reject services absent from the server runtime; @effect-diagnostics-next-line missingEffectContext:off
-  ping: serverDefault.reducer(
-    Effect.fn(function* () {
-      const extra = yield* ExtraService
-      void extra.value
-    }),
-  ),
-})
-void missingSectionRuntimeService
-
-const serverWithRuntime = makeServer({
-  module: CallableOnlyModule,
-  runtime: fromLayer(Layer.succeed(ExtraService, { value: "ok" })),
-})
-
-const handlersWithRuntime = serverWithRuntime.handlers({
-  reducers: {
-    ping: Effect.fn(function* () {
-      const extra = yield* ExtraService
-      void extra.value
-    }),
-  },
-  procedures: {
-    echo: Effect.fn(function* (_args: EchoArgs) {
+    echo: Effect.fn(function* () {
       const extra = yield* ExtraService
       return extra.value
     }),
   },
+)
+
+// @ts-expect-error ExtraService must be provided by the plan runtime.
+void StdbInternal.planModule(CallableOnlyBuilder, [ExtraServiceLive] as const)
+
+void StdbInternal.planModule(CallableOnlyBuilder, [ExtraServiceLive] as const, {
+  runtime: Layer.succeed(ExtraService, { value: "ok" }),
 })
 
-void handlersWithRuntime
-
-const sectionHandlersWithRuntime = serverWithRuntime.reducers({
-  ping: serverWithRuntime.reducer(
-    Effect.fn(function* () {
-      const extra = yield* ExtraService
-      const db = yield* serverWithRuntime.db
-      void extra.value
-      void db
-    }),
-  ),
+const DbOnlyLive = Stdb.Builder.group(CallableOnlyBuilder, "CallableOnly", {
+  ping: Effect.fn(function* () {
+    const db = yield* CallableOnlyBuilder.Db
+    void db
+  }),
+  echo: Effect.fn(function* () {
+    return "ok"
+  }),
 })
-void sectionHandlersWithRuntime
+
+void StdbInternal.planModule(CallableOnlyBuilder, [DbOnlyLive] as const)
+
+// `onDefect` alone needs no runtime options beside it.
+void StdbInternal.planModule(CallableOnlyBuilder, [DbOnlyLive] as const, {
+  onDefect: (cause) => {
+    void cause
+  },
+})

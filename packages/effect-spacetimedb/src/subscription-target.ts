@@ -1,3 +1,9 @@
+import type { ModulePlan } from "./module-plan.ts"
+import {
+  nestMembers,
+  type NestedMembers,
+  type MembersByPath,
+} from "./member-path.ts"
 import type { AnyModuleSpec } from "./contract/module.ts"
 import type { TableRow } from "./contract/table.ts"
 import type {
@@ -27,6 +33,13 @@ type ModuleBrand<Module extends AnyModuleSpec> = {
   readonly __module?: Module
 }
 
+export type TableTargetName<
+  M extends AnyModuleSpec,
+  K extends keyof MembersByPath<M, "tables"> & string,
+> = K extends `${string}.${string}`
+  ? string
+  : MembersByPath<M, "tables">[K]["name"]
+
 export type TableSubscriptionTarget<
   Module extends AnyModuleSpec,
   Key extends
@@ -34,13 +47,13 @@ export type TableSubscriptionTarget<
 > = ModuleBrand<Module> & {
   readonly kind: "table"
   readonly key: Key
-  readonly name: Module["tables"][Key]["name"]
+  readonly name: TableTargetName<Module, Key>
   where(
     predicate: (
-      row: StdbRowExpr<Module["tables"][Key]>,
-    ) => StdbPredicate<Module["tables"][Key]>,
+      row: StdbRowExpr<MembersByPath<Module, "tables">[Key]>,
+    ) => StdbPredicate<MembersByPath<Module, "tables">[Key]>,
   ): QuerySubscriptionTarget<Module, Key>
-  readonly __row?: TableRow<Module["tables"][Key]>
+  readonly __row?: TableRow<MembersByPath<Module, "tables">[Key]>
 }
 
 export type EventTableSubscriptionTarget<
@@ -49,13 +62,13 @@ export type EventTableSubscriptionTarget<
 > = ModuleBrand<Module> & {
   readonly kind: "eventTable"
   readonly key: Key
-  readonly name: Module["tables"][Key]["name"]
+  readonly name: TableTargetName<Module, Key>
   where(
     predicate: (
-      row: StdbRowExpr<Module["tables"][Key]>,
-    ) => StdbPredicate<Module["tables"][Key]>,
+      row: StdbRowExpr<MembersByPath<Module, "tables">[Key]>,
+    ) => StdbPredicate<MembersByPath<Module, "tables">[Key]>,
   ): QuerySubscriptionTarget<Module, Key>
-  readonly __row?: TableRow<Module["tables"][Key]>
+  readonly __row?: TableRow<MembersByPath<Module, "tables">[Key]>
 }
 
 /**
@@ -72,10 +85,10 @@ export type ViewSubscriptionTarget<
   readonly key: Key
   readonly name: string
   /** The params the arguments encode through; an empty struct without them. */
-  readonly params: Module["views"][Key]["params"]
+  readonly params: MembersByPath<Module, "views">[Key]["params"]
   /** The call's arguments; `{}` for a view without params. */
-  readonly args: ViewCallArgsOf<Module["views"][Key]>
-  readonly __row?: ViewRowOf<Module["views"][Key]>
+  readonly args: ViewCallArgsOf<MembersByPath<Module, "views">[Key]>
+  readonly __row?: ViewRowOf<MembersByPath<Module, "views">[Key]>
 }
 
 /**
@@ -85,59 +98,55 @@ export type ViewSubscriptionTarget<
 export type ViewTargetOf<
   Module extends AnyModuleSpec,
   Key extends PublicViewKeys<Module>,
-> = ViewTakesArgs<Module["views"][Key]> extends true
+> = ViewTakesArgs<MembersByPath<Module, "views">[Key]> extends true
   ? (
-      args: ViewCallArgsOf<Module["views"][Key]>,
+      args: ViewCallArgsOf<MembersByPath<Module, "views">[Key]>,
     ) => ViewSubscriptionTarget<Module, Key>
   : ViewSubscriptionTarget<Module, Key>
 
 export type QuerySubscriptionTarget<
   Module extends AnyModuleSpec,
-  Key extends keyof Module["tables"] & string = PublicTableKeys<Module>,
+  Key extends keyof MembersByPath<Module, "tables"> &
+    string = PublicTableKeys<Module>,
 > = ModuleBrand<Module> & {
   readonly kind: "query"
   readonly key: Key
-  readonly name: Module["tables"][Key]["name"]
+  readonly name: TableTargetName<Module, Key>
   readonly predicate: (
-    row: StdbRowExpr<Module["tables"][Key]>,
-  ) => StdbPredicate<Module["tables"][Key]>
+    row: StdbRowExpr<MembersByPath<Module, "tables">[Key]>,
+  ) => StdbPredicate<MembersByPath<Module, "tables">[Key]>
 }
 
 export type AllPublicTablesSubscriptionTarget<Module extends AnyModuleSpec> =
   ModuleBrand<Module> & {
     readonly kind: "allPublicTables"
+    readonly names?: Readonly<Record<string, string>>
     readonly keys: ReadonlyArray<PublicTableKeys<Module>>
   }
 
 type QuerySubscriptionPredicate<Module extends AnyModuleSpec> = {
   bivarianceHack(
-    row: StdbRowExpr<Module["tables"][PublicTableKeys<Module>]>,
-  ): StdbPredicate<Module["tables"][PublicTableKeys<Module>]>
+    row: StdbRowExpr<MembersByPath<Module, "tables">[PublicTableKeys<Module>]>,
+  ): StdbPredicate<MembersByPath<Module, "tables">[PublicTableKeys<Module>]>
 }["bivarianceHack"]
 
-type PublicQuerySubscriptionTarget<Module extends AnyModuleSpec> =
-  ModuleBrand<Module> & {
-    readonly kind: "query"
-    readonly key: PublicTableKeys<Module>
-    readonly name: Module["tables"][PublicTableKeys<Module>]["name"]
-    readonly predicate: QuerySubscriptionPredicate<Module>
-  } & {
-      readonly [Key in PublicTableKeys<Module>]: QuerySubscriptionTarget<
-        Module,
-        Key
-      >
-    }[PublicTableKeys<Module>]
+export type PublicQuerySubscriptionTarget<Module extends AnyModuleSpec> = {
+  readonly [Key in PublicTableKeys<Module>]: QuerySubscriptionTarget<
+    Module,
+    Key
+  >
+}[PublicTableKeys<Module>]
 
 export type SubscriptionTarget<Module extends AnyModuleSpec> =
   | (ModuleBrand<Module> & {
       readonly kind: "table"
       readonly key: PublicPersistentTableKeys<Module>
-      readonly name: Module["tables"][PublicPersistentTableKeys<Module>]["name"]
+      readonly name: string
     })
   | (ModuleBrand<Module> & {
       readonly kind: "eventTable"
       readonly key: PublicEventTableKeys<Module>
-      readonly name: Module["tables"][PublicEventTableKeys<Module>]["name"]
+      readonly name: string
     })
   | PublicQuerySubscriptionTarget<Module>
   | ViewSubscriptionTarget<Module>
@@ -148,23 +157,23 @@ export type MatchableSubscriptionTarget<Module extends AnyModuleSpec> =
   | (ModuleBrand<Module> & {
       readonly kind: "table"
       readonly key: PublicPersistentTableKeys<Module>
-      readonly name: Module["tables"][PublicPersistentTableKeys<Module>]["name"]
+      readonly name: string
     })
   | (ModuleBrand<Module> & {
       readonly kind: "eventTable"
       readonly key: PublicEventTableKeys<Module>
-      readonly name: Module["tables"][PublicEventTableKeys<Module>]["name"]
+      readonly name: string
     })
   | (ModuleBrand<Module> & {
       readonly kind: "query"
       readonly key: PublicTableKeys<Module>
-      readonly name: Module["tables"][PublicTableKeys<Module>]["name"]
+      readonly name: string
       readonly predicate: QuerySubscriptionPredicate<Module>
     })
   | ViewSubscriptionTarget<Module>
   | AllPublicTablesSubscriptionTarget<Module>
 
-export type ProjectedSubscriptionTargets<Module extends AnyModuleSpec> = {
+export type FlatSubscriptionTargets<Module extends AnyModuleSpec> = {
   readonly tables: {
     readonly [Key in PublicPersistentTableKeys<Module>]: TableSubscriptionTarget<
       Module,
@@ -188,7 +197,7 @@ const makeTableTarget = <
   Key extends PublicPersistentTableKeys<Module>,
 >(
   key: Key,
-  name: Module["tables"][Key]["name"],
+  name: TableTargetName<Module, Key>,
 ): TableSubscriptionTarget<Module, Key> => {
   const where: TableSubscriptionTarget<Module, Key>["where"] = (predicate) => ({
     kind: "query",
@@ -210,7 +219,7 @@ const makeEventTableTarget = <
   Key extends PublicEventTableKeys<Module>,
 >(
   key: Key,
-  name: Module["tables"][Key]["name"],
+  name: TableTargetName<Module, Key>,
 ): EventTableSubscriptionTarget<Module, Key> => {
   const where: EventTableSubscriptionTarget<Module, Key>["where"] = (
     predicate,
@@ -235,10 +244,10 @@ const makeViewTarget = <
 >(
   key: Key,
   name: string,
-  params: Module["views"][Key]["params"],
+  params: MembersByPath<Module, "views">[Key]["params"],
 ): ViewTargetOf<Module, Key> => {
   const call = (
-    args: ViewCallArgsOf<Module["views"][Key]>,
+    args: ViewCallArgsOf<MembersByPath<Module, "views">[Key]>,
   ): ViewSubscriptionTarget<Module, Key> => ({
     kind: "view",
     key,
@@ -251,27 +260,37 @@ const makeViewTarget = <
   return (
     viewTakesArgs(params)
       ? call
-      : call({} as ViewCallArgsOf<Module["views"][Key]>)
+      : call({} as ViewCallArgsOf<MembersByPath<Module, "views">[Key]>)
   ) as ViewTargetOf<Module, Key>
 }
 
 export const makeTargetsFromModule = <Module extends AnyModuleSpec>(options: {
-  readonly module: Module
+  readonly members: ModulePlan<Module>["members"]
   readonly publicTables: PublicPersistentTables<Module>
   readonly publicEventTables: PublicEventTables<Module>
   readonly publicViews: PublicViews<Module>
-}): ProjectedSubscriptionTargets<Module> => {
+}): FlatSubscriptionTargets<Module> => {
   const tables = typedFromEntries(
     typedEntries(options.publicTables).map(([key, tableSpec]) => [
       key,
-      makeTableTarget<Module, typeof key>(key, tableSpec.name),
+      makeTableTarget<Module, typeof key>(
+        key,
+        (key.includes(".")
+          ? options.members.tables[key]!.wireName
+          : tableSpec.name) as TableTargetName<Module, typeof key>,
+      ),
     ]),
   )
 
   const eventTables = typedFromEntries(
     typedEntries(options.publicEventTables).map(([key, tableSpec]) => [
       key,
-      makeEventTableTarget<Module, typeof key>(key, tableSpec.name),
+      makeEventTableTarget<Module, typeof key>(
+        key,
+        (key.includes(".")
+          ? options.members.tables[key]!.wireName
+          : tableSpec.name) as TableTargetName<Module, typeof key>,
+      ),
     ]),
   )
   const views = typedFromEntries(
@@ -279,8 +298,8 @@ export const makeTargetsFromModule = <Module extends AnyModuleSpec>(options: {
       key,
       makeViewTarget<Module, typeof key>(
         key,
-        options.module.wireNames.views[key] ?? key,
-        viewSpec.params,
+        options.members.views[key]!.wireName,
+        viewSpec.params as MembersByPath<Module, "views">[typeof key]["params"],
       ),
     ]),
   )
@@ -290,14 +309,39 @@ export const makeTargetsFromModule = <Module extends AnyModuleSpec>(options: {
     ...typedEntries(options.publicEventTables).map(([key]) => key),
   ] as unknown as ReadonlyArray<PublicTableKeys<Module>>
 
+  const names = publicTableKeys.some((key) => key.includes("."))
+    ? Object.fromEntries(
+        publicTableKeys.map((key) => [
+          key,
+          options.members.tables[key]!.wireName,
+        ]),
+      )
+    : undefined
   return {
-    tables: tables as unknown as ProjectedSubscriptionTargets<Module>["tables"],
+    tables: tables as unknown as FlatSubscriptionTargets<Module>["tables"],
     eventTables:
-      eventTables as unknown as ProjectedSubscriptionTargets<Module>["eventTables"],
-    views: views as unknown as ProjectedSubscriptionTargets<Module>["views"],
+      eventTables as unknown as FlatSubscriptionTargets<Module>["eventTables"],
+    views: views as unknown as FlatSubscriptionTargets<Module>["views"],
     allPublicTables: () => ({
       kind: "allPublicTables",
       keys: publicTableKeys,
+      ...(names === undefined ? {} : { names }),
     }),
   }
 }
+
+export type ProjectedSubscriptionTargets<M extends AnyModuleSpec> = {
+  readonly tables: NestedMembers<FlatSubscriptionTargets<M>["tables"]>
+  readonly eventTables: NestedMembers<FlatSubscriptionTargets<M>["eventTables"]>
+  readonly views: NestedMembers<FlatSubscriptionTargets<M>["views"]>
+  readonly allPublicTables: FlatSubscriptionTargets<M>["allPublicTables"]
+}
+
+export const nestedTargets = <M extends AnyModuleSpec>(
+  flat: FlatSubscriptionTargets<M>,
+): ProjectedSubscriptionTargets<M> => ({
+  tables: nestMembers(flat.tables),
+  eventTables: nestMembers(flat.eventTables),
+  views: nestMembers(flat.views),
+  allPublicTables: flat.allPublicTables,
+})

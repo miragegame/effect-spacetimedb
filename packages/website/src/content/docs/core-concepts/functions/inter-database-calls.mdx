@@ -19,11 +19,11 @@ The pieces, using the `examples/idc-pair` modules from the repository:
 
 | Piece | Declared with | Lives in |
 | --- | --- | --- |
-| Interface | a group of `Stdb.StdbFn.receiver(...)` | a package both sides import |
+| Interface | a group of `Stdb.Fn.receiver(...)` | a package both sides import |
 | Receiver binding | `generateReceiverArtifact` (`effect-spacetimedb/codegen`) | committed next to the caller, bound in its module entry |
-| Inbox | `Stdb.StdbBuilder.group(...)` with a guard | the receiving module |
+| Inbox | `Stdb.Builder.group(...)` with a guard | the receiving module |
 | Outbox | `Stdb.outboxTable(...)` | the calling module |
-| Settle reducer | `Stdb.StdbFn.outboxResult(...)` | the calling module |
+| Settle reducer | `Stdb.Fn.outboxResult(...)` | the calling module |
 
 ## Interface
 
@@ -31,10 +31,10 @@ An interface is a group whose endpoints are all receivers. Its declared errors
 are how the receiver refuses a call.
 
 ```ts
-export const IdcPairInbox = Stdb.StdbGroup.make("IdcPairInbox", {
+export const IdcPairInbox = Stdb.Group.make("IdcPairInbox", {
   errors: Stdb.errors(IdcPairUnknownSender, IdcPairBlankNote),
 }).add(
-  Stdb.StdbFn.receiver("receiveNote", {
+  Stdb.Fn.receiver("receiveNote", {
     params: Stdb.struct({ note: Stdb.string() }),
   }),
 )
@@ -95,12 +95,12 @@ export const PairInboxInterface = Stdb.RemoteInterface.make({
 })
 ```
 
-`RemoteInterface.make` throws `StdbValidationError` (`InvalidRemoteInterface`)
+`RemoteInterface.make` throws `StdbValidationDefect` (`InvalidRemoteInterface`)
 at load when an endpoint of the group is not a receiver or the name is not a
 SpacetimeDB identifier.
 
 A package that emits declarations annotates the exported group with
-`Stdb.StdbGroup<...>` and the interface with
+`Stdb.Group<...>` and the interface with
 `Stdb.RemoteInterfaceOf<"pair_inbox", typeof IdcPairInbox>`: their inferred
 types are built from internal helpers that a consumer's declaration emit
 cannot name.
@@ -130,23 +130,25 @@ const compiled = build(
 )
 ```
 
-`RemoteInterface.bind` throws `StdbValidationError`
+`RemoteInterface.bind` throws `StdbValidationDefect`
 (`RemoteInterfaceBindingMismatch`) at load when the binding no longer carries a
 receiver of the interface under its wire name with its parameters in order, and
 a receiver missing from the binding's declaration is a type error. `build`
 refuses a module with an outbox whose interface has no binding
 (`OutboxReceiverBindingMissing`) or an interface bound twice
 (`DuplicateReceiverBinding`); a binding no outbox uses is accepted.
-`StdbBuilder.plan` and the test harness never read a binding.
+The test harness binds implementations directly and never reads a binding.
 
 ## Inbox
 
 The receiving module adds the group like any other and implements it. A group
 implementing a receiver must declare a guard as its `middleware.reducers`;
-`StdbBuilder.group` throws `StdbValidationError` (`ReceiverWithoutGuard`)
+`Builder.group` throws `StdbValidationDefect` (`ReceiverWithoutGuard`)
 otherwise.
 
 ```ts
+const { Db, Env, ReducerCtx } = IdcPairReceiverModule
+
 export const requireTrustedSender = Effect.gen(function* () {
   const ctx = yield* ReducerCtx
   const env = yield* Env
@@ -161,7 +163,7 @@ export const requireTrustedSender = Effect.gen(function* () {
   }
 })
 
-export const IdcPairInboxLive = Stdb.StdbBuilder.group(
+export const IdcPairInboxLive = Stdb.Builder.group(
   IdcPairReceiverModule,
   "IdcPairInbox",
   {
@@ -196,43 +198,51 @@ An outbox table is bound to one receiver of one interface. Its row is the
 call: `msgId` (`u64`, primary key, auto-increment), `target` (the receiving
 database), the receiver's parameters as the binding defines them, any local
 columns you add (stored, never sent), and `enqueuedAt`. It has a `byTarget`
-index over `[target, msgId]`, is always private, and states its encoded size
-bound.
+index over `[target, msgId]`, is always private, and limits each encoded row.
 
 ```ts
 export const noteOutbox = Stdb.outboxTable("noteOutbox", {
   interface: PairInboxInterface,
   reducer: "receiveNote",
-  rowBytesMax: 4 * 1024,
 })
 ```
 
-`rowBytesMax` defaults to `Stdb.outboxRowBytesMaxDefault` (64 KiB) and may not
+The optional `rowBytesMax` setting defaults to `Stdb.outboxRowBytesMaxDefault` (64 KiB) and may not
 exceed `Stdb.outboxRowBytesMaxCeiling` (1 MiB), half of the 2 MiB request body
 a standalone host accepts: a row over that limit can never be delivered and
 would block its stream. Send ids and digests, never blobs.
 
 The insert is the send. The handle fills `msgId` and `enqueuedAt`, and its
-error channel carries `OutboxRowTooLarge` for a row over the bound, which your
+error channel carries `OutboxRowTooLargeError` for a row over the bound, which your
 handler must handle: drop the call, or refuse its own caller with an error it
 declares.
 
 ```ts
+const { Db, Env, ReducerCtx } = IdcPairSenderModule
+
 export const resolveReceiver = Effect.gen(function* () {
   const env = yield* Env
   const hex = yield* env.IDC_PAIR_RECEIVER
   return Stdb.RemoteInterface.peer(PairInboxInterface, new Identity(hex))
 })
 
-sendNote: Effect.fn(function* ({ note }) {
-  const target = yield* resolveReceiver
-  const db = yield* Db
-  yield* db.noteOutbox.insert({ target, note }).pipe(
-    Effect.catchTag("OutboxRowTooLarge", (tooLarge) =>
-      Effect.fail(IdcPairNoteTooLarge.make({ rowBytes: tooLarge.rowBytes })),
-    ),
-  )
-})
+export const IdcPairSendsLive = Stdb.Builder.group(
+  IdcPairSenderModule,
+  "IdcPairSends",
+  {
+    sendNote: Effect.fn(function* ({ note }) {
+      const target = yield* resolveReceiver
+      const db = yield* Db
+      yield* db.noteOutbox.insert({ target, note }).pipe(
+        Effect.catchTag("OutboxRowTooLargeError", (tooLarge) =>
+          Effect.fail(
+            IdcPairNoteTooLarge.make({ rowBytes: tooLarge.rowBytes }),
+          ),
+        ),
+      )
+    }),
+  },
+)
 ```
 
 `target` is a `PeerIdentity` of the interface, which only
@@ -251,22 +261,30 @@ receiver's failure text otherwise. Transport failures never settle; the host
 retries them.
 
 ```ts
-export const IdcPairSettles = Stdb.StdbGroup.make("IdcPairSettles").add(
-  Stdb.StdbFn.outboxResult("noteSettled", { table: noteOutbox }),
+export const IdcPairSettles = Stdb.Group.make("IdcPairSettles").add(
+  Stdb.Fn.outboxResult("noteSettled", { table: noteOutbox }),
 )
 
-noteSettled: ({ row, result }) =>
-  Effect.gen(function* () {
-    const db = yield* Db
-    yield* db.noteDelivery.insert({
-      msgId: row.msgId,
-      note: row.note,
-      ...StdbServer.OutboxResult.$match(result, {
-        Delivered: () => ({ delivered: true, message: "" }),
-        Refused: ({ message }) => ({ delivered: false, message }),
-      }),
-    })
-  }).pipe(Effect.orDie)
+export const IdcPairSettlesLive = Stdb.Builder.group(
+  IdcPairSenderModule,
+  "IdcPairSettles",
+  {
+    noteSettled: ({ row, result }) =>
+      Effect.gen(function* () {
+        const ctx = yield* ReducerCtx
+        const db = yield* Db
+        yield* db.noteDelivery.insert({
+          msgId: row.msgId,
+          note: row.note,
+          settledBy: ctx.sender,
+          ...StdbServer.OutboxResult.$match(result, {
+            Delivered: () => ({ delivered: true, message: "" }),
+            Refused: ({ message }) => ({ delivered: false, message }),
+          }),
+        })
+      }).pipe(Effect.orDie),
+  },
+)
 ```
 
 A settle handler's error type is `never`: the host does not retry a failed
@@ -298,11 +316,14 @@ database with no JWT, a failure settles `Refused`, the settle runs as the zero
 identity and the row is deleted. Tests choose every interleaving explicitly.
 
 ```ts
+declare const sender: StdbTesting.IdcPumpDatabase
+declare const receiver: StdbTesting.IdcPumpDatabase
+
 const pump = StdbTesting.makeIdcPump({
   links: [{ sender, receivers: [receiver] }],
 })
 pump.deliverNext("noteOutbox") // the head row of one stream
-pump.drain({ deliveriesMax: 100 })
+pump.drain() // up to 1,000 deliveries; `{ deliveriesMax }` sets another bound
 ```
 
 `IdcPump.recording({ databaseIdentity })` stands in for a receiver you do not

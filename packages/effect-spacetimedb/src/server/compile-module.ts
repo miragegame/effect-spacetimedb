@@ -1,30 +1,28 @@
-import type {
-  ModuleExport,
-  CaseConversionPolicy as ServerCaseConversionPolicy,
-} from "spacetimedb/server"
+import type { ModuleExport } from "spacetimedb/server"
 import {
   type InternalStdbBuildPlan,
   InternalStdbBuildPlanSymbol as internalStdbBuildPlanSymbol,
 } from "../builder/internal-build-plan.ts"
 import { procedureResponseType } from "../callable-protocol.ts"
-import { snakeCaseName } from "../contract/canonical-name.ts"
+import {
+  canonicalNameForPolicy,
+  snakeCaseName,
+} from "../contract/canonical-name.ts"
 import { outboxResultFromHost } from "../contract/outbox-result.ts"
 import {
   type AnyRemoteInterfaceBinding,
   isReceiverSpec,
 } from "../contract/remote-interface.ts"
-import type {
-  Declaration as EnvironmentDeclaration,
-  LiteralValues,
-} from "../contract/environment.ts"
 import { fieldOptions } from "../contract/field.ts"
 import {
   type HttpHandlerMethod,
   HttpRouterExportKey,
 } from "../contract/http-handler.ts"
+import type { LifecycleName } from "../contract/lifecycle.ts"
+import { makeStdbDiagnostic } from "../contract/diagnostic.ts"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import {
-  StdbValidationError,
+  StdbValidationDefect,
   validateServerHandlers,
 } from "../contract/module-validation.ts"
 import {
@@ -33,9 +31,7 @@ import {
 } from "../contract/type/host-codec.ts"
 import * as Type from "../contract/type.ts"
 import { addDecodeContext, StdbDecodeError } from "../decode-error.ts"
-import type { LifecycleKeys, ServerInstance } from "./bind.ts"
 import {
-  asCompilerSchemaBridge,
   compilerOutboxResultType,
   type CompilerReducerOptions,
   defineCompilerHostAnonymousView,
@@ -50,41 +46,50 @@ import {
   invokeCompilerAnonymousView,
   invokeCompilerSenderView,
   makeCompilerHttpRouter,
+  rejectCompilerViewArguments,
+  reportCompilerViewFailure,
   resetCompilerTypeBuilderCaches,
   toCompilerHttpHandlerCtx,
   toCompilerProcedureCtx,
   toCompilerReducerCtx,
   toCompilerTypeBuilder,
 } from "./compiler-interop.ts"
+import type {
+  BoundModule,
+  RawHttpHandlerRecord,
+  RawLifecycleHandlerRecord,
+  RawProcedureHandlerRecord,
+  RawReducerHandlerRecord,
+  RawViewHandlerRecord,
+  ViewKeys,
+} from "./handler-types.ts"
 import {
-  assertOwnedHandlerBundle,
-  ServerOwnerSymbol,
-} from "./handler-ownership.ts"
-import type { ViewKeys } from "./handler-types.ts"
-import {
-  CaseConversionPolicy,
   SenderError as CompilerSenderError,
+  assertMountSchema,
   isRowTypedQuery,
   schema,
-  t,
 } from "./host-abi-compiler.ts"
 import {
   identityKey,
+  isDatabaseSender,
   isHostRecord,
   isScheduledRowPayload,
   senderErrorMessage,
 } from "./host-abi-runtime.ts"
+import { makeCompilerSchema } from "./compiler-schema.ts"
+import { mountedQueries, type MountQueries } from "./mount-context.ts"
+import { StdbSenderError } from "./services.ts"
 import {
   materializeParamsObject,
   materializeTables,
 } from "./table-materialize.ts"
 import { validateMaterializedTypeNames } from "./type-name-diagnostics.ts"
 
-type CompiledExports = Record<string, ModuleExport>
+export type CompiledExports = Record<string, ModuleExport>
 
 export type CompiledModule<Module extends AnyModuleSpec = AnyModuleSpec> = {
-  readonly module: ServerInstance<Module>["module"]
-  readonly scheduleBindings: ServerInstance<Module>["scheduleBindings"]
+  readonly module: BoundModule<Module>["module"]
+  readonly scheduleBindings: BoundModule<Module>["scheduleBindings"]
   readonly schema: unknown
   readonly exports: Readonly<CompiledExports>
   readonly exportGroup: () => ModuleExport
@@ -129,68 +134,6 @@ const asCompilerSenderError = (cause: unknown): Error | undefined => {
   return message === undefined ? undefined : new CompilerSenderError(message)
 }
 
-const toCaseConversionPolicy = (
-  policy: AnyModuleSpec["settings"]["caseConversionPolicy"],
-): ServerCaseConversionPolicy => {
-  switch (policy) {
-    case undefined:
-    case "snake_case":
-      return CaseConversionPolicy.SnakeCase
-    case "none":
-      return CaseConversionPolicy.None
-  }
-}
-
-// The SATS unit payload every allowed literal value carries.
-const environmentLiteralPayload = {
-  tag: "Product",
-  value: { elements: [] },
-} as const
-
-/**
- * The SDK reads an environment literal set from a payload-free sum's
- * `algebraicType` and only checks that a `variants` member exists. `t.enum`
- * builds the same type but also installs every allowed value as a property of
- * its builder, which breaks on values such as `create`, `optional` or
- * `__proto__`. This constraint carries the type and nothing else.
- */
-const environmentLiteralConstraint = (values: LiteralValues) => ({
-  algebraicType: {
-    tag: "Sum",
-    value: {
-      variants: values.map((name) => ({
-        name,
-        algebraicType: environmentLiteralPayload,
-      })),
-    },
-  },
-  variants: {},
-})
-
-const toCompilerEnvironmentBuilder = (
-  declaration: EnvironmentDeclaration,
-): unknown => {
-  // Secrets are plain strings to the host; redaction applies when module code
-  // reads them.
-  const inner =
-    declaration.kind === "literal"
-      ? environmentLiteralConstraint(declaration.values)
-      : t.string()
-  // `t.option` reads only the inner type's `algebraicType`.
-  return declaration.optional ? t.option(inner as never) : inner
-}
-
-/** Declaration metadata only: no environment value is part of the artifact. */
-const toCompilerEnvironment = (
-  environment: AnyModuleSpec["environment"],
-): Record<string, unknown> =>
-  Object.fromEntries(
-    Object.entries(environment ?? {}).map(([key, declaration]) => [
-      key,
-      toCompilerEnvironmentBuilder(declaration),
-    ]),
-  )
-
 const addHttpRoute = (
   router: ReturnType<typeof makeCompilerHttpRouter>,
   method: HttpHandlerMethod,
@@ -224,19 +167,66 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
     /** See `BuildOptions.receiverBindings`. */
     readonly receiverBindings?: ReadonlyArray<AnyRemoteInterfaceBinding>
   } = {},
-): CompiledModule<Module> => {
+  prefix = "",
+  nativeSchemas = new WeakSet<object>(),
+): CompiledModule<Module> & { readonly [mountedQueries]: MountQueries } => {
   const server = options[internalStdbBuildPlanSymbol].server
-  assertOwnedHandlerBundle(server[ServerOwnerSymbol], options.handlers)
+  const entries: Record<string, unknown> = Object.create(null)
+  const children: Record<string, MountQueries> = Object.create(null)
+  const implementations = options[internalStdbBuildPlanSymbol].mounts
+  // The native dispatcher assigns function ids in schema insertion order.
+  let reference: object | undefined
+  for (const [key, mount] of Object.entries(server.module.mounts ?? {})) {
+    const implementation = implementations[key]!
+    let library: unknown
+    if (implementation.kind === "moduleMount") {
+      const child = compileModule(
+        implementation.plan,
+        compileOptions,
+        prefix + mount.wireNamespace + ".",
+        nativeSchemas,
+      )
+      children[key] = child[mountedQueries]
+      library = { default: child.schema, ModuleExports: child.exportGroup() }
+    } else {
+      library = implementation.library
+      if (isHostRecord(library) && isHostRecord(library.default)) {
+        if (nativeSchemas.has(library.default))
+          throw new StdbValidationDefect({
+            diagnostics: [
+              makeStdbDiagnostic(
+                "DuplicateMountedModule",
+                ["mounts", key],
+                `Native mount "${prefix}${key}" reuses an already mounted Schema. The host accepts repeated schemas, but this package requires one compiled instance per mount. Reuse the existing mount accessor or supply a fresh native schema.`,
+              ),
+            ],
+          })
+        nativeSchemas.add(library.default)
+      }
+    }
+    reference ??= schema({})
+    assertMountSchema(
+      key,
+      isHostRecord(library) ? library.default : undefined,
+      reference,
+    )
+    entries[key] =
+      mount.wireNamespace ===
+      canonicalNameForPolicy(server.module.settings.caseConversionPolicy, key)
+        ? library
+        : { name: mount.wireNamespace, module: library }
+  }
   resetCompilerTypeBuilderCaches()
 
   const module = server.module
   const typeNameDiagnostics = validateMaterializedTypeNames(module)
   if (typeNameDiagnostics.length > 0) {
-    throw new StdbValidationError({ diagnostics: typeNameDiagnostics })
+    throw new StdbValidationDefect({ diagnostics: typeNameDiagnostics })
   }
 
   const materializedTables = materializeTables({
     module,
+    mountedWireNames: prefix === "" ? undefined : module.wireNames.tables,
     receiverBindings: compileOptions.receiverBindings ?? [],
   })
 
@@ -302,17 +292,13 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
     }
   }
 
-  const compiledSchema = asCompilerSchemaBridge(
-    schema(materializedTables as never, {
-      CASE_CONVERSION_POLICY: toCaseConversionPolicy(
-        module.settings.caseConversionPolicy,
-      ),
-      // Compiler boundary: literal constraints are structural SDK types, not
-      // builder instances (see `environmentLiteralConstraint`).
-      env: toCompilerEnvironment(module.environment) as never,
-    }),
+  const { compiledSchema, queries, viewContext } = makeCompilerSchema(
+    module,
+    materializedTables,
+    entries,
+    children,
+    prefix,
   )
-
   const reducerHandlers = (options.handlers.reducers ?? {}) as Record<
     string,
     unknown
@@ -339,28 +325,33 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
     lifecycle: lifecycleHandlers,
   })
   if (handlerDiagnostics.length > 0) {
-    throw new StdbValidationError({ diagnostics: handlerDiagnostics })
+    throw new StdbValidationDefect({ diagnostics: handlerDiagnostics })
   }
 
+  // Compiler boundary: `Handlers` is conditional on each section being
+  // populated, which a generic `Module` leaves unresolved.
+  const handlers = options.handlers as {
+    readonly reducers?: RawReducerHandlerRecord<Module, RuntimeR>
+    readonly procedures?: RawProcedureHandlerRecord<Module, RuntimeR>
+    readonly httpHandlers?: RawHttpHandlerRecord<Module, RuntimeR>
+    readonly views?: RawViewHandlerRecord<Module, RuntimeR>
+    readonly lifecycle?: RawLifecycleHandlerRecord<Module, RuntimeR>
+  }
   const boundReducers =
-    options.handlers.reducers != null
-      ? server.reducers(options.handlers.reducers)
-      : undefined
+    handlers.reducers != null ? server.reducers(handlers.reducers) : undefined
   const boundProcedures =
-    options.handlers.procedures != null
-      ? server.procedures(options.handlers.procedures)
+    handlers.procedures != null
+      ? server.procedures(handlers.procedures)
       : undefined
   const boundHttpHandlers =
-    options.handlers.httpHandlers != null
-      ? server.httpHandlers(options.handlers.httpHandlers)
+    handlers.httpHandlers != null
+      ? server.httpHandlers(handlers.httpHandlers)
       : undefined
   const boundViews =
-    options.handlers.views != null
-      ? server.views(options.handlers.views)
-      : undefined
+    handlers.views != null ? server.views(handlers.views) : undefined
   const boundLifecycle =
-    options.handlers.lifecycle != null
-      ? server.lifecycle(options.handlers.lifecycle)
+    handlers.lifecycle != null
+      ? server.lifecycle(handlers.lifecycle)
       : undefined
 
   const compiledExports: CompiledExports = {}
@@ -370,31 +361,19 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
     }
     compiledExports[name] = value
   }
-  const assertSchedulerInvocation = (
+  const schedulerRefusal = (
     key: string,
     ctx: {
       readonly sender: unknown
       readonly databaseIdentity: unknown
     },
-  ): void => {
+  ): string | undefined => {
     const binding = scheduledTargetBindings.get(key)
-    if (binding === undefined || binding.allowExternalCallers) {
-      return
-    }
-
-    const senderKey = identityKey(ctx.sender)
-    const databaseIdentityKey = identityKey(ctx.databaseIdentity)
-    if (
-      senderKey !== undefined &&
-      databaseIdentityKey !== undefined &&
-      senderKey === databaseIdentityKey
-    ) {
-      return
-    }
-
-    throw new CompilerSenderError(
-      `Scheduled target ${key} is only invocable by the scheduler`,
-    )
+    return binding === undefined ||
+      binding.allowExternalCallers ||
+      isDatabaseSender(ctx)
+      ? undefined
+      : `Scheduled target ${key} is only invocable by the scheduler`
   }
   // The host runs a settle reducer as the zero identity; anyone else calling
   // it, the owner included, could forge an outcome for a row it did not send.
@@ -517,13 +496,26 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
         compiledSchema,
         params,
         (ctx, rawArgs) => {
-          assertSchedulerInvocation(key, ctx)
+          const refusal = schedulerRefusal(key, ctx)
+          if (refusal !== undefined) {
+            throw new CompilerSenderError(refusal)
+          }
           assertSettleInvocation(key, ctx)
-          const args = decodeCallableArgs<
-            Type.TypeOf<typeof reducer.spec.params>
-          >(key, reducer.spec.params, rawArgs, `reducers.${key}.params`)
+          const reducerCtx = toCompilerReducerCtx<Module>(ctx)
+          const decodeArgs = (): Type.TypeOf<typeof reducer.spec.params> => {
+            try {
+              return decodeCallableArgs(
+                key,
+                reducer.spec.params,
+                rawArgs,
+                `reducers.${key}.params`,
+              )
+            } catch (cause) {
+              return reducer.rejectArguments(reducerCtx, cause)
+            }
+          }
           try {
-            reducer.invoke(toCompilerReducerCtx<Module>(ctx), args)
+            reducer.invoke(reducerCtx, decodeArgs())
           } catch (cause) {
             throw asCompilerSenderError(cause) ?? cause
           }
@@ -555,21 +547,47 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
         compiledSchema,
         params,
         toCompilerTypeBuilder(returnType, `procedures.${key}.returns`),
+        // No failure of the call may escape this function: the host answers an
+        // exception out of a procedure by discarding the isolate, whatever threw
+        // it. The SDK serializes what this returns after it has returned, so a
+        // `Stdb.custom` whose encoder disagrees with its declared type still
+        // throws there. That takes the module author's own mismatch, which no
+        // caller can reach and the first test finds, so nothing checks for it.
         (ctx, rawArgs: unknown) => {
-          assertSchedulerInvocation(key, ctx)
-          const args = decodeCallableArgs<
-            Type.TypeOf<typeof procedure.spec.params>
-          >(key, procedure.spec.params, rawArgs, `procedures.${key}.params`)
-          const value = procedure.invoke(
-            toCompilerProcedureCtx<Module>(ctx),
-            args,
-          )
-          return wrapCallableDecode(
-            key,
-            "ok",
-            `procedures.${key}.returns`,
-            () => encodeOrThrow(returnType, value),
-          )
+          const procedureCtx = toCompilerProcedureCtx<Module>(ctx)
+          let args: Type.TypeOf<typeof procedure.spec.params>
+          try {
+            const refusal = schedulerRefusal(key, ctx)
+            if (refusal !== undefined) {
+              throw new StdbSenderError({ value: refusal })
+            }
+            args = decodeCallableArgs(
+              key,
+              procedure.spec.params,
+              rawArgs,
+              `procedures.${key}.params`,
+            )
+          } catch (cause) {
+            return encodeOrThrow(
+              returnType,
+              procedure.rejectArguments(procedureCtx, cause),
+            )
+          }
+
+          const reply = procedure.invoke(procedureCtx, args)
+          try {
+            return wrapCallableDecode(
+              key,
+              "ok",
+              `procedures.${key}.returns`,
+              () => encodeOrThrow(returnType, reply),
+            )
+          } catch (cause) {
+            return encodeOrThrow(
+              returnType,
+              procedure.failReply(procedureCtx, cause),
+            )
+          }
         },
         scheduledTargetTables.get(key),
       )
@@ -629,13 +647,36 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
       )
       // A view is never a schedule target, so its arguments always arrive
       // as the host's named params object.
-      const decodeArgs = (rawArgs: unknown) =>
-        wrapCallableDecode(key, "args", `views.${key}.params`, () =>
-          decodeOrThrow<Type.TypeOf<typeof view.spec.params>>(
-            view.spec.params,
-            rawArgs,
-          ),
-        )
+      const decodeArgs = (
+        ctx: Parameters<typeof rejectCompilerViewArguments>[1],
+        rawArgs: unknown,
+      ): Type.TypeOf<typeof view.spec.params> => {
+        try {
+          return wrapCallableDecode(key, "args", `views.${key}.params`, () =>
+            decodeOrThrow<Type.TypeOf<typeof view.spec.params>>(
+              view.spec.params,
+              rawArgs,
+            ),
+          )
+        } catch (cause) {
+          return rejectCompilerViewArguments(view, ctx, cause)
+        }
+      }
+      // A result that does not encode never reached the view's boundary, so it
+      // reports here. The view's own failures already have.
+      const encodeResult = (
+        ctx: Parameters<typeof reportCompilerViewFailure>[1],
+        value: unknown,
+      ) => {
+        try {
+          return wrapCallableDecode(key, "ok", `views.${key}.returns`, () =>
+            compileViewResult(view.spec.returns, value),
+          )
+        } catch (cause) {
+          reportCompilerViewFailure(view, ctx, cause)
+          throw cause
+        }
+      }
 
       const compiledView =
         view.spec.context === "sender"
@@ -643,46 +684,38 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
               compiledSchema,
               {
                 name: exportName,
-                public: view.spec.public,
+                public: true,
               },
               params,
               returnType,
               (ctx, rawArgs) => {
+                const args = decodeArgs(ctx, rawArgs)
                 const value = invokeCompilerSenderView<
                   Module,
                   unknown,
                   unknown
-                >(view, ctx, decodeArgs(rawArgs))
+                >(view, viewContext(ctx), args)
 
-                return wrapCallableDecode(
-                  key,
-                  "ok",
-                  `views.${key}.returns`,
-                  () => compileViewResult(view.spec.returns, value),
-                )
+                return encodeResult(ctx, value)
               },
             )
           : defineCompilerHostAnonymousView(
               compiledSchema,
               {
                 name: exportName,
-                public: view.spec.public,
+                public: true,
               },
               params,
               returnType,
               (ctx, rawArgs) => {
+                const args = decodeArgs(ctx, rawArgs)
                 const value = invokeCompilerAnonymousView<
                   Module,
                   unknown,
                   unknown
-                >(view, ctx, decodeArgs(rawArgs))
+                >(view, viewContext(ctx), args)
 
-                return wrapCallableDecode(
-                  key,
-                  "ok",
-                  `views.${key}.returns`,
-                  () => compileViewResult(view.spec.returns, value),
-                )
+                return encodeResult(ctx, value)
               },
             )
 
@@ -693,14 +726,14 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
   if (boundLifecycle != null) {
     const lifecycleRecord = boundLifecycle as Partial<
       Record<
-        LifecycleKeys,
+        LifecycleName,
         (typeof boundLifecycle)[keyof typeof boundLifecycle]
       >
     >
 
     for (const key of Object.keys(
       lifecycleRecord,
-    ) as ReadonlyArray<LifecycleKeys>) {
+    ) as ReadonlyArray<LifecycleName>) {
       const lifecycle = lifecycleRecord[key]
       if (lifecycle == null) {
         continue
@@ -736,6 +769,7 @@ export const compileModule = <Module extends AnyModuleSpec, RuntimeR = never>(
   return {
     module,
     scheduleBindings: server.scheduleBindings,
+    [mountedQueries]: queries,
     schema: compiledSchema,
     exports: compiledExports,
     exportGroup: () => compiledSchema.exportGroup(compiledExports),

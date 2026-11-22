@@ -12,7 +12,7 @@ Primary keys and single-column unique constraints are declared on the column
 value type. Multi-column unique constraints are declared in the table's
 `constraints` callback so column names stay type-checked.
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
 const membership = Stdb.table("membership", {
@@ -23,11 +23,11 @@ const membership = Stdb.table("membership", {
     email: Stdb.string(),
     externalId: Stdb.string().unique(),
   },
+  indexes: (columns) => [
+    Stdb.index("byTenantEmail", [columns.tenantId, columns.email]),
+  ],
   constraints: (columns) => [
-    Stdb.unique("membership_tenant_email_unique", [
-      columns.tenantId,
-      columns.email,
-    ]),
+    Stdb.unique("tenantEmailUnique", [columns.tenantId, columns.email]),
   ],
 })
 ```
@@ -44,15 +44,15 @@ widths, `bool`, `string`, `Stdb.bigint()`, `Stdb.identity()`,
 `Stdb.connectionId()`, `Stdb.timestamp()`, `Stdb.timeDuration()`,
 `Stdb.uuid()`, and any `Stdb.enum(...)` or `Stdb.sum(...)`. A sum keys on its
 whole encoded value, so a payload variant is a distinct key per payload:
-`{ tag: "Retrying", value: 7 }` and `{ tag: "Retrying", value: 9 }` are two
+`{ tag: "retrying", value: 7 }` and `{ tag: "retrying", value: 9 }` are two
 rows under a sum primary key.
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
 const Status = Stdb.sum({
-  Ready: Stdb.unit(),
-  Retrying: Stdb.u32(),
+  ready: Stdb.unit(),
+  retrying: Stdb.u32(),
 })
 
 const progress = Stdb.table("progress", {

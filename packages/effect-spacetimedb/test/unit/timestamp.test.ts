@@ -2,7 +2,7 @@ import * as EffectVitest from "@effect/vitest"
 import {
   compareTimestampAsc,
   compareTimestampDesc,
-  timestampAddMillis,
+  timestampAdd,
   timestampIsDue,
   timestampToDate,
   timestampToIso,
@@ -28,12 +28,12 @@ describe("timestamp utilities", (it) => {
   it("preserves whole-millisecond rounding for additions", () => {
     const base = new Timestamp(10_000n)
 
-    expect(timestampAddMillis(base, 1.5).microsSinceUnixEpoch).toBe(12_000n)
-    expect(timestampAddMillis(base, -1.5).microsSinceUnixEpoch).toBe(9_000n)
-    expect(timestampAddMillis(base, -0.5).microsSinceUnixEpoch).toBe(10_000n)
-    expect(
-      timestampAddMillis(timestampAddMillis(base, 5), -5).microsSinceUnixEpoch,
-    ).toBe(base.microsSinceUnixEpoch)
+    expect(timestampAdd(base, 1.5).microsSinceUnixEpoch).toBe(12_000n)
+    expect(timestampAdd(base, -1.5).microsSinceUnixEpoch).toBe(9_000n)
+    expect(timestampAdd(base, -0.5).microsSinceUnixEpoch).toBe(10_000n)
+    expect(timestampAdd(timestampAdd(base, 5), -5).microsSinceUnixEpoch).toBe(
+      base.microsSinceUnixEpoch,
+    )
   })
 
   it("checks due timestamps inclusively", () => {

@@ -13,7 +13,7 @@ import type { AnyTableSpec } from "../contract/table.ts"
 import type { AnyViewSpec } from "../contract/view.ts"
 
 import type { AnyEndpointDecl, AnyHttpRouteDecl } from "./declarations.ts"
-import type { StdbHttpGroup } from "./http-builders.ts"
+import type { HttpGroup } from "./http-builders.ts"
 
 export declare const EndpointTypeId: unique symbol
 
@@ -104,25 +104,20 @@ export type MergeErrorDefinitions<
     : Default
   : Own
 
-type WithErrors<Spec, Errors extends AnyErrorDefinition | undefined> = Omit<
+export type WithErrors<
   Spec,
-  "errors"
-> &
+  Errors extends AnyErrorDefinition | undefined,
+> = Omit<Spec, "errors"> &
   (Errors extends AnyErrorDefinition
     ? { readonly errors: Errors }
     : { readonly errors?: undefined })
 
-type SpecWithGroupErrors<
+export type SpecWithGroupErrors<
   Spec,
   Default extends AnyErrorDefinition | undefined,
-> = Spec extends ReducerSpec<infer _Params, infer Own, infer _Public>
+> = Spec extends ReducerSpec<infer _Params, infer Own>
   ? WithErrors<Spec, MergeErrorDefinitions<Default, Own>>
-  : Spec extends ProcedureSpec<
-        infer _Params,
-        infer _Returns,
-        infer Own,
-        infer _Public
-      >
+  : Spec extends ProcedureSpec<infer _Params, infer _Returns, infer Own>
     ? WithErrors<Spec, MergeErrorDefinitions<Default, Own>>
     : Spec extends HttpHandlerSpec<
           infer Request,
@@ -136,7 +131,7 @@ type SpecWithGroupErrors<
         : WithErrors<Spec, MergeErrorDefinitions<Default, Own>>
       : Spec
 
-type DeclRecordUnionWithGroupErrors<
+export type DeclRecordUnionWithGroupErrors<
   Endpoints,
   Kind extends AnyEndpointDecl["declKind"],
   SpecConstraint,
@@ -151,7 +146,7 @@ type DeclRecordUnionWithGroupErrors<
     }
   : never
 
-type RecordFromDeclsWithGroupErrors<
+export type RecordFromDeclsWithGroupErrors<
   Endpoints,
   Kind extends AnyEndpointDecl["declKind"],
   SpecConstraint,
@@ -177,7 +172,7 @@ export type LifecycleConfig = Partial<{
   readonly [Name in LifecycleName]: LifecycleConfigEntry<Name>
 }>
 
-type SpecOfLifecycleConfigEntry<Entry> = Entry extends {
+export type SpecOfLifecycleConfigEntry<Entry> = Entry extends {
   readonly spec: infer Spec extends LifecycleSpec
 }
   ? Spec
@@ -423,7 +418,7 @@ export type GroupEndpointPairsOf<Groups> = Groups extends {
 
 export type HttpGroupPair = { readonly name: string; readonly group: string }
 
-export type HttpGroupPairsOf<Groups> = Groups extends StdbHttpGroup<
+export type HttpGroupPairsOf<Groups> = Groups extends HttpGroup<
   infer GroupId,
   infer Endpoints
 >

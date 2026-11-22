@@ -1,10 +1,8 @@
-import { make as makeServer } from "../../src/server/bind.ts"
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import * as Server from "effect-spacetimedb/server"
-import * as StdbTesting from "effect-spacetimedb/testing"
 import type { Bound, Range } from "spacetimedb/server"
-import { TestSyncRunner } from "../helpers/sync-runner"
 
 const indexedUser = Stdb.table("user", {
   columns: {
@@ -39,10 +37,9 @@ const indexedUser = Stdb.table("user", {
   ],
 })
 
-const IndexedModule = Stdb.StdbModule.make(
-  "indexed_users_typecheck",
-  {},
-).addTables(indexedUser).spec
+const IndexedModule = Stdb.Module.make("indexed_users_typecheck", {}).addTables(
+  indexedUser,
+).spec
 
 const algorithmIndexedUser = Stdb.table("algorithmUser", {
   columns: {
@@ -107,7 +104,7 @@ const algorithmIndexedUser = Stdb.table("algorithmUser", {
   ],
 })
 
-const AlgorithmIndexedModule = Stdb.StdbModule.make(
+const AlgorithmIndexedModule = Stdb.Module.make(
   "algorithm_indexed_users_typecheck",
   {},
 ).addTables(algorithmIndexedUser).spec
@@ -120,24 +117,16 @@ const fieldAlgorithmIndexedUser = Stdb.table("fieldAlgorithmUser", {
   },
 })
 
-const FieldAlgorithmIndexedModule = Stdb.StdbModule.make(
+const FieldAlgorithmIndexedModule = Stdb.Module.make(
   "field_algorithm_indexed_users_typecheck",
   {},
 ).addTables(fieldAlgorithmIndexedUser).spec
 
-const server = makeServer({
-  module: IndexedModule,
-  runtime: TestSyncRunner,
-})
-const algorithmServer = makeServer({
-  module: AlgorithmIndexedModule,
-  runtime: TestSyncRunner,
-})
-const fieldAlgorithmServer = makeServer({
-  module: FieldAlgorithmIndexedModule,
-  runtime: TestSyncRunner,
-})
-
+declare const db: Server.DbService<typeof IndexedModule>
+declare const algorithmDb: Server.DbService<typeof AlgorithmIndexedModule>
+declare const fieldAlgorithmDb: Server.DbService<
+  typeof FieldAlgorithmIndexedModule
+>
 declare const readonlyDb: Server.ReadonlyDbService<typeof IndexedModule>
 declare const readonlyAlgorithmDb: Server.ReadonlyDbService<
   typeof AlgorithmIndexedModule
@@ -156,8 +145,6 @@ declare const nativeNameRange: Range<string>
 declare const nativeScoreRange: Range<number>
 
 const _indexUsageProgram = Effect.gen(function* () {
-  const db = yield* server.db
-
   const inserted = yield* db.user.insert({
     id: "user-1",
     tenant: "tenant-a",
@@ -167,7 +154,6 @@ const _indexUsageProgram = Effect.gen(function* () {
   const pkDeleted: boolean = yield* db.user.id.delete("user-1")
   const cleared: bigint = yield* db.user.clear()
   const pkUpdated = yield* db.user.id.update(inserted)
-  const pkReplaced = yield* db.user.id.replace(inserted)
   const uniqueRow = yield* db.user.email_tenant.find([
     "ada@example.com",
     "tenant-a",
@@ -188,8 +174,6 @@ const _indexUsageProgram = Effect.gen(function* () {
     yield* db.user.email_only.filterToArray("ada@example.com")
   const emailOnlyDeleted: number =
     yield* db.user.email_only.delete("ada@example.com")
-  const emailOnlyDeletedAll: number =
-    yield* db.user.email_only.deleteAll("ada@example.com")
   const rangedRows = yield* db.user.name_index.filterToArray("Ada")
   const nameRange: {
     readonly from: Bound<string>
@@ -241,14 +225,12 @@ const _indexUsageProgram = Effect.gen(function* () {
   void pkDeleted
   void cleared
   void pkUpdated
-  void pkReplaced
   void uniqueRow
   void namedUniqueRow
   void uniqueDeleted
   void namedUniqueDeleted
   void emailOnlyRows
   void emailOnlyDeleted
-  void emailOnlyDeletedAll
   void rangedRows
   void rangeRows
   void nativeRangeRows
@@ -270,17 +252,11 @@ const _indexUsageProgram = Effect.gen(function* () {
   // @ts-expect-error unique explicit indexes must not expose update unless they are the primary-key accessor
   void db.user.email_tenant.update
 
-  // @ts-expect-error unique explicit indexes must not expose replace unless they are the primary-key accessor
-  void db.user.email_tenant.replace
-
   // @ts-expect-error ranged indexes must not expose find
   void db.user.name_index.find
 
   // @ts-expect-error ranged indexes must not expose update
   void db.user.name_index.update
-
-  // @ts-expect-error ranged indexes must not expose replace
-  void db.user.name_index.replace
 
   // @ts-expect-error subset indexes of a wider unique constraint must remain ranged
   void db.user.email_only.find
@@ -300,32 +276,32 @@ const _indexUsageProgram = Effect.gen(function* () {
 void _indexUsageProgram
 
 const _algorithmIndexUsageProgram = Effect.gen(function* () {
-  const db = yield* algorithmServer.db
-
   const tenantHashRows =
-    yield* db.algorithmUser.tenantHash.filterToArray("tenant-a")
+    yield* algorithmDb.algorithmUser.tenantHash.filterToArray("tenant-a")
   const tenantHashDeleted: number =
-    yield* db.algorithmUser.tenantHash.delete("tenant-a")
+    yield* algorithmDb.algorithmUser.tenantHash.delete("tenant-a")
   const tenantEmailHashRows =
-    yield* db.algorithmUser.tenantEmailHash.filterToArray([
+    yield* algorithmDb.algorithmUser.tenantEmailHash.filterToArray([
       "tenant-a",
       "ada@example.com",
     ])
   const tenantEmailHashNamedRows =
-    yield* db.algorithmUser.tenantEmailHash.filterToArray({
+    yield* algorithmDb.algorithmUser.tenantEmailHash.filterToArray({
       tenant: "tenant-a",
       email: "ada@example.com",
     })
-  const rankDirectRows = yield* db.algorithmUser.rankDirect.filterToArray(1)
+  const rankDirectRows =
+    yield* algorithmDb.algorithmUser.rankDirect.filterToArray(1)
   const rankDirectRangeRows =
-    yield* db.algorithmUser.rankDirect.filterToArray(nativeScoreRange)
+    yield* algorithmDb.algorithmUser.rankDirect.filterToArray(nativeScoreRange)
   const displayNameBtreeRows =
-    yield* db.algorithmUser.displayNameBtree.filterToArray("Ada")
+    yield* algorithmDb.algorithmUser.displayNameBtree.filterToArray("Ada")
   const emailHashUniqueRow =
-    yield* db.algorithmUser.emailHashUnique.find("ada@example.com")
-  const scoreDirectUniqueRow = yield* db.algorithmUser.scoreDirectUnique.find(1)
+    yield* algorithmDb.algorithmUser.emailHashUnique.find("ada@example.com")
+  const scoreDirectUniqueRow =
+    yield* algorithmDb.algorithmUser.scoreDirectUnique.find(1)
   const uniqueCodeBtreeUniqueRow =
-    yield* db.algorithmUser.uniqueCodeBtreeUnique.find("code-1")
+    yield* algorithmDb.algorithmUser.uniqueCodeBtreeUnique.find("code-1")
 
   void tenantHashRows
   void tenantHashDeleted
@@ -339,42 +315,43 @@ const _algorithmIndexUsageProgram = Effect.gen(function* () {
   void uniqueCodeBtreeUniqueRow
 
   // @ts-expect-error non-unique hash indexes must not expose single-row find
-  void db.algorithmUser.tenantHash.find
-
-  // @ts-expect-error non-unique hash indexes must not expose range deleteAll
-  void db.algorithmUser.tenantHash.deleteAll
+  void algorithmDb.algorithmUser.tenantHash.find
 
   // @ts-expect-error hash point filters require exact keys, not ranges
-  yield* db.algorithmUser.tenantHash.filterToArray(nativeNameRange)
+  yield* algorithmDb.algorithmUser.tenantHash.filterToArray(nativeNameRange)
 
   // @ts-expect-error composite hash point filters require all columns
-  yield* db.algorithmUser.tenantEmailHash.filterToArray(["tenant-a"])
+  yield* algorithmDb.algorithmUser.tenantEmailHash.filterToArray(["tenant-a"])
 
   // @ts-expect-error direct range indexes must not expose single-row find
-  void db.algorithmUser.rankDirect.find
+  void algorithmDb.algorithmUser.rankDirect.find
 
   // @ts-expect-error btree range indexes must not expose single-row find
-  void db.algorithmUser.displayNameBtree.find
+  void algorithmDb.algorithmUser.displayNameBtree.find
 
   // @ts-expect-error unique hash indexes must not expose range filters
-  void db.algorithmUser.emailHashUnique.filterToArray
+  void algorithmDb.algorithmUser.emailHashUnique.filterToArray
 
   // @ts-expect-error unique direct indexes must not expose range filters
-  void db.algorithmUser.scoreDirectUnique.filterToArray
+  void algorithmDb.algorithmUser.scoreDirectUnique.filterToArray
 })
 void _algorithmIndexUsageProgram
 
 const _fieldAlgorithmIndexUsageProgram = Effect.gen(function* () {
-  const db = yield* fieldAlgorithmServer.db
-
   const fieldHashRows =
-    yield* db.fieldAlgorithmUser.fieldTenant.filterToArray("tenant-a")
+    yield* fieldAlgorithmDb.fieldAlgorithmUser.fieldTenant.filterToArray(
+      "tenant-a",
+    )
   const fieldDirectRows =
-    yield* db.fieldAlgorithmUser.fieldRank.filterToArray(nativeScoreRange)
+    yield* fieldAlgorithmDb.fieldAlgorithmUser.fieldRank.filterToArray(
+      nativeScoreRange,
+    )
   const fieldHashDeleted: number =
-    yield* db.fieldAlgorithmUser.fieldTenant.delete("tenant-a")
+    yield* fieldAlgorithmDb.fieldAlgorithmUser.fieldTenant.delete("tenant-a")
   const fieldDirectDeleted: number =
-    yield* db.fieldAlgorithmUser.fieldRank.delete(nativeScoreRange)
+    yield* fieldAlgorithmDb.fieldAlgorithmUser.fieldRank.delete(
+      nativeScoreRange,
+    )
 
   void fieldHashRows
   void fieldDirectRows
@@ -382,13 +359,15 @@ const _fieldAlgorithmIndexUsageProgram = Effect.gen(function* () {
   void fieldDirectDeleted
 
   // @ts-expect-error field-derived hash indexes must not expose single-row find
-  void db.fieldAlgorithmUser.fieldTenant.find
+  void fieldAlgorithmDb.fieldAlgorithmUser.fieldTenant.find
 
-  // @ts-expect-error field-derived hash indexes must not accept ranges
-  yield* db.fieldAlgorithmUser.fieldTenant.filterToArray(nativeNameRange)
+  yield* fieldAlgorithmDb.fieldAlgorithmUser.fieldTenant.filterToArray(
+    // @ts-expect-error field-derived hash indexes must not accept ranges
+    nativeNameRange,
+  )
 
   // @ts-expect-error field-derived direct indexes remain range indexes, not unique indexes
-  void db.fieldAlgorithmUser.fieldRank.find
+  void fieldAlgorithmDb.fieldAlgorithmUser.fieldRank.find
 })
 void _fieldAlgorithmIndexUsageProgram
 
@@ -412,17 +391,11 @@ void readonlyDb.user.clear
 // @ts-expect-error readonly db must not expose primary-key updates
 void readonlyDb.user.id.update
 
-// @ts-expect-error readonly db must not expose primary-key replacements
-void readonlyDb.user.id.replace
-
 // @ts-expect-error readonly db must not expose unique-index deletes
 void readonlyDb.user.email_tenant.delete
 
 // @ts-expect-error readonly db must not expose ranged-index deletes
 void readonlyDb.user.email_only.delete
-
-// @ts-expect-error readonly db must not expose ranged-index deleteAll
-void readonlyDb.user.email_only.deleteAll
 
 // @ts-expect-error readonly db must not expose hash-index deletes
 void readonlyAlgorithmDb.algorithmUser.tenantHash.delete
@@ -445,7 +418,7 @@ const rawUniqueComposite = reducerCtx.db.user.email_tenant.find([
   "tenant-a",
 ])
 const rawBtreeCompositeRows: Iterable<
-  StdbTesting.TableRow<typeof indexedUser>
+  StdbInternal.TableRow<typeof indexedUser>
 > = reducerCtx.db.user.tenant_name.filter(["tenant-a"])
 const rawUniqueCompositeObject = {
   email: "ada@example.com",
@@ -464,21 +437,22 @@ void reducerCtx.db.user.email_tenant.find(rawUniqueCompositeObject)
 // @ts-expect-error raw composite range indexes only accept tuple prefixes
 void reducerCtx.db.user.tenant_name.filter(rawBtreeCompositeObject)
 
-const rawHashRows: Iterable<StdbTesting.TableRow<typeof algorithmIndexedUser>> =
-  algorithmReducerCtx.db.algorithmUser.tenantHash.filter("tenant-a")
+const rawHashRows: Iterable<
+  StdbInternal.TableRow<typeof algorithmIndexedUser>
+> = algorithmReducerCtx.db.algorithmUser.tenantHash.filter("tenant-a")
 const rawHashDeleted: number =
   algorithmReducerCtx.db.algorithmUser.tenantHash.delete("tenant-a")
 const rawCompositeHashRows: Iterable<
-  StdbTesting.TableRow<typeof algorithmIndexedUser>
+  StdbInternal.TableRow<typeof algorithmIndexedUser>
 > = algorithmReducerCtx.db.algorithmUser.tenantEmailHash.filter([
   "tenant-a",
   "ada@example.com",
 ])
 const rawDirectRows: Iterable<
-  StdbTesting.TableRow<typeof algorithmIndexedUser>
+  StdbInternal.TableRow<typeof algorithmIndexedUser>
 > = algorithmReducerCtx.db.algorithmUser.rankDirect.filter(nativeScoreRange)
 const rawBtreeRows: Iterable<
-  StdbTesting.TableRow<typeof algorithmIndexedUser>
+  StdbInternal.TableRow<typeof algorithmIndexedUser>
 > = algorithmReducerCtx.db.algorithmUser.displayNameBtree.filter("Ada")
 const rawUniqueHash =
   algorithmReducerCtx.db.algorithmUser.emailHashUnique.find("ada@example.com")
@@ -516,11 +490,11 @@ void algorithmReducerCtx.db.algorithmUser.tenantEmailHash.filter(
 )
 
 const rawFieldHashRows: Iterable<
-  StdbTesting.TableRow<typeof fieldAlgorithmIndexedUser>
+  StdbInternal.TableRow<typeof fieldAlgorithmIndexedUser>
 > =
   fieldAlgorithmReducerCtx.db.fieldAlgorithmUser.fieldTenant.filter("tenant-a")
 const rawFieldDirectRows: Iterable<
-  StdbTesting.TableRow<typeof fieldAlgorithmIndexedUser>
+  StdbInternal.TableRow<typeof fieldAlgorithmIndexedUser>
 > =
   fieldAlgorithmReducerCtx.db.fieldAlgorithmUser.fieldRank.filter(
     nativeScoreRange,

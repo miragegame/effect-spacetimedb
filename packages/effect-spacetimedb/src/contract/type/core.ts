@@ -17,6 +17,7 @@ import {
   annotateSchema,
   annotationInEncodedShape,
   type SchemaAnnotationId,
+  schemaRegistryKey,
   StdbTypeInfoAnnotationId,
 } from "../schema-annotations.ts"
 import type { IndexAlgorithm } from "../table-index.ts"
@@ -119,8 +120,9 @@ export type LiteralEncoded<
 
 export const StructTypeId = "__effectSpacetimeDbStructType" as const
 export const StructFieldTypeId = "__effectSpacetimeDbStructFieldType" as const
+// Published copies share this registry key when exchanging schema values.
 export const StdbValueTypeId: unique symbol = Symbol.for(
-  "effect-spacetimedb/StdbValueType",
+  schemaRegistryKey("ValueType"),
 ) as never
 
 export const I8Min = -0x80
@@ -153,7 +155,7 @@ export const I256Max = (1n << 255n) - 1n
 
 export const U256Max = (1n << 256n) - 1n
 
-export interface StdbValueType<
+export interface ValueType<
   out A,
   out Encoded = A,
   out Kind extends TypeKind = TypeKind,
@@ -229,7 +231,11 @@ export interface StdbValueType<
       { readonly default: Value }
     >
   >
-  readonly name: <Self extends AnyValueType, const Name extends string>(
+  /**
+   * The column's name in the database. `.named(...)` names the SATS type
+   * instead, which is what a reusable struct or sum wants.
+   */
+  readonly columnName: <Self extends AnyValueType, const Name extends string>(
     this: Self,
     dbName: Name,
   ) => TableFieldType<
@@ -239,19 +245,14 @@ export interface StdbValueType<
       { readonly name: Name }
     >
   >
+  /** The SATS type's name, which generated clients use for this type. */
   readonly named: <Self extends AnyValueType>(
     this: Self,
     identifier: string,
   ) => Self
 }
 
-export type ValueType<
-  A,
-  Encoded = A,
-  Kind extends TypeKind = TypeKind,
-> = StdbValueType<A, Encoded, Kind>
-
-export type AnyValueType = StdbValueType<unknown, unknown>
+export type AnyValueType = ValueType<unknown, unknown>
 
 export type StringValueType = ValueType<string, string, "string">
 
@@ -331,7 +332,7 @@ export type HostSum<Variants extends SumVariants> = {
   >
 }[keyof Variants & string]
 
-type TableFieldOptionsOfValue<Value extends AnyValueType> =
+export type TableFieldOptionsOfValue<Value extends AnyValueType> =
   Value extends TableFieldType<
     AnyValueType,
     infer Options extends TableFieldOptions
@@ -339,7 +340,7 @@ type TableFieldOptionsOfValue<Value extends AnyValueType> =
     ? Options
     : {}
 
-type MergeTableFieldOptions<
+export type MergeTableFieldOptions<
   Current extends TableFieldOptions,
   Next extends TableFieldOptions,
 > = Omit<Current, keyof Next> & Next
@@ -478,13 +479,14 @@ export type ValueCodec<A, Encoded> = {
 }
 
 /**
- * Inclusive element-count bounds of a `Stdb.array`. They constrain decoding and
- * encoding only: SpaceTimeDB's `array<T>` wire type has no length, so arrays
- * of the same item with different bounds lower identically.
+ * Inclusive element-count bounds of a `Stdb.array`. A side left out is not
+ * checked. They constrain decoding and encoding only: SpaceTimeDB's `array<T>`
+ * wire type has no length, so arrays of the same item with different bounds
+ * lower identically.
  */
 export type ArrayLengthBounds = {
-  readonly minimum: number
-  readonly maximum: number
+  readonly minimum?: number
+  readonly maximum?: number
 }
 
 export type ValueTypeInfo<A = unknown, Encoded = unknown> = {
@@ -733,14 +735,13 @@ export const supportsAutoInc = (
   return AutoIncColumnKinds.has(info.kind)
 }
 
-export class StdbTypeNotNameableError extends Data.TaggedError(
-  "StdbTypeNotNameableError",
+export class StdbTypeNotNameableDefect extends Data.TaggedError(
+  "StdbTypeNotNameableDefect",
 )<{
   readonly kind: TypeKind
 }> {
-  override get message(): string {
-    return `SATS type identifiers can only be assigned to struct, sum, and string-literal value types; received ${this.kind}`
-  }
+  override readonly message =
+    `SATS type identifiers can only be assigned to struct, sum, and string-literal value types; received ${this.kind}`
 }
 
 const isStringLiteralValues = (
@@ -775,7 +776,7 @@ export function namedValueType<Type extends AnyValueType>(
         info.values == null ||
         !isStringLiteralValues(info.values)))
   ) {
-    throw new StdbTypeNotNameableError({
+    throw new StdbTypeNotNameableDefect({
       kind: info?.kind ?? this[StdbValueTypeId],
     })
   }
@@ -829,8 +830,8 @@ export const applyFieldOptions = <
     throw new Error("A field cannot be both optional and a primary key")
   }
 
-  if (options?.autoInc === true && options.primaryKey !== true) {
-    throw new Error("autoInc fields must also be primary keys")
+  if (options?.optional === true && options.autoInc === true) {
+    throw new Error("A field cannot be both optional and autoInc")
   }
 
   if (
@@ -951,7 +952,7 @@ export const fieldChainMethods = {
   default<Type extends AnyValueType>(this: Type, value: TypeOf<Type>) {
     return mergeFieldOptions(this, { default: value })
   },
-  name<Type extends AnyValueType>(this: Type, dbName: string) {
+  columnName<Type extends AnyValueType>(this: Type, dbName: string) {
     return mergeFieldOptions(this, { name: dbName })
   },
   named<Type extends AnyValueType>(this: Type, identifier: string) {

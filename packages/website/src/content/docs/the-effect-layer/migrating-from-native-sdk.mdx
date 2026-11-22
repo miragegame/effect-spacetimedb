@@ -15,6 +15,8 @@ contract, then move handlers behind the typed builder group by group.
 
 :::
 
+For an existing effect-spacetimedb 0.8 application, follow [Upgrading from 0.8 to 0.9](/the-effect-layer/upgrading-from-0-8).
+
 ## The Same Module, Both Ways
 
 The native module and the equivalent effect-spacetimedb contract — declare the
@@ -59,18 +61,18 @@ const user = Stdb.table("user", {
   },
 })
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.reducer("user_upsert", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.reducer("userUpsert", {
     params: Stdb.struct({ id: Stdb.string(), name: Stdb.string() }),
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const Module = Stdb.Module.make("app").addTables(user).add(Users)
 const { Db } = Module
 
 // 2. implement handlers behind the typed group
-const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
-  user_upsert: (args) =>
+const UsersLive = Stdb.Builder.group(Module, "Users", {
+  userUpsert: (args) =>
     Effect.gen(function* () {
       const db = yield* Db
       yield* db.user.insert(args)
@@ -85,13 +87,17 @@ const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
 
 | Native concept | effect-spacetimedb concept |
 | --- | --- |
-| reducer function export | `StdbFn.reducer(...)` in a callable group |
-| procedure function export | `StdbFn.procedure(...)` in a callable group |
+| reducer function export | `Fn.reducer(...)` in a callable group |
+| procedure function export | `Fn.procedure(...)` in a callable group |
+| `table({ cachePolicy }, columns)` | Pass the same literal to `Stdb.table`, `Stdb.scheduledTable`, or `Stdb.outboxTable`. Set a module-wide fallback with `settings.tableCachePolicyDefault`. |
 | table builder | `Stdb.table(...)` bound to a variable |
-| `reducer`/`procedure` `onSchedule` option | `StdbFn.scheduledReducer(...)` or `scheduledProcedure(...)` |
-| HTTP handler export | `StdbHttpGroup` plus `StdbBuilder.group(...)` |
+| `reducer`/`procedure` `onSchedule` option | `Fn.scheduledReducer(...)` or `scheduledProcedure(...)` |
+| `schema({ ns: lib })` | Declare `.mount("ns", Library)` for an Effect contract, or `.mountNative<typeof import("lib")>()("ns")` for a native library. Implement the declaration in the parent build. |
+| `ctx.db.ns` | Use the Effect child table handles at `(yield* Parent.Db).ns`, or the corresponding readonly handles in a root view. |
+| `ctx.as.ns` | Use `Parent.mounts.ns.use(fn)` for a native mutation helper, or select the procedure or HTTP kind. Run an Effect library operation with `Parent.mounts.ns.run(effect)`. See [Submodules](/core-concepts/databases/submodules). |
+| HTTP handler export | `HttpGroup` plus `Builder.group(...)` |
 
-Schedules are registered on the function, not the table: `StdbFn.scheduledReducer(...)`
+Schedules are registered on the function, not the table: `Fn.scheduledReducer(...)`
 and `scheduledProcedure(...)` compile to the native `onSchedule` option, which is
 where SpacetimeDB now expects the binding. If you are porting a module that
 passes `scheduled` to `table(...)`, that registration is deprecated upstream —

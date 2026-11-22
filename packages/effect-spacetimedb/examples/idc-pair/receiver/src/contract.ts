@@ -16,7 +16,7 @@ export const receivedNote = Stdb.table("receivedNote", {
  * `IDC_PAIR_TRUSTED_SENDER` is the hex identity of the one database it admits;
  * until it is set, it admits none.
  */
-export const IdcPairReceiverModule = Stdb.StdbModule.make("idc_pair_receiver", {
+export const IdcPairReceiverModule = Stdb.Module.make("idc_pair_receiver", {
   environment: {
     IDC_PAIR_TRUSTED_SENDER: Stdb.Environment.optional(
       Stdb.Environment.string(),

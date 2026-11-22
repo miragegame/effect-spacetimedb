@@ -1,4 +1,4 @@
-import { makeStdbDiagnostic, StdbValidationError } from "../diagnostic.ts"
+import { makeStdbDiagnostic, StdbValidationDefect } from "../diagnostic.ts"
 import type {
   BuilderFactories,
   PrimitiveLiteral,
@@ -22,7 +22,7 @@ export const assertNumericLiteralPrecision = (
       (!Number.isFinite(value) ||
         (Number.isInteger(value) && Math.abs(value) > Number.MAX_SAFE_INTEGER))
     ) {
-      throw new StdbValidationError({
+      throw new StdbValidationDefect({
         diagnostics: [
           makeStdbDiagnostic(
             "NumericLiteralPrecision",

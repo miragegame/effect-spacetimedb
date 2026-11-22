@@ -9,9 +9,9 @@ sidebar:
 <a class="upstream-doc" href="https://spacetimedb.com/docs/functions/views" target="_blank" rel="noopener noreferrer">SpacetimeDB: Views ↗</a>
 
 Views are callable group endpoints with return value types. Sender views use
-`StdbFn.view(...)`; anonymous views use `StdbFn.anonymousView(...)`.
+`Fn.view(...)`; anonymous views use `Fn.anonymousView(...)`.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -23,20 +23,20 @@ const user = Stdb.table("user", {
   },
 })
 
-const Users = Stdb.StdbGroup.make("Users")
-  .add(Stdb.StdbFn.view("self_user", { returns: Stdb.option(user.row) }))
-  .add(Stdb.StdbFn.anonymousView("all_users", { returns: Stdb.array(user.row, { minimum: 0, maximum: 1_000 }) }))
+const Users = Stdb.Group.make("Users")
+  .add(Stdb.Fn.view("selfUser", { returns: Stdb.option(user.row) }))
+  .add(Stdb.Fn.anonymousView("allUsers", { returns: Stdb.array(user.row) }))
 
-const Module = Stdb.StdbModule.make("app").addTables(user).add(Users)
+const Module = Stdb.Module.make("app").addTables(user).add(Users)
 const { ReadonlyDb, ViewCtx } = Module
 
-const UsersLive = Stdb.StdbBuilder.group(Module, "Users", {
-  self_user: Effect.fn(function* () {
+const UsersLive = Stdb.Builder.group(Module, "Users", {
+  selfUser: Effect.fn(function* () {
     const ctx = yield* ViewCtx
     const db = yield* ReadonlyDb
     return yield* db.user.id.find(String(ctx.sender))
   }),
-  all_users: Effect.fn(function* () {
+  allUsers: Effect.fn(function* () {
     const db = yield* ReadonlyDb
     return yield* db.user.toArray()
   }),
@@ -54,7 +54,7 @@ handler receives them decoded, and the host computes one answer per distinct
 argument tuple: an anonymous view's answer is shared by every caller passing
 the same arguments, a sender view's is per caller.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
@@ -68,17 +68,17 @@ const post = Stdb.table("post", {
   indexes: (columns) => [Stdb.index("byAuthor", [columns.authorId])],
 })
 
-const Posts = Stdb.StdbGroup.make("Posts").add(
-  Stdb.StdbFn.anonymousView("postsByAuthor", {
+const Posts = Stdb.Group.make("Posts").add(
+  Stdb.Fn.anonymousView("postsByAuthor", {
     params: Stdb.struct({ authorId: Stdb.string() }),
-    returns: Stdb.array(post.row, { minimum: 0, maximum: 1_000 }),
+    returns: Stdb.array(post.row),
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").addTables(post).add(Posts)
+const Module = Stdb.Module.make("app").addTables(post).add(Posts)
 const { ReadonlyDb } = Module
 
-const PostsLive = Stdb.StdbBuilder.group(Module, "Posts", {
+const PostsLive = Stdb.Builder.group(Module, "Posts", {
   postsByAuthor: Effect.fn(function* ({ authorId }) {
     const db = yield* ReadonlyDb
     return yield* db.post.byAuthor.filterToArray(authorId)
@@ -92,6 +92,8 @@ arguments, and the WebSocket session's `viewGroup`, `streamViewRows` and
 params:
 
 ```typescript
+declare const session: StdbClient.WsSession<typeof Module.spec>
+
 session.viewGroup(["postsByAuthor"] as const, {
   args: { postsByAuthor: { authorId: "ada" } },
 })

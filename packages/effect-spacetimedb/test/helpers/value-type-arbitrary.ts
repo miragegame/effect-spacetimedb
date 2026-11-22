@@ -1,5 +1,5 @@
 import * as FastCheck from "fast-check"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import {
   ConnectionId,
   Identity,
@@ -34,11 +34,11 @@ import {
   codecCorpus,
   codecCorpusEntries,
 } from "./codec-corpus"
-import { testArrayLength } from "./array-bounds"
+import { testArrayLengthMaximum, testArrayLengthMinimum } from "./array-bounds"
 
 type CorpusArbitrary = {
-  readonly kind: StdbTesting.ContractType.TypeKind
-  readonly type: StdbTesting.ContractType.AnyValueType
+  readonly kind: StdbInternal.ContractType.TypeKind
+  readonly type: StdbInternal.ContractType.AnyValueType
   readonly valueArbitrary: FastCheck.Arbitrary<unknown>
 }
 
@@ -69,7 +69,7 @@ const u256BigInt = FastCheck.bigInt({ min: 0n, max: U256Max })
 const literalArbitrary = (
   sample: CodecCorpusSample,
 ): FastCheck.Arbitrary<unknown> => {
-  const values = StdbTesting.ContractType.literalValues(sample.type)
+  const values = StdbInternal.ContractType.literalValues(sample.type)
   if (values === undefined) {
     throw new Error("Expected corpus literal values")
   }
@@ -107,8 +107,8 @@ const arbitraryByKind = {
   // carry the u16 bound and its length the test bounds.
   array: () =>
     FastCheck.array(u16Number, {
-      minLength: testArrayLength.minimum,
-      maxLength: testArrayLength.maximum,
+      minLength: testArrayLengthMinimum,
+      maxLength: testArrayLengthMaximum,
     }),
   bigint: () => FastCheck.bigInt(),
   bool: () => FastCheck.boolean(),
@@ -171,7 +171,7 @@ const arbitraryByKind = {
   unit: (sample) => FastCheck.constant(sample.value),
   uuid: () => u128BigInt.map((n) => new Uuid(n)),
 } satisfies Record<
-  StdbTesting.ContractType.TypeKind,
+  StdbInternal.ContractType.TypeKind,
   (sample: CodecCorpusSample) => FastCheck.Arbitrary<unknown>
 >
 
@@ -183,8 +183,8 @@ export const corpusArbitraries: ReadonlyArray<CorpusArbitrary> =
   }))
 
 export const anyCorpusSample: FastCheck.Arbitrary<{
-  readonly kind: StdbTesting.ContractType.TypeKind
-  readonly type: StdbTesting.ContractType.AnyValueType
+  readonly kind: StdbInternal.ContractType.TypeKind
+  readonly type: StdbInternal.ContractType.AnyValueType
   readonly value: unknown
 }> = FastCheck.oneof(
   ...corpusArbitraries.map(({ kind, type, valueArbitrary }) =>

@@ -38,7 +38,6 @@ const isBaseHostError = (value: unknown) =>
   "name" in value &&
   value.name === "SpacetimeHostError"
 
-// @effect-diagnostics-next-line extendsNativeError:off -- Mirrors the `spacetimedb` host runtime's own native error class: its `Symbol.hasInstance` matches errors the host throws (matched by `name`), which a tagged class could never be.
 export class SpacetimeHostError extends Error {
   static override [Symbol.hasInstance](value: unknown): boolean {
     return isBaseHostError(value) || isNamedHostError(value)

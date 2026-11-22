@@ -14,11 +14,10 @@ needed by clients.
 
 ## HTTP Client
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
-declare const Module: Stdb.AnyStdbModule
 declare const uri: string
 declare const databaseName: string
 declare const token: string
@@ -28,12 +27,11 @@ const HttpLive = Example.client.http.layer({
   uri,
   databaseName,
   token,
-  callDurationMax: "10 seconds",
 })
 
 const program = Effect.gen(function* () {
   const client = yield* Example.client.http.Tag
-  yield* client.reducers.user_upsert({ userId: "u1", name: "Ada" })
+  yield* client.reducers.userUpsert({ userId, name })
 }).pipe(Effect.provide(HttpLive))
 ```
 
@@ -52,20 +50,39 @@ const api = Stdb.toHttpApi(Module)
 This is useful when callers already use `HttpApiClient.make(...)` and want
 status-based declared-error decoding.
 
+## Time Bounds
+
+`callDurationMax` bounds an HTTP call from request to
+fully read response, and a WebSocket call from sending it to its answer, and
+`connectDurationMax` bounds WebSocket connection acquisition. All are optional
+and default to 30 seconds, the exported `callDurationMaxDefault` and
+`connectDurationMaxDefault`. Set either option to `Duration.infinity` to disable its timer. Zero, negative
+and invalid durations throw a `TypeError` when the client is built.
+
+An overrun HTTP call fails with `TransportError` whose `cause` is
+`HttpCallDurationExceededError`. The bound stops the caller waiting, not the database:
+a request that already arrived may still commit, so treat a `TransportError` as
+"outcome unknown". Set the option from your own budget, such as a request
+deadline or a lease, when 30 seconds is not what a caller can afford.
+
+An overrun WebSocket call fails with `ConnectionLostError`, which also means
+"outcome unknown", and it ends the connection, not just the call. A socket can stay
+open with no peer behind it, after a network change for example, and an unanswered
+call is the only evidence a client gets of that. Every other call on the connection
+fails the same way, and a session supervisor replaces it. So one overrun costs the
+whole connection: raise the bound for a procedure that may legitimately take longer.
+A session that only reads makes no calls, so this cannot detect a dead socket under
+it.
+
 ## WebSocket Client
 
 WebSocket sessions use generated native bindings through
 `effect-spacetimedb/client`.
 
-```typescript twoslash
-import * as StdbClient from "effect-spacetimedb/client"
+```typescript
 import * as Stdb from "effect-spacetimedb"
+import { DbConnection } from "./module_bindings"
 
-declare const Module: Stdb.AnyStdbModule
-declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
-  typeof Module.spec,
-  unknown
->
 declare const uri: string
 declare const databaseName: string
 declare const token: string
@@ -77,7 +94,6 @@ const WsLive = Example.client.ws.layerGenerated({
   uri,
   databaseName,
   token,
-  connectTimeoutMillis: 10_000,
 })
 ```
 
@@ -87,15 +103,10 @@ entrypoint.
 
 Named tags let one process hold multiple sessions for the same module.
 
-```typescript twoslash
-import * as StdbClient from "effect-spacetimedb/client"
+```typescript
 import * as Stdb from "effect-spacetimedb"
+import { DbConnection } from "./module_bindings"
 
-declare const Module: Stdb.AnyStdbModule
-declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
-  typeof Module.spec,
-  unknown
->
 declare const uri: string
 declare const databaseName: string
 declare const token: string
@@ -103,7 +114,7 @@ declare const token: string
 const Example = Stdb.project(Module)
 const MainSession = Example.client.ws.tag("main")
 const MainLive = Example.client.ws.layerGenerated(
-  { DbConnection, uri, databaseName, token, connectTimeoutMillis: 10_000 },
+  { DbConnection, uri, databaseName, token },
   { name: "main" },
 )
 ```
@@ -158,15 +169,10 @@ batch and reconciles the cache: rows unchanged across the outage fire no
 callbacks, changed rows fire one update, insert or delete, and each replayed
 subscription fires `onApplied` again.
 
-```typescript twoslash
-import * as StdbClient from "effect-spacetimedb/client"
+```typescript
 import * as Stdb from "effect-spacetimedb"
+import { DbConnection } from "./module_bindings"
 
-declare const Module: Stdb.AnyStdbModule
-declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
-  typeof Module.spec,
-  unknown
->
 declare const uri: string
 declare const databaseName: string
 declare const token: string
@@ -178,9 +184,8 @@ const WsLive = Example.client.ws.layerGenerated({
   uri,
   databaseName,
   token,
-  connectTimeoutMillis: 10_000,
   // The SDK raises delays below 500 ms (first) and 1 s (cap) to those floors.
-  automaticReconnect: { delayMillisMin: 1_000, delayMillisMax: 30_000 },
+  automaticReconnect: { delayMin: "1 second", delayMax: "30 seconds" },
 })
 ```
 
@@ -192,6 +197,7 @@ last rows and streams stay open, while calls are refused without being sent:
 | --- | --- | --- |
 | Made while the SDK reconnects or replays | `CallNotSentError` | The server never saw it; retrying once the session is live is safe. |
 | In flight when the socket dropped | `ConnectionLostError` | The outcome is unknown; it may have committed. |
+| Unanswered at `callDurationMax` | `ConnectionLostError` | The outcome is unknown, and the connection ended with it. |
 | Made on a session whose reconnect changed identity | `ConnectionIdentityChangedError` | The session ended; no retry on it can succeed. |
 
 The SDK does not retry the *initial* connection: that failure still fails the
@@ -200,7 +206,7 @@ supervised session after it connected, subscribed and ran `setup`); a drop
 before that ends it. The session is invalidated when the SDK schedules no
 further attempt (a protocol-error close, a refused fresh token, an identity
 change, `disconnect()`), when a token refresh fails (see Tokens), or when a
-reconnect attempt or its replay is still unresolved `connectTimeoutMillis`
+reconnect attempt or its replay is still unresolved `connectDurationMax`
 after its scheduled start; the SDK has no handshake or replay timeout of its
 own, so the library ends such a connection.
 
@@ -213,7 +219,10 @@ server runtime that never sends resume events.
 A subscription that fails to replay is dropped by the SDK. A consumer stream on
 it fails with `SubscriptionRejectedError` on its own; a supervisor's
 subscription target that fails to replay ends the session, so the supervisor
-replaces it.
+replaces it. A subscription made with no failure sink of its own
+(`session.subscribe`, a table or view group's `subscribe`, `wsConnectAndSubscribe`)
+ends the connection as `lost`: its rows have left the cache, and nothing else
+would say so.
 
 ## Supervised Sessions With Automatic Reconnect
 
@@ -227,8 +236,61 @@ backoff), and per-session setup. Its phase reports which one is happening:
 | `connecting` | none yet | the supervisor's first activation |
 | `live` | current | — |
 | `recovering` | retained (published as waiting); cache readable, calls refused | the SDK, on the same session (`reconnectAttempt`, `reconnectDelayMillis`, `reason`) |
-| `reconnecting` | the previous one, as waiting | the supervisor, building a replacement |
-| `fatal` | the last one | nobody: retrying cannot help |
+| `reconnecting` | the previous one, as waiting, unless it was revoked | the supervisor, building a replacement |
+| `fatal` | the last one, unless it was revoked | nobody: retrying cannot help |
+
+Between replacements the supervisor waits `reconnectDelayFirst` (250 ms) and
+doubles the wait up to `reconnectDelayMax` (30 seconds), with jitter, both set
+through `policy`. Going live does not start that over: a server that accepts a session
+and ends it at once would otherwise have every client back at the shortest wait after
+each one. Only a session that stayed live for `stabilityWindow` does (30 seconds,
+the exported `stabilityWindowDefault`), and each stretch between two automatic
+reconnects is judged on its own. A value that bounds nothing, such as `NaN`, `Infinity`
+or a window of `0`, throws a `TypeError` when the supervisor is built.
+
+A session whose reconnect changed identity, or whose token refresh failed or died,
+is revoked: the session signal is a failure with no previous value, so
+`AsyncResult.value` returns nothing, because that session's cache may hold another
+identity's rows. So is a retained session whose replacement cannot get a token,
+because the token Effect failed, died or overran the attempt: refs read from the
+session lose their rows too, with `credentialsFailed` or `credentialsDefect` as the
+`kind`. The library cannot tell a passing failure of the token source from a user
+who signed out, so a brief failure of the token source blanks what the session
+showed until a replacement connects.
+
+So is a retained session whose replacement connects under a different identity, with
+`identityChanged` as the `kind`, as soon as the replacement connects: before its
+subscriptions and `setup` run, and whether or not they succeed. The replacement itself
+carries on, because its own connection is clean. Until it is live, the session signal,
+`wsSupervisedSessionAtom` and `wsTableGroupSnapshotAtom` read as a waiting failure with no
+value, whose error is `ConnectionLostError`, because a lost connection is what happened
+to the old session. Once it is live, `wsTableGroupSnapshotAtom` is `Initial` until its
+subscription applies. `ConnectionIdentityChangedError` never appears on this path.
+
+A client with no `token` gets a new identity on every connection, so all of its
+replacements go this way, where a client with a token keeps showing the previous rows,
+as waiting, until the new subscription applies. To keep them, keep the identity: give
+the client a `token`, because the same token keeps the same identity. `session.token` is
+the one the server issued to a connection that had none.
+
+A revocation reaches back through every session the supervisor has replaced under
+that identity, not only the latest: a snapshot atom that nothing has read for a while
+and a ref still open on an older session lose their rows all the same, and that
+session's `isRevoked()` turns true. Any other end keeps the rows, including a
+replacement that got its token and failed to connect.
+
+`wsTableGroupSnapshotAtom` carries the previous rows only into a session the supervisor
+built to replace the last one under the same identity, and keeps them if that
+replacement fails before its subscription applies. Everything else starts with none: a
+connection atom that moves to another supervisor, one that goes `Initial` when a user
+signs out, and a session with no supervisor, whose rows go to no other connection.
+
+A session you hold directly, from `client.ws.scoped` or a layer, has no supervisor to
+withdraw it, and you decide when to stop reading it. Its refs and streams fail, but
+`session.cache` and a view's `toArray` keep serving the rows after any end. Watch for
+the end with `session.observeInvalidation`, whose `kind` says what happened, or ask
+`session.isRevoked()`, which is true once those rows should no longer be shown, and
+already true when an observer hears of such an end.
 
 `setup` runs once per session. Server state that belongs to a connection rather
 than to a session (presence, for example) is discarded when the server sees the
@@ -239,16 +301,11 @@ next drop; a failure ends the session (the supervisor then replaces it), and a
 drop while it runs, including a call it makes being refused by a socket found
 closed, interrupts it instead. Keep it idempotent.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
-import * as StdbClient from "effect-spacetimedb/client"
 import * as Stdb from "effect-spacetimedb"
+import { DbConnection } from "./module_bindings"
 
-declare const Module: Stdb.AnyStdbModule
-declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
-  typeof Module.spec,
-  unknown
->
 declare const uri: string
 declare const databaseName: string
 // Never a token it already handed out, nor one due for refresh (see Tokens).
@@ -264,7 +321,6 @@ const supervisor = StdbClient.wsSupervisorGenerated({
     uri,
     databaseName,
     token: fetchFreshToken,
-    connectTimeoutMillis: 10_000,
     automaticReconnect: {},
   },
   setup: registerPresence,
@@ -275,7 +331,10 @@ const supervisor = StdbClient.wsSupervisorGenerated({
 A reconnect that comes back under a different identity parks the supervisor in
 `fatal` with a `WsConnectError` whose `cause` is `ConnectionIdentityChangedError`:
 replacing the session would silently serve another identity's data, so the owner
-decides, typically by constructing a supervisor for the new credentials.
+decides, typically by constructing a supervisor for the new credentials. That is the
+SDK's own reconnect, on a session whose subscriptions would carry over. A replacement
+the supervisor builds after a session ended is a new connection, so it does not park:
+it takes the old session's rows away, as above, and starts with none.
 
 ## Tokens
 
@@ -284,11 +343,11 @@ evaluated for every connection attempt: each scoped acquisition, every session a
 supervisor builds, and with automatic reconnect also whenever the SDK refreshes
 its retained token, which it does before a reconnect when that token has no
 expiry, has 5% of its lifetime (at least 30 seconds) or less left, or was
-rejected. An acquisition's evaluation is bounded by `connectTimeoutMillis`,
+rejected. An acquisition's evaluation is bounded by `connectDurationMax`,
 and a failure (any `Error`) fails that attempt with `WsConnectError` carrying
 it as `cause`.
 A refresh runs within its reconnect attempt's bound (the SDK's delay plus
-`connectTimeoutMillis`). One that fails, dies or overruns that bound ends the
+`connectDurationMax`). One that fails, dies or overruns that bound ends the
 session rather than let the SDK retry a token that may never come back (a
 signed-out user). A supervisor reports a failure as that `WsConnectError` and
 an overrun as `WsConnectError` with a `WsConnectTimeoutError` cause, and its
@@ -305,3 +364,11 @@ even while the client clock counts it valid: the server may just have refused
 it (revoked, or the client clock runs behind the server's). The pattern: a
 token cached when the session was checked may serve the first attempt while
 it is not due; every later evaluation fetches a fresh token, or fails.
+
+## When a server message cannot be read
+
+If the SDK cannot decode or apply a server message, it closes the connection even with automatic reconnect enabled. During acquisition, `WsConnectError.cause` carries a `WsProtocolError` with the SDK error and original decode cause. After acquisition, subscriptions are invalidated with kind `protocolError` and cached rows are revoked because the update may have been partially applied. An in-flight call fails with `ConnectionLostError` and its outcome is unknown.
+
+The supervisor parks by default. Check that the bindings match the deployed module before reconnecting. The existing `isRetryable` hook can opt into another attempt.
+
+The SDK logs exceptions from application callbacks and continues delivering events. Row decoding and callback failures in the Effect client reach their owning stream or subscription. A subscription error-message formatter that throws produces a `SubscriptionTransportError`.

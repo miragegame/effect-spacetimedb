@@ -79,15 +79,13 @@ export const viewParamWireKind = (
 export const viewTakesArgs = (params: StructLikeValueType): boolean =>
   Object.keys(structFields(params) ?? {}).length > 0
 
-type BaseViewSpec<
+export type BaseViewSpec<
   Context extends "sender" | "anonymous" = "sender" | "anonymous",
   Returns extends AnyValueType = AnyValueType,
-  Public extends boolean = boolean,
   Params extends StructLikeValueType = StructLikeValueType,
 > = {
   readonly kind: "view"
   readonly context: Context
-  readonly public: Public
   readonly params: Params
   readonly returns: Returns
 }
@@ -95,38 +93,30 @@ type BaseViewSpec<
 export type ViewSpec<
   Context extends "sender" | "anonymous" = "sender" | "anonymous",
   Returns extends AnyValueType = AnyValueType,
-  Public extends boolean = boolean,
   Params extends StructLikeValueType = EmptyViewParamsType,
-> = BaseViewSpec<Context, Returns, Public, Params>
+> = BaseViewSpec<Context, Returns, Params>
 
 export type AnyViewSpec = BaseViewSpec<
   "sender" | "anonymous",
   AnyValueType,
-  boolean,
   StructLikeValueType
 >
 
 type ViewOptions<
   Returns extends AnyValueType,
-  Public extends boolean,
   Params extends StructLikeValueType,
 > = {
-  readonly public: Public
   readonly params: Params
   readonly returns: Returns
 }
 
 export function sender<
   Returns extends AnyValueType = AnyValueType,
-  const Public extends boolean = boolean,
   Params extends StructLikeValueType = EmptyViewParamsType,
->(
-  options: ViewOptions<Returns, Public, Params>,
-): ViewSpec<"sender", Returns, Public, Params> {
+>(options: ViewOptions<Returns, Params>): ViewSpec<"sender", Returns, Params> {
   return {
     kind: "view" as const,
     context: "sender" as const,
-    public: options.public,
     params: options.params,
     returns: options.returns,
   }
@@ -134,15 +124,13 @@ export function sender<
 
 export function anonymous<
   Returns extends AnyValueType = AnyValueType,
-  const Public extends boolean = boolean,
   Params extends StructLikeValueType = EmptyViewParamsType,
 >(
-  options: ViewOptions<Returns, Public, Params>,
-): ViewSpec<"anonymous", Returns, Public, Params> {
+  options: ViewOptions<Returns, Params>,
+): ViewSpec<"anonymous", Returns, Params> {
   return {
     kind: "view" as const,
     context: "anonymous" as const,
-    public: options.public,
     params: options.params,
     returns: options.returns,
   }

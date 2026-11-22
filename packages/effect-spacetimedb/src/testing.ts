@@ -1,15 +1,3 @@
-export * as ClientGeneratedWsAdapter from "./testing/client-generated-ws-adapter.ts"
-export * as ClientHttp from "./testing/client-http.ts"
-export * as ClientHttpJson from "./testing/client-http-json.ts"
-export * as ClientValueCodec from "./testing/client-value-codec.ts"
-export * as ClientWs from "./testing/client-ws.ts"
-export * as ContractCanonicalName from "./testing/contract/canonical-name.ts"
-export * as ContractError from "./testing/contract/error.ts"
-export * as ContractTypeCodec from "./testing/contract/type-codec.ts"
-export * as ContractTypeDescriptor from "./testing/contract/type-descriptor.ts"
-export * as ContractTypeName from "./testing/contract/type-name.ts"
-export * as ContractTypeSchemaFallback from "./testing/contract/type-schema-fallback.ts"
-export * as ContractType from "./testing/contract/type.ts"
 export * as SpacetimeSysStub from "./testing/spacetime-sys.ts"
 
 const spacetimeSysStubSpecifier = import.meta.url.endsWith("/dist/testing.js")
@@ -25,144 +13,500 @@ export const spacetimeSysAlias = {
   "spacetime:sys@2.2": spacetimeSysStub,
 } as const
 
+export type {
+  DeclRecordUnion,
+  DeclRecordUnionWithGroupErrors,
+  EndpointsOfGroup,
+  ErrorsOfGroup,
+  Expand,
+  GroupEndpointPair,
+  HttpGroupPair,
+  HttpHandlerRecordsFromDecls,
+  HttpHandlerRecordsFromDeclsWithGroupErrors,
+  HttpHandlerRecordsFromDeclsWithOptionalGroupErrors,
+  LifecycleNamesFromDecls,
+  LifecycleRecordFromNames,
+  LifecycleRecordsFromDecls,
+  LiteralLifecycleName,
+  MergeConstrainedRecordUnion,
+  MergeErrorDefinitions,
+  MergeRecordUnion,
+  NonEmptyReadonlyArray,
+  ProcedureRecordsFromDecls,
+  ProcedureRecordsFromDeclsWithGroupErrors,
+  ProcedureRecordsFromDeclsWithOptionalGroupErrors,
+  RecordFromDecls,
+  RecordFromDeclsWithGroupErrors,
+  ReducerRecordsFromDecls,
+  ReducerRecordsFromDeclsWithGroupErrors,
+  ReducerRecordsFromDeclsWithOptionalGroupErrors,
+  SchedulePair,
+  SpecWithGroupErrors,
+  UnionToIntersection,
+  ViewRecordsFromDecls,
+  WithErrors,
+} from "./builder/type-utils.ts"
 export {
-  httpHandlerCallable,
-  procedureCallable,
-  procedureEnvelope,
-  procedureResponseType,
-  reducerCallable,
-} from "./callable-protocol.ts"
-export {
-  type CallFailure,
-  catchRawTags,
-  ConnectionLostError,
-  DomainCallError,
-  encodeArgsArray,
-  type RawCallFailure,
-  RemoteRejectedBody,
-  RemoteRejectedError,
-  StdbDecodeError,
-  TransportError,
-} from "./client/call-errors.ts"
-export {
-  decodeStdbEventContext,
-  decodeStdbEventContextSync,
-  StdbEventContext,
-  StdbReducerOutcome,
-} from "./client/event-context.ts"
-export { type InsertEvent, type RelationHandle } from "./client/relation.ts"
-export {
-  type EventTableStreamBufferOptions,
-  EventTableStreamOverflowError,
-  TableStreamOverflowError,
-  type SessionStreamBufferOptions,
-  type TableChange,
-  type TableChangeWithContext,
-} from "./client/session-stream.ts"
-export {
-  type StdbTableChangeEvent,
-  type NativeSubscriptionHandleLike,
-  type SubscriptionBuilderLike,
-  type SubscriptionHandleLike,
-  type TableGroup,
-  type TableGroupSnapshot,
-  type WsCallableTransport,
-  type WsConnectionLike,
-  type WsEventTableStreamOptions,
-  type WsStreamOptions,
-  type WsTableRow,
-  type WaitUntilOptions,
-  WaitUntilTimeoutError,
-  unsubscribeThen,
-} from "./client/ws-client.ts"
-export {
-  type GeneratedConnectionOf,
-  type GeneratedConnectionClassLike,
-  type GeneratedErrorContextOf,
-  GeneratedArtifactShapeError,
-  generatedConnection,
-  type GeneratedWsErrorContext,
-  type GeneratedWsBuilderLike,
-  type GeneratedWsClientConfig,
-  type GeneratedWsConnectionFactory,
-  type ManagedWsConnection,
-  type MismatchedGeneratedModuleDiagnostic,
-  makeScopedFromModulePlan,
-  type WsBuilderConfig,
-  type WsCompression,
-  WsConnectError,
-  WsConnectTimeoutError,
-  type WsGeneratedConfig,
-} from "./client/ws-resource.ts"
-export {
-  makeSupervisor as makeWsSessionSupervisor,
-  makeSupervisorFromModulePlan as makeWsSessionSupervisorFromModulePlan,
-  makeSupervisorGenerated as makeWsSessionSupervisorGenerated,
-  reconnectDelayMillisFirstDefault,
-  reconnectDelayMillisMaxDefault,
-  WsSessionSupervisorDefectError,
-  type WsSessionSupervisor,
-  type WsSessionSupervisorFailure,
-  type WsSessionSupervisorHandle,
-  type WsSessionSupervisorPhase,
-  type WsSessionSupervisorPolicy,
-} from "./client/ws-session-supervisor.ts"
-export {
-  type SubscriptionFailure,
-  SubscriptionInvalidatedError,
-  SubscriptionRejectedError,
-  SubscriptionTransportError,
-} from "./client/ws-subscription.ts"
-export { fromBuilder } from "./client/ws-subscription-adapter.ts"
-export { ensureServerPolyfills } from "./compat/polyfills.ts"
-export { fieldOptions } from "./contract/field.ts"
-export { type AnyModuleSpec } from "./contract/module.ts"
-export { type TableRow } from "./contract/table.ts"
-export {
-  encodeHostValue,
-  StdbHostEncodeError,
-} from "./contract/type/host-codec.ts"
-export { type TypeOf } from "./contract/type.ts"
-export { makeModulePlan } from "./module-plan.ts"
-export { project } from "./project.ts"
-export { bindCallables } from "./testing/bind-callables.ts"
+  bindCallables,
+  type BindCallablesOptions,
+  type BoundCallable,
+  type BoundCallableRecord,
+  type HandlerInput,
+  type HandlerSection,
+  type RawHandlerRecord,
+  type RawSectionedHandlers,
+  type TestCallables,
+} from "./testing/bind-callables.ts"
 export * as IdcPump from "./testing/idc-pump.ts"
 export {
   IdcDelivery,
   type IdcPumpDatabase,
+  type IdcPumpHarness,
   type IdcPumpLink,
   type IdcPumpReceiver,
   type IdcPumpRecordingReceiver,
   type IdcRecordedCall,
   makeIdcPump,
+  type PumpCallable,
 } from "./testing/idc-pump.ts"
 export {
-  TestModuleEnvironmentError,
+  TestModuleEnvironmentDefect,
   type TestModuleEnvironmentUpdate,
   type TestModuleEnvironmentValues,
 } from "./testing/module-environment.ts"
 export {
+  type HarnessOverrides,
   makeTestModuleHarness,
-  NestedTestTransactionError,
+  NestedTestTransactionDefect,
   type OutboxTableKeys,
+  type ProcedureHarnessOverrides,
   type TestModuleHarness,
-  type TestModuleRawDb,
   type TestModuleRowWrite,
 } from "./testing/module-harness.ts"
+export type {
+  AnonymousViewDecl,
+  AnyCallableDecl,
+  AnyEndpointDecl,
+  AnyGroup,
+  AnyHttpRouteDecl,
+  LifecycleDecl,
+  ProcedureDecl,
+  RawHttpRouteDecl,
+  ReducerDecl,
+  RuntimeModuleState,
+  ScheduledCallableMetadata,
+  ScheduledParams,
+  ScheduledProcedureDecl,
+  ScheduledProcedureSpec,
+  ScheduledReducerDecl,
+  ScheduledReducerSpec,
+  SenderViewDecl,
+  TypedHttpRouteDecl,
+} from "./builder/declarations.ts"
+export type {
+  AnyBuilderImpl,
+  AnyModule,
+  BuildPlan,
+  GroupImpl,
+  LifecycleImpl,
+  MountImpl,
+} from "./builder/handler-types.ts"
+export type {
+  Group,
+  HttpGroup,
+} from "./builder/http-builders.ts"
+export type {
+  HttpHandlerCallableDescriptor,
+  ProcedureCallableDescriptor,
+  ReducerCallableDescriptor,
+} from "./callable-protocol.ts"
+export type {
+  ConstraintSpec,
+  UniqueConstraintSpec,
+} from "./contract/constraint.ts"
+export type {
+  Diagnostic,
+  DiagnosticCode,
+  DiagnosticSeverity,
+} from "./contract/diagnostic.ts"
+export type {
+  Declaration,
+  Declarations,
+  LiteralDeclaration,
+  LiteralValues,
+  SecretDeclaration,
+  StringDeclaration,
+  SuppliedValueOf,
+} from "./contract/environment.ts"
+export type {
+  AnyErrorDefinition,
+  ClassesOfInput,
+  ClassesOfItem,
+  DefinitionOfInput,
+  DefinitionOfInputOrUndefined,
+  ErrorDefinition,
+  ErrorInstanceOf,
+  ErrorInstances,
+  ErrorsInput,
+  ErrorsInputItem,
+  ErrorTagOf,
+  PickedErrorClass,
+  PickedErrorClasses,
+  ProcedureDeclaredErrorType,
+  TaggedErrorClass,
+} from "./contract/error.ts"
+export type {
+  AnyFieldType,
+  AnyNormalizedFieldOptions,
+  FieldOptions,
+  FieldOptionsOf,
+  FieldType,
+  FieldValue,
+  NormalizedFieldOptions,
+} from "./contract/field.ts"
+export type {
+  HttpHandlerMethod,
+  HttpHandlerSpec,
+  RawHttpHandlerSpec,
+  TypedHttpHandlerSpec,
+} from "./contract/http-handler.ts"
+export type {
+  LifecycleName,
+  LifecycleSpec,
+  LifecycleSpecs,
+} from "./contract/lifecycle.ts"
+export type {
+  AnyModuleSpec,
+  ModuleSpec,
+  ModuleWireNames,
+} from "./contract/module.ts"
+export type {
+  ModuleMount,
+  MountRecord,
+  MountsOf,
+  NativeMount,
+} from "./contract/mount.ts"
+export type { OutboxResult } from "./contract/outbox-result.ts"
 export {
-  type ClientQueryRoot,
-  type ClientViewQueryRoot,
-  type QueryRelation,
-  type TypedQuery,
+  type OutboxMetadata,
+  OutboxRowTooLargeError,
+} from "./contract/outbox-table.ts"
+export type { ProcedureSpec } from "./contract/procedure.ts"
+export type { ReducerSpec } from "./contract/reducer.ts"
+export type {
+  AnyRemoteInterface,
+  PeerIdentity,
+  RemoteInterface,
+} from "./contract/remote-interface.ts"
+export type {
+  CaseConversionPolicy,
+  ModuleSettings,
+} from "./contract/settings.ts"
+export type { TableCachePolicy } from "./contract/table-cache-policy.ts"
+export type {
+  IndexAlgorithm,
+  IndexSpec,
+} from "./contract/table-index.ts"
+export type {
+  ColumnKey,
+  PrimaryKeyNames,
+  SinglePrimaryKeyName,
+  SingleUnionMember,
+} from "./contract/table-keys.ts"
+export type {
+  AnyScheduledTableSpec,
+  AnyTableSpec,
+  TableRow,
+  TableSpec,
+} from "./contract/table.ts"
+export {
+  type AnyValueType,
+  type ArrayLengthBounds,
+  type ArrayValueType,
+  type Encoded,
+  type EncodedOf,
+  type HostOf,
+  type HostStruct,
+  type HostValue,
+  type MergeTableFieldOptions,
+  type NormalizedStructFieldOptions,
+  type OptionValueType,
+  StdbValueCodecError,
+  type StringValueType,
+  type StructFieldOptions,
+  type StructFields,
+  type StructFieldType,
+  type StructLikeValueType,
+  type StructValueType,
+  type TableFieldOptionsOfValue,
+  type Type,
+  type TypeKind,
+  type TypeOf,
+  type UnitValueType,
+  type ValueType,
+} from "./contract/type/core.ts"
+export type {
+  OptionalKeys,
+  OptionalStructField,
+  OptionWire,
+  RequiredKeys,
+  StructType,
+  UnitWire,
+} from "./contract/type/shapes.ts"
+export type {
+  AnyViewSpec,
+  BaseViewSpec,
+  EmptyViewParamsType,
+  ViewSpec,
+} from "./contract/view.ts"
+export {
+  StdbDecodeError,
+  type StdbDecodePhase,
+} from "./decode-error.ts"
+export type {
+  BodyInit,
+  Headers,
+  HeadersInit,
+  Request,
+  RequestInit,
+  ResponseInit,
+  SyncResponse,
+} from "./http-primitives.ts"
+export type { ModuleBrand } from "./identity-brand.ts"
+export type {
+  Below,
+  Entries,
+  MembersByPath,
+  MountedEntries,
+  NestedMembers,
+  Prefix,
+} from "./member-path.ts"
+export type {
+  ModulePlan,
+  PlannedMember,
+  PlanSection,
+} from "./module-plan.ts"
+export type {
+  HostInvokedFunction,
+  HttpHandlers,
+  OutboxResultBinding,
+  PublicEventTables,
+  PublicPersistentTables,
+  PublicProcedures,
+  PublicReducers,
+  PublicViewKeys,
+  PublicViews,
+  ScheduleBinding,
+  ViewCallArgsOf,
+  ViewItemOf,
+  ViewRowOf,
+  ViewTakesArgs,
+} from "./module-projection.ts"
+export type {
+  QueryRelation,
+  QueryRelationOfTable,
+  QueryRowOfType,
+  ServerQueryRelationOfTable,
+  ServerQueryRoot,
+  StdbColumnExpr,
+  StdbLiteralColumn,
+  StdbPredicate,
+  StdbRowExpr,
+  TypedQuery,
+  TypedQueryRelation,
+  ViewQueryResult,
 } from "./query/types.ts"
-export type { ServerInstance } from "./server/bind.ts"
+export type {
+  AnonymousViewCtx,
+  AnyAnonymousViewCtxService,
+  AnyFromService,
+  AnyHttpHandlerCtxService,
+  AnyProcedureCtxService,
+  AnyQueryRelation,
+  AnyReducerCtxService,
+  AnyServerContextRequirements,
+  AnyServerEffect,
+  AnyViewCtxService,
+  ContextServiceName,
+  Db,
+  EffectServicesOf,
+  EffectWithoutForbiddenRequirements,
+  Env,
+  EnvRequirementFor,
+  From,
+  Http,
+  HttpHandlerCtx,
+  HttpTxAllowedRequirements,
+  HttpTxAllowedRequirementsFor,
+  HttpTxRunner,
+  HttpTxRunnerService,
+  ModuleNameOfRequirement,
+  ModuleScopedAllowedRequirements,
+  ModuleScopedRequirement,
+  MutationCtx,
+  ProcedureCtx,
+  ReadonlyDb,
+  ReducerCtx,
+  TxAllowedRequirements,
+  TxAllowedRequirementsFor,
+  TxCtx,
+  TxRunner,
+  TxRunnerService,
+  ViewCtx,
+  WithEnv,
+} from "./server/context.ts"
+export type {
+  AnyEnvService,
+  EnvironmentOfSpec,
+  ServerEnvironmentReader,
+} from "./server/environment.ts"
+export type {
+  AnonymousViewAllowedRequirements,
+  DeclaredErrorsOf,
+  ExtraRequirements,
+  HandlerBaseErrors,
+  HandlerRequirements,
+  HttpHandlerAllowedRequirements,
+  HttpHandlerErrors,
+  HttpHandlerKeys,
+  HttpHandlerRequestOf,
+  HttpHandlerResponseOf,
+  ModuleLifecycleKeys,
+  ParamsOf,
+  PresentKeys,
+  ProcedureAllowedRequirements,
+  ProcedureHandlerErrors,
+  ProcedureKeys,
+  ReducerAllowedRequirements,
+  ReducerHandlerErrors,
+  ReducerKeys,
+  ReturnsOf,
+  SenderViewAllowedRequirements,
+  ViewArgsOf,
+  ViewHandlerErrors,
+  ViewKeys,
+  ViewSuccessOf,
+} from "./server/handler-types-core.ts"
+export type {
+  HandlerInputDefinitions,
+  Handlers,
+  RawHttpHandlerRecord,
+  RawLifecycleHandlerRecord,
+  RawProcedureHandlerRecord,
+  RawReducerHandlerRecord,
+  RawViewHandlerRecord,
+  SectionFor,
+} from "./server/handler-types-inputs.ts"
+export type {
+  AnonymousViewCtxLike,
+  BaseCallableCtx,
+  BaseReducerCtx,
+  DbShape,
+  ExplicitIndexAccessor,
+  HttpHandlerCtxLike,
+  ImplicitPrimaryKeyAccessor,
+  IntArray,
+  NativeProcedureHttp,
+  PointAccessorFromColumns,
+  PrimaryKeyAccessorFromColumns,
+  ProcedureCtxLike,
+  RangeAccessorFromColumns,
+  ServerAnonymousViewCtx,
+  ServerConnectionId,
+  ServerDatabaseIdentity,
+  ServerJsonValue,
+  ServerJwtClaims,
+  ServerRandom,
+  ServerSender,
+  ServerSenderAuth,
+  ServerSenderViewCtx,
+  ServerTimestamp,
+  ServerUuid,
+  TableHandle,
+  TableKey,
+  TableSpecOf,
+  UniqueAccessorFromColumns,
+  ViewCtxLike,
+} from "./server/runtime-types.ts"
 export {
-  encodeHttpResult,
-  HttpRequestDecodeError,
-  HttpResponseEncodeError,
-  type HttpResult,
-  toHttpResponse,
-} from "./server/callable-runtime.ts"
-export { makeDbHandleFactory } from "./server/db-handle.ts"
-export { provideConstrainedServerSupport } from "./server/runtime-layer.ts"
-export { materializeTableOptions } from "./server/table-options.ts"
+  type DbEffect,
+  type DbFailure,
+  type InsertFailure,
+  type DbHandleFor,
+  type DbStream,
+  type EffectDbView,
+  type EffectHttpClient,
+  type EffectTableHandle,
+  type HostFailure,
+  type HttpResponseLike,
+  type MountedDb,
+  type NativeProcedureHttpRequestOptions,
+  type OutboxInsertRow,
+  type OutboxTableHandle,
+  type ProcedureHttpHeadersInit,
+  type ProcedureHttpRequestOptions,
+  type RawProcedureHttp,
+  type ReadonlyDbHandleFor,
+  type ReadonlyEffectDbView,
+  type ScheduledInsertRow,
+  StdbAutoIncOverflowError,
+  StdbDeclaredErrorEncodingError,
+  StdbHostCallError,
+  StdbNoSuchRowError,
+  StdbScheduleDelayTooLongError,
+  StdbSenderError,
+  StdbUniqueAlreadyExistsError,
+  type TableAccessors,
+  type TableHandleFor,
+} from "./server/services.ts"
+export type {
+  AllPublicTablesSubscriptionTarget,
+  EventTableSubscriptionTarget,
+  FlatSubscriptionTargets,
+  ProjectedSubscriptionTargets,
+  PublicEventTableKeys,
+  PublicPersistentTableKeys,
+  PublicTableKeys,
+  QuerySubscriptionTarget,
+  TableSubscriptionTarget,
+  TableTargetName,
+  ViewSubscriptionTarget,
+  ViewTargetOf,
+} from "./subscription-target.ts"
+export type {
+  Bound,
+  CollapseIndexPoint,
+  CompositeIndexRangeBounds,
+  CompositeIndexRangeObject,
+  ContainsAllColumns,
+  ExplicitIndexSpec,
+  HasExplicitUniqueConstraint,
+  HasImplicitPrimaryKeyUniqueness,
+  IndexPoint,
+  IndexPointObject,
+  IndexPointTuple,
+  IndexRange,
+  IndexRangeBounds,
+  IndexRangeMode,
+  IsSameColumnSet,
+  IsUniqueIndexColumns,
+  Range,
+  RangeInput,
+  StructuralRange,
+} from "./table-index-typing.ts"
+export {
+  StdbHostEncodeError,
+  type StdbHostEncodeErrorFields,
+} from "./contract/type/host-codec.ts"
+export {
+  SpacetimeHostError,
+  SpacetimeHostErrorCodes,
+  type SpacetimeHostErrorConstructor,
+  SpacetimeHostErrors,
+  SpacetimeHostErrorsByCode,
+} from "./server/host-errors.ts"
+export type {
+  EncodedModule,
+  EncodedTable,
+  TestModuleRawDb,
+} from "./testing/raw-db.ts"

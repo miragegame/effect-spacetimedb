@@ -14,6 +14,7 @@ import {
   exampleBundlePath,
   exampleGeneratedClientDir,
   exampleModuleRoot,
+  mountedModuleRoot,
   idcPairReceiverProject,
   idcPairReceiverBindingDir,
   packageRoot,
@@ -65,6 +66,17 @@ const clientTarget: CodegenTarget = {
   spacetimeCommand,
 }
 
+const mountedBundlePath = path.join(stagingRoot, "mounted-module", "bundle.js")
+bundleModuleEntry(path.join(mountedModuleRoot, "index.ts"), mountedBundlePath)
+const clientTargets = [
+  clientTarget,
+  {
+    moduleBundlePath: mountedBundlePath,
+    stagingDir: path.join(stagingRoot, "mounted-module", "staging"),
+    artifactDir: path.join(mountedModuleRoot, "generated-client"),
+    spacetimeCommand,
+  },
+]
 // Each committed receiver binding, with the interface fixture it is generated
 // from: the example pair's, and the inter-database-call test fixtures'.
 const idcFixtureRoot = path.join(packageRoot, "test", "fixtures", "idc")
@@ -106,7 +118,10 @@ for (const binding of receiverBindings) {
 if (check) {
   await Effect.runPromise(
     Effect.gen(function* () {
-      yield* checkArtifact(clientTarget)
+      yield* Effect.forEach(clientTargets, checkArtifact, {
+        concurrency: 1,
+        discard: true,
+      })
       yield* Effect.forEach(
         receiverBindings,
         (binding) => checkReceiverArtifact(binding.target),
@@ -117,14 +132,16 @@ if (check) {
 } else {
   const written = await Effect.runPromise(
     Effect.gen(function* () {
-      const client = yield* generateArtifact(clientTarget)
+      const clients = yield* Effect.forEach(clientTargets, generateArtifact, {
+        concurrency: 1,
+      })
       const receivers = yield* Effect.forEach(
         receiverBindings,
         (binding) => generateReceiverArtifact(binding.target),
         { concurrency: 1 },
       )
       return [
-        client.artifactDir,
+        ...clients.map((client) => client.artifactDir),
         ...receivers.map((receiver) => receiver.artifactDir),
       ]
     }).pipe(Effect.provide(NodeServices.layer)),

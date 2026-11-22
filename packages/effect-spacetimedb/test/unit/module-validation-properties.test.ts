@@ -52,8 +52,8 @@ const idColumn = () => Stdb.u64(U64Domain).primaryKey()
 const textColumn = () => Stdb.string(StringDomain)
 
 const expectOnlyDiagnostic = (
-  diagnostics: ReadonlyArray<Stdb.StdbDiagnostic>,
-  code: Stdb.StdbDiagnosticCode,
+  diagnostics: ReadonlyArray<Stdb.Diagnostic>,
+  code: Stdb.DiagnosticCode,
   path: ReadonlyArray<string | number>,
 ) => {
   expect(diagnostics).toEqual([
@@ -101,13 +101,13 @@ const validTable = (name: string): Stdb.AnyTableSpec =>
 const validEndpointGroup = (options: {
   readonly reducers: readonly string[]
   readonly procedures: readonly string[]
-}): Stdb.StdbGroup<string, Stdb.AnyCallableDecl> => {
-  let group: Stdb.StdbGroup<string, Stdb.AnyCallableDecl> =
-    Stdb.StdbGroup.make("ValidEndpoints")
+}): Stdb.Group<string, Stdb.AnyCallableDecl> => {
+  let group: Stdb.Group<string, Stdb.AnyCallableDecl> =
+    Stdb.Group.make("ValidEndpoints")
 
   for (const name of options.reducers) {
     group = group.add(
-      Stdb.StdbFn.reducer(name, {
+      Stdb.Fn.reducer(name, {
         params: Stdb.struct({}),
       }),
     )
@@ -115,7 +115,7 @@ const validEndpointGroup = (options: {
 
   for (const name of options.procedures) {
     group = group.add(
-      Stdb.StdbFn.procedure(name, {
+      Stdb.Fn.procedure(name, {
         params: Stdb.struct({}),
         returns: Stdb.unit(),
       }),
@@ -136,7 +136,7 @@ describe("module validation properties", () => {
         const procedureNames = input.endpointNames.filter((name) =>
           name.endsWith("Procedure"),
         )
-        const spec = Stdb.StdbModule.make("validGenerated", {})
+        const spec = Stdb.Module.make("validGenerated", {})
           .addTables(...tables)
           .add(
             validEndpointGroup({

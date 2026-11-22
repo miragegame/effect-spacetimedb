@@ -8,13 +8,16 @@ import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Scheduler from "effect/Scheduler"
 import * as EffectVitest from "@effect/vitest"
 import {
-  ReducerAsyncNotAllowedError,
-  RuntimeLayerAsyncError,
+  HandlerAsyncNotAllowedDefect,
+  RuntimeLayerAsyncDefect,
   type SyncRunner,
   fromLayer,
   fromManagedRuntime,
 } from "effect-spacetimedb/server"
-import { toReducerThrow } from "../../src/server/callable-runtime.ts"
+import {
+  resolveAsyncEscape,
+  toReducerThrow,
+} from "../../src/server/callable-runtime.ts"
 import {
   makeUntimedServerClock,
   provideConstrainedServerSupport,
@@ -42,7 +45,7 @@ describe("managed synchronous runner robustness", () => {
         return Effect.succeed(1)
       })
 
-      expect(() => runner[method](handler)).toThrow(RuntimeLayerAsyncError)
+      expect(() => runner[method](handler)).toThrow(RuntimeLayerAsyncDefect)
       expect(handlerEntered).toBe(false)
     })
   }
@@ -51,7 +54,13 @@ describe("managed synchronous runner robustness", () => {
     const runner = Layer.empty.pipe(ManagedRuntime.make, fromManagedRuntime)
     const exit = runner.runSyncExit(Effect.never)
 
-    expect(() => toReducerThrow(exit)).toThrow(ReducerAsyncNotAllowedError)
+    expect(() =>
+      toReducerThrow(
+        Exit.isFailure(exit)
+          ? exit.cause.pipe(resolveAsyncEscape, Exit.failCause)
+          : exit,
+      ),
+    ).toThrow(HandlerAsyncNotAllowedDefect)
   })
 
   it("preflights a synchronous managed layer only once", () => {

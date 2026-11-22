@@ -1,3 +1,5 @@
+import { makeMountAccessors } from "../server/mount-context.ts"
+import type { MountRecord } from "../contract/mount.ts"
 import * as Effect from "effect/Effect"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import * as ServerContext from "../server/context.ts"
@@ -18,16 +20,16 @@ const moduleScopedAccessor = <
 > =>
   // Builder accessor boundary: the runtime tag is shared; only the R-channel
   // records which module accessor produced it.
-  // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
   effect as Effect.Effect<
     A,
     never,
     ServerContext.ModuleScopedRequirement<Spec, Requirement>
   >
 
-export const makeAccessors = <
-  Spec extends AnyModuleSpec,
->(): ModuleAccessors<Spec> => ({
+export const makeAccessors = <Spec extends AnyModuleSpec>(
+  mounts: MountRecord = {},
+): ModuleAccessors<Spec> => ({
+  mounts: makeMountAccessors<Spec>(mounts),
   Db: moduleScopedAccessor<
     Spec,
     ServerContext.DbService<Spec>,

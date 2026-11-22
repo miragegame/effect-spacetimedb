@@ -1,3 +1,10 @@
+import {
+  mountLabel,
+  type ModuleMount,
+  type NativeMount,
+  type MountOptions,
+} from "../contract/mount.ts"
+import { canonicalNameForPolicy } from "../contract/canonical-name.ts"
 import * as Match from "effect/Match"
 import type { AnyErrorDefinition } from "../contract/error.ts"
 import { type HttpHandlerSpec } from "../contract/http-handler.ts"
@@ -11,9 +18,9 @@ import {
 } from "../contract/module.ts"
 import {
   httpHandlerRoutesOverlap,
-  StdbDiagnostic,
-  type StdbDiagnosticCode,
-  StdbValidationError,
+  Diagnostic,
+  type DiagnosticCode,
+  StdbValidationDefect,
 } from "../contract/module-validation.ts"
 import { type ProcedureSpec } from "../contract/procedure.ts"
 import { type ReducerSpec } from "../contract/reducer.ts"
@@ -41,12 +48,12 @@ import {
   middlewareForDecl,
   prependMiddleware,
 } from "./group-middleware-runtime.ts"
-import type { AnyStdbModule } from "./handler-types.ts"
+import type { AnyModule } from "./handler-types.ts"
 import type {
   SpecWithEnvironment,
-  StdbGroup,
-  StdbHttpGroup,
-  StdbModule,
+  Group,
+  HttpGroup,
+  Module,
 } from "./http-builders.ts"
 import type {
   GroupEndpointPair,
@@ -64,13 +71,13 @@ import type {
 } from "./type-utils.ts"
 
 export const diagnostic = (
-  code: StdbDiagnosticCode,
+  code: DiagnosticCode,
   path: ReadonlyArray<string | number>,
   message: string,
-): StdbValidationError =>
-  new StdbValidationError({
+): StdbValidationDefect =>
+  new StdbValidationDefect({
     diagnostics: [
-      new StdbDiagnostic({
+      new Diagnostic({
         code,
         path,
         message,
@@ -82,7 +89,7 @@ export const diagnostic = (
 export const duplicateCallableError = (
   path: ReadonlyArray<string | number>,
   message: string,
-): StdbValidationError => diagnostic("DuplicateCallableName", path, message)
+): StdbValidationDefect => diagnostic("DuplicateCallableName", path, message)
 
 export const normalizeRoutePath = (...parts: ReadonlyArray<string>): string => {
   const joined = parts.filter((part) => part.length > 0).join("/")
@@ -208,7 +215,7 @@ export const makeCallableGroup = <
   id: Id,
   endpoints: ReadonlyArray<AnyCallableDecl>,
   errors?: Errors,
-): StdbGroup<Id, Endpoints, Errors> => {
+): Group<Id, Endpoints, Errors> => {
   assertUniqueEndpointNames(id, endpoints)
 
   return {
@@ -222,7 +229,7 @@ export const makeCallableGroup = <
         [...endpoints, ...added],
         errors,
       ),
-  } as StdbGroup<Id, Endpoints, Errors>
+  } as Group<Id, Endpoints, Errors>
 }
 
 export const makeHttpGroup = <
@@ -234,7 +241,7 @@ export const makeHttpGroup = <
   endpoints: ReadonlyArray<AnyHttpRouteDecl>,
   errors?: Errors,
   activePrefix = "",
-): StdbHttpGroup<Id, Endpoints, Errors> => {
+): HttpGroup<Id, Endpoints, Errors> => {
   assertUniqueEndpointNames(id, endpoints)
   assertHttpRouteConflicts(id, endpoints)
 
@@ -266,7 +273,7 @@ export const makeHttpGroup = <
       ),
     nest: (
       prefix: string,
-      other: StdbHttpGroup<
+      other: HttpGroup<
         string,
         AnyHttpRouteDecl,
         AnyErrorDefinition | undefined
@@ -287,7 +294,7 @@ export const makeHttpGroup = <
         activePrefix,
       ) as never,
     merge: (
-      other: StdbHttpGroup<
+      other: HttpGroup<
         string,
         AnyHttpRouteDecl,
         AnyErrorDefinition | undefined
@@ -299,7 +306,7 @@ export const makeHttpGroup = <
         mergeGroupErrorDefaults(errors, other.errors),
         activePrefix,
       ) as never,
-  } as unknown as StdbHttpGroup<Id, Endpoints, Errors>
+  } as unknown as HttpGroup<Id, Endpoints, Errors>
 }
 
 export const sortedRecord = <Value>(
@@ -436,12 +443,16 @@ const assembleSpec = <
     name: state.id,
     settings: state.settings,
     environment: state.environment,
+    mounts: state.mountDeclarations ?? {},
     tables: state.tables as Tables,
     views: sortedRecord(viewEntries),
     reducers: sortedRecord(reducerEntries),
     procedures: sortedRecord(procedureEntries),
     lifecycle: sortedRecord(lifecycleEntries),
     httpHandlers: sortedRecord(httpHandlerEntries),
+    httpGroupNames: state.groups
+      .filter((g) => g.kind === "stdbHttpGroup")
+      .map((g) => g.id),
     httpGroups: sortedRecord(httpGroupEntries),
     reducerGroups: sortedRecord(reducerGroupEntries),
     procedureGroups: sortedRecord(procedureGroupEntries),
@@ -470,7 +481,7 @@ export const makeModule = <
   Environment extends EnvironmentDeclarations = {},
 >(
   state: RuntimeModuleState,
-): StdbModule<
+): Module<
   Id,
   Tables,
   Groups,
@@ -485,13 +496,12 @@ export const makeModule = <
   Environment
 > => {
   assertUniqueGroupIds(state.groups)
-  const accessors =
-    makeAccessors<
-      SpecWithEnvironment<
-        ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs>,
-        Environment
-      >
-    >()
+  const accessors = makeAccessors<
+    SpecWithEnvironment<
+      ModuleSpecFor<Id, Tables, Groups, Lifecycle, HttpGroupPairs>,
+      Environment
+    >
+  >(state.mountDeclarations)
   /*
    * `spec` is a getter, and every builder method returns a *new* module over a
    * new state object, so `state` is immutable for the lifetime of this module
@@ -513,8 +523,55 @@ export const makeModule = <
         Environment
       >
     | undefined
+  const addMount = (declaration: ModuleMount | NativeMount) => {
+    const key = declaration.namespace
+    if (Object.hasOwn(state.mountDeclarations ?? {}, key))
+      throw diagnostic(
+        "DuplicateMountNamespace",
+        ["mounts", key],
+        `${mountLabel(key, declaration.kind === "moduleMount" ? declaration.module.name : undefined)} repeats an accessor. Choose an unused mount key.`,
+      )
+    return makeModule({
+      ...state,
+      mountDeclarations: { ...state.mountDeclarations, [key]: declaration },
+    })
+  }
+  const namespaceNames = (namespace: string, options?: MountOptions) => ({
+    namespace,
+    wireNamespace:
+      options?.name ??
+      canonicalNameForPolicy(state.settings.caseConversionPolicy, namespace),
+  })
   const module = {
     ...state,
+    mount: (
+      namespace: string,
+      child: { readonly spec: AnyModuleSpec },
+      options?: MountOptions,
+    ) => {
+      let spec: AnyModuleSpec
+      try {
+        spec = child.spec
+      } catch (error) {
+        if (!(error instanceof StdbValidationDefect)) throw error
+        throw new StdbValidationDefect({
+          diagnostics: error.diagnostics.map(
+            (d) =>
+              new Diagnostic({
+                ...d,
+                path: ["mounts", namespace, ...d.path],
+              }),
+          ),
+        })
+      }
+      return addMount({
+        kind: "moduleMount",
+        ...namespaceNames(namespace, options),
+        module: spec,
+      })
+    },
+    mountNative: () => (namespace: string, options?: MountOptions) =>
+      addMount({ kind: "nativeMount", ...namespaceNames(namespace, options) }),
     ...accessors,
     get spec() {
       if (assembledSpec === undefined) {
@@ -571,7 +628,7 @@ export const makeModule = <
       }),
   }
 
-  return module as unknown as StdbModule<
+  return module as unknown as Module<
     Id,
     Tables,
     Groups,
@@ -624,7 +681,7 @@ export const findDecl = (
 }
 
 export const makeHandlerDefinitionsFromRecord = <
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   RuntimeR,
 >(
   groupId: string,

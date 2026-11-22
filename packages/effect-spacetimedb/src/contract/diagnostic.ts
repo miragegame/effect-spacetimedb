@@ -1,8 +1,21 @@
 import * as Data from "effect/Data"
 
-export type StdbDiagnosticSeverity = "error" | "warning"
+export type DiagnosticSeverity = "error" | "warning"
 
-export type StdbDiagnosticCode =
+export type DiagnosticCode =
+  | "InvalidMountNamespace"
+  | "DuplicateMountNamespace"
+  | "MountNamespaceCollision"
+  | "MountedEnvironment"
+  | "MountedLifecycle"
+  | "MountedHttpHandler"
+  | "MountedReceiver"
+  | "DuplicateMountedModule"
+  | "MountDepthExceeded"
+  | "MountCycle"
+  | "MountNotImplemented"
+  | "UndeclaredMountImpl"
+  | "DuplicateMountImpl"
   | "DuplicateRelationName"
   | "DuplicateCallableName"
   | "DuplicateTypeName"
@@ -17,6 +30,9 @@ export type StdbDiagnosticCode =
   | "GroupNotImplemented"
   | "LifecycleNotImplemented"
   | "LifecycleHookMismatch"
+  | "CachePolicyRequiresBTree"
+  | "EventTableCachePolicy"
+  | "UnknownTableCachePolicy"
   | "EventScheduledTable"
   | "ScheduleAtColumnOnTable"
   | "ScheduledTableWithoutTarget"
@@ -71,15 +87,15 @@ export type StdbDiagnosticCode =
   | "DuplicateOutboxResult"
   | "InvalidOutboxResult"
 
-export class StdbDiagnostic extends Data.TaggedClass("StdbDiagnostic")<{
-  readonly code: StdbDiagnosticCode
+export class Diagnostic extends Data.TaggedClass("Diagnostic")<{
+  readonly code: DiagnosticCode
   readonly path: ReadonlyArray<string | number>
   readonly message: string
-  readonly severity: StdbDiagnosticSeverity
+  readonly severity: DiagnosticSeverity
 }> {}
 
 export const formatModuleDiagnostics = (
-  diagnostics: ReadonlyArray<StdbDiagnostic>,
+  diagnostics: ReadonlyArray<Diagnostic>,
 ): string =>
   diagnostics
     .map(
@@ -88,23 +104,23 @@ export const formatModuleDiagnostics = (
     )
     .join("\n")
 
-export class StdbValidationError extends Data.TaggedError(
-  "StdbValidationError",
+export class StdbValidationDefect extends Data.TaggedError(
+  "StdbValidationDefect",
 )<{
-  readonly diagnostics: ReadonlyArray<StdbDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic>
 }> {
-  override get message(): string {
-    return formatModuleDiagnostics(this.diagnostics)
-  }
+  // An own property, as on every error that can reach the host: its uncaught
+  // text reads data properties only, so a prototype getter prints no reason.
+  override readonly message = formatModuleDiagnostics(this.diagnostics)
 }
 
 export const makeStdbDiagnostic = (
-  code: StdbDiagnosticCode,
+  code: DiagnosticCode,
   path: ReadonlyArray<string | number>,
   message: string,
-  severity: StdbDiagnosticSeverity = "error",
-): StdbDiagnostic =>
-  new StdbDiagnostic({
+  severity: DiagnosticSeverity = "error",
+): Diagnostic =>
+  new Diagnostic({
     code,
     path,
     message,

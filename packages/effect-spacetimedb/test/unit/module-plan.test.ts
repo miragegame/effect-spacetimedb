@@ -1,11 +1,12 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { make as makeServer } from "../../src/server/bind.ts"
+import { makeServer } from "../helpers/module-server"
 import { fixtureCallDurationMax } from "../helpers/transport-bounds"
 
 const { expect } = EffectVitest
 
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as Stdb from "effect-spacetimedb"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { FullModule } from "../fixtures/full-module"
 import { TestSyncRunner } from "../helpers/sync-runner"
 import { TestLayer } from "../helpers/test-layer"
@@ -16,11 +17,19 @@ const describe = EffectVitest.layer(TestLayer)
 const noopWsConnection = makeFullModuleWsConnection()
 
 describe("module plan", (it) => {
+  it("builds a module's plan once, so clients pay for validation once", () => {
+    const module = Stdb.Module.make("plan_once", {}).spec
+
+    expect(StdbInternal.makeModulePlan(module)).toBe(
+      StdbInternal.makeModulePlan(module),
+    )
+  })
+
   it.effect(
     "derives the canonical plan data directly from the authored module",
     () =>
       Effect.gen(function* () {
-        const plan = StdbTesting.makeModulePlan(FullModule)
+        const plan = StdbInternal.makeModulePlan(FullModule)
 
         expect(plan.module).toBe(FullModule)
         expect(plan.scheduleBindings).toEqual([
@@ -40,7 +49,7 @@ describe("module plan", (it) => {
           "userUpsert",
         ])
         expect(Object.keys(plan.publicProcedures)).toEqual(["userGet"])
-        expect(Object.keys(plan.httpHandlers)).toEqual([
+        expect(Object.keys(plan.projectedHttpHandlers)).toEqual([
           "rotateToken",
           "stripeWebhook",
         ])
@@ -92,14 +101,14 @@ describe("module plan", (it) => {
 
   it.effect("reuses the same direct projections across projected helpers", () =>
     Effect.gen(function* () {
-      const plan = StdbTesting.makeModulePlan(FullModule)
-      const Full = StdbTesting.project(FullModule)
+      const plan = StdbInternal.makeModulePlan(FullModule)
+      const Full = StdbInternal.project(FullModule)
 
       const server = makeServer({
         module: FullModule,
         runtime: TestSyncRunner,
       })
-      const http = StdbTesting.ClientHttp.makeFromModulePlan({
+      const http = StdbInternal.ClientHttp.makeFromModulePlan({
         plan,
         config: {
           uri: "http://localhost:3000",
@@ -107,7 +116,7 @@ describe("module plan", (it) => {
           callDurationMax: fixtureCallDurationMax,
         },
       })
-      const ws = StdbTesting.ClientWs.makeFromModulePlan({
+      const ws = StdbInternal.ClientWs.makeFromModulePlan({
         plan,
         connection: noopWsConnection,
       })
@@ -145,7 +154,7 @@ describe("module plan", (it) => {
         Object.keys(plan.publicProcedures),
       )
       expect(Object.keys(http.httpHandlers)).toEqual(
-        Object.keys(plan.httpHandlers),
+        Object.keys(plan.projectedHttpHandlers),
       )
       expect(Object.keys(ws.reducers)).toEqual(Object.keys(plan.publicReducers))
       expect(Object.keys(ws.procedures)).toEqual(

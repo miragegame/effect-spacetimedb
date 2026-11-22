@@ -52,9 +52,8 @@ export class StdbEnvironmentHostReadDefect extends Data.TaggedError(
   readonly key: string
   readonly cause: unknown
 }> {
-  override get message(): string {
-    return `SpaceTimeDB failed to read the declared environment key ${this.key}`
-  }
+  override readonly message =
+    `SpaceTimeDB failed to read the declared environment key ${this.key}`
 }
 
 /**
@@ -67,14 +66,10 @@ export class StdbEnvironmentValueDefect extends Data.TaggedError(
   readonly key: string
   readonly reason: "requiredValueAbsent" | "valueOutsideDeclaration"
 }> {
-  override get message(): string {
-    switch (this.reason) {
-      case "requiredValueAbsent":
-        return `SpaceTimeDB returned no value for the required environment key ${this.key}`
-      case "valueOutsideDeclaration":
-        return `SpaceTimeDB returned a value outside the declared literal set for environment key ${this.key}`
-    }
-  }
+  override readonly message =
+    this.reason === "requiredValueAbsent"
+      ? `SpaceTimeDB returned no value for the required environment key ${this.key}`
+      : `SpaceTimeDB returned a value outside the declared literal set for environment key ${this.key}`
 }
 
 type EnvironmentSource = {

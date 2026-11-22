@@ -10,7 +10,7 @@ import { TestEffectCallbackError } from "../helpers/effect-errors"
 const { expect } = EffectVitest
 
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { TestLayer } from "../helpers/test-layer"
 import { testViewRowsLength } from "../helpers/array-bounds"
 
@@ -32,7 +32,7 @@ const withWireNames = (
 const unsafeLiteralDescriptor = (
   values: readonly [string, ...string[]],
 ): Stdb.AnyValueType =>
-  StdbTesting.ContractType.attachStdbType(
+  StdbInternal.ContractType.attachStdbType(
     Schema.String,
     (factories) => factories.string(),
     { kind: "literal", values },
@@ -65,16 +65,6 @@ describe("module validation diagnostics", (it) => {
       }
 
       expect(Stdb.validate(withWireNames(InvalidModule))).toEqual([
-        expect.objectContaining({
-          code: "InvalidGroupClientKey",
-          path: ["reducerGroups", "reducerEndpoint"],
-          severity: "error",
-        }),
-        expect.objectContaining({
-          code: "InvalidGroupClientKey",
-          path: ["reducerGroups", "subscriptionEndpoint"],
-          severity: "error",
-        }),
         expect.objectContaining({
           code: "InvalidGroupClientKey",
           path: ["procedureGroups", "procedureEndpoint"],
@@ -116,7 +106,7 @@ describe("module validation diagnostics", (it) => {
           user: User,
         },
         views: {
-          relation: Stdb.StdbFn.anonymousView("relation", {
+          relation: Stdb.Fn.anonymousView("relation", {
             returns: Stdb.array(
               Stdb.struct({
                 id: Stdb.string(),
@@ -142,9 +132,7 @@ describe("module validation diagnostics", (it) => {
         ]),
       )
       expect(
-        diagnostics.every((entry) =>
-          Predicate.isTagged(entry, "StdbDiagnostic"),
-        ),
+        diagnostics.every((entry) => Predicate.isTagged(entry, "Diagnostic")),
       ).toBe(true)
     }),
   )
@@ -316,7 +304,7 @@ describe("module validation diagnostics", (it) => {
       )
       expect(
         () =>
-          Stdb.StdbModule.make("invalid_direct_index_builder", {}).addTables(
+          Stdb.Module.make("invalid_direct_index_builder", {}).addTables(
             InvalidDirectIndexTable,
           ).spec,
       ).toThrow(
@@ -368,20 +356,20 @@ describe("module validation diagnostics", (it) => {
 
   it.effect("rejects duplicate view names across groups", () =>
     Effect.gen(function* () {
-      const DuplicateViewsModule = Stdb.StdbModule.make(
+      const DuplicateViewsModule = Stdb.Module.make(
         "duplicate_view_names",
         {},
       ).add(
-        Stdb.StdbGroup.make("FirstViews").add(
-          Stdb.StdbFn.anonymousView("duplicate_view", {
+        Stdb.Group.make("FirstViews").add(
+          Stdb.Fn.anonymousView("duplicate_view", {
             returns: Stdb.array(
               Stdb.struct({ id: Stdb.string() }),
               testViewRowsLength,
             ),
           }),
         ),
-        Stdb.StdbGroup.make("SecondViews").add(
-          Stdb.StdbFn.anonymousView("duplicate_view", {
+        Stdb.Group.make("SecondViews").add(
+          Stdb.Fn.anonymousView("duplicate_view", {
             returns: Stdb.array(
               Stdb.struct({ id: Stdb.string() }),
               testViewRowsLength,
@@ -393,7 +381,7 @@ describe("module validation diagnostics", (it) => {
       const failure = yield* Effect.try({
         try: () => DuplicateViewsModule.spec,
         catch: (cause) =>
-          cause instanceof Stdb.StdbValidationError
+          cause instanceof Stdb.StdbValidationDefect
             ? cause
             : new TestEffectCallbackError({
                 operation: "effect-spacetimedb/unit/module-validation",
@@ -406,7 +394,7 @@ describe("module validation diagnostics", (it) => {
         Effect.flip,
       )
 
-      expect(failure).toBeInstanceOf(Stdb.StdbValidationError)
+      expect(failure).toBeInstanceOf(Stdb.StdbValidationDefect)
       expect(failure.diagnostics).toEqual([
         expect.objectContaining({
           code: "DuplicateRelationName",
@@ -425,13 +413,13 @@ describe("module validation diagnostics", (it) => {
           public: true,
           params: Stdb.struct({}),
         }
-        const viewSpec = Stdb.StdbFn.anonymousView("sharedName", {
+        const viewSpec = Stdb.Fn.anonymousView("sharedName", {
           returns: Stdb.array(
             Stdb.struct({ id: Stdb.string() }),
             testViewRowsLength,
           ),
         }).spec
-        const lifecycleSpec = Stdb.StdbFn.init().spec
+        const lifecycleSpec = Stdb.Fn.init().spec
 
         const ReducerViewModule = {
           kind: "module" as const,
@@ -497,7 +485,7 @@ describe("module validation diagnostics", (it) => {
           settings: {},
           tables: {},
           views: {
-            clientConnected: Stdb.StdbFn.anonymousView("clientConnected", {
+            clientConnected: Stdb.Fn.anonymousView("clientConnected", {
               returns: Stdb.array(
                 Stdb.struct({ id: Stdb.string() }),
                 testViewRowsLength,
@@ -509,7 +497,7 @@ describe("module validation diagnostics", (it) => {
           httpHandlers: {},
           httpGroups: {},
           lifecycle: {
-            clientConnected: Stdb.StdbFn.clientConnected().spec,
+            clientConnected: Stdb.Fn.clientConnected().spec,
           },
         }
 
@@ -548,7 +536,7 @@ describe("module validation diagnostics", (it) => {
         },
         views: {},
         reducers: {
-          runJobs: Stdb.StdbFn.scheduledReducer("runJobs", {
+          runJobs: Stdb.Fn.scheduledReducer("runJobs", {
             table: unregisteredJobs,
           }).spec,
         },
@@ -570,10 +558,10 @@ describe("module validation diagnostics", (it) => {
       const DuplicateTargetModule = {
         ...InvalidModule,
         reducers: {
-          first: Stdb.StdbFn.scheduledReducer("first", {
+          first: Stdb.Fn.scheduledReducer("first", {
             table: scheduledJobs,
           }).spec,
-          second: Stdb.StdbFn.scheduledReducer("second", {
+          second: Stdb.Fn.scheduledReducer("second", {
             table: scheduledJobs,
           }).spec,
         },
@@ -597,7 +585,7 @@ describe("module validation diagnostics", (it) => {
           scheduledJobs: eventScheduledJobs,
         },
         reducers: {
-          runJobs: Stdb.StdbFn.scheduledReducer("runJobs", {
+          runJobs: Stdb.Fn.scheduledReducer("runJobs", {
             table: eventScheduledJobs,
           }).spec,
         },
@@ -624,7 +612,7 @@ describe("module validation diagnostics", (it) => {
           scheduledJobs: invalidScheduledIdJobs,
         },
         reducers: {
-          runJobs: Stdb.StdbFn.scheduledReducer("runJobs", {
+          runJobs: Stdb.Fn.scheduledReducer("runJobs", {
             table: invalidScheduledIdJobs,
           }).spec,
         },
@@ -653,14 +641,14 @@ describe("module validation diagnostics", (it) => {
         httpHandlers: {},
         httpGroups: {},
         lifecycle: {
-          onConnect: Stdb.StdbFn.init().spec,
+          onConnect: Stdb.Fn.init().spec,
         } as unknown as Stdb.LifecycleSpecs,
       }
       const MismatchedLifecycleModule = {
         ...UnknownLifecycleModule,
         name: "mismatched_lifecycle",
         lifecycle: {
-          clientDisconnected: Stdb.StdbFn.init().spec,
+          clientDisconnected: Stdb.Fn.init().spec,
         } as unknown as Stdb.LifecycleSpecs,
       }
 
@@ -699,7 +687,7 @@ describe("module validation diagnostics", (it) => {
           settings: {},
           views: {},
           reducers: {
-            runSchedule: Stdb.StdbFn.scheduledReducer("runSchedule", {
+            runSchedule: Stdb.Fn.scheduledReducer("runSchedule", {
               table: scheduledJobs,
             }).spec,
           },
@@ -747,7 +735,7 @@ describe("module validation diagnostics", (it) => {
             scheduledJobs: scheduledTargetOnly,
           },
           reducers: {
-            runSchedule: Stdb.StdbFn.scheduledReducer("runSchedule", {
+            runSchedule: Stdb.Fn.scheduledReducer("runSchedule", {
               table: scheduledTargetOnly,
             }).spec,
           },
@@ -790,7 +778,7 @@ describe("module validation diagnostics", (it) => {
             scheduledJobs: customScheduledJobs,
           },
           reducers: {
-            runSchedule: Stdb.StdbFn.scheduledReducer("runSchedule", {
+            runSchedule: Stdb.Fn.scheduledReducer("runSchedule", {
               table: customScheduledJobs,
             }).spec,
           },
@@ -849,13 +837,13 @@ describe("module validation diagnostics", (it) => {
         tables: {},
         views: {},
         reducers: {
-          first: Stdb.StdbFn.reducer("first", {
+          first: Stdb.Fn.reducer("first", {
             params: Stdb.struct({}),
             errors: Stdb.errors(SharedDeclaredOne),
           }).spec,
         },
         procedures: {
-          second: Stdb.StdbFn.procedure("second", {
+          second: Stdb.Fn.procedure("second", {
             params: Stdb.struct({}),
             returns: Stdb.unit(),
             errors: Stdb.errors(SharedDeclaredTwo),
@@ -886,7 +874,7 @@ describe("module validation diagnostics", (it) => {
         tables: {},
         views: {},
         reducers: {
-          lazy_reducer: Stdb.StdbFn.reducer("lazy_reducer", {
+          lazy_reducer: Stdb.Fn.reducer("lazy_reducer", {
             params: Stdb.struct({
               nested: Stdb.lazy(() =>
                 Stdb.struct({
@@ -923,9 +911,9 @@ describe("module validation diagnostics", (it) => {
   it("rejects group ids that are not valid client keys", () => {
     expect(
       () =>
-        Stdb.StdbModule.make("invalid_group_client_key", {}).add(
-          Stdb.StdbHttpGroup.make("web-hooks").add(
-            Stdb.StdbHttp.post("rotate", "/rotate", {
+        Stdb.Module.make("invalid_group_client_key", {}).add(
+          Stdb.HttpGroup.make("web-hooks").add(
+            Stdb.Http.post("rotate", "/rotate", {
               request: Schema.Struct({ id: Schema.String }),
               response: Schema.Struct({ ok: Schema.Boolean }),
             }),
@@ -990,12 +978,12 @@ describe("module validation diagnostics", (it) => {
         {},
       ) {}
       const ReducerOnlyErrors = Stdb.errors(ReducerOnlyStatuslessError)
-      const ReducerOnlyModule = Stdb.StdbModule.make(
+      const ReducerOnlyModule = Stdb.Module.make(
         "reducer_only_statusless_errors",
         {},
       ).add(
-        Stdb.StdbGroup.make("Reducers").add(
-          Stdb.StdbFn.reducer("statuslessReducer", {
+        Stdb.Group.make("Reducers").add(
+          Stdb.Fn.reducer("statuslessReducer", {
             params: Stdb.struct({}),
             errors: ReducerOnlyErrors,
           }),
@@ -1014,9 +1002,9 @@ describe("module validation diagnostics", (it) => {
         { httpApiStatus: 409 },
       ) {}
       const FullyStatusedErrors = Stdb.errors(FullyStatusedError)
-      const ValidModule = Stdb.StdbModule.make("http_statused_errors", {}).add(
-        Stdb.StdbHttpGroup.make("Http").add(
-          Stdb.StdbHttp.post("statusedRoute", "/statused", {
+      const ValidModule = Stdb.Module.make("http_statused_errors", {}).add(
+        Stdb.HttpGroup.make("Http").add(
+          Stdb.Http.post("statusedRoute", "/statused", {
             request: Schema.Void,
             response: Schema.Void,
             errors: FullyStatusedErrors,
@@ -1052,7 +1040,7 @@ describe("module validation diagnostics", (it) => {
           tables: {},
           views: {},
           reducers: {
-            sharedReducer: Stdb.StdbFn.reducer("sharedReducer", {
+            sharedReducer: Stdb.Fn.reducer("sharedReducer", {
               params: Stdb.struct({}),
               errors: SharedErrors,
             }).spec,
@@ -1082,14 +1070,14 @@ describe("module validation diagnostics", (it) => {
       }),
   )
 
-  it.effect("reports non-canonical declared names across module surfaces", () =>
+  it.effect("accepts unambiguous declared names across module surfaces", () =>
     Effect.gen(function* () {
-      const BadVariant = Stdb.sum({
-        BadTag: Stdb.struct({
+      const Variant = Stdb.sum({
+        ready_now: Stdb.struct({
           nested_field: Stdb.string(),
         }),
       })
-      const InvalidModule = {
+      const module = {
         kind: "module" as const,
         name: "canonical_names",
         settings: {},
@@ -1102,11 +1090,11 @@ describe("module validation diagnostics", (it) => {
               }),
             },
             indexes: [Stdb.index("by_user", ["user_id"])],
-            constraints: [Stdb.unique("bad_name", ["user_id"])],
+            constraints: [Stdb.unique("user_unique", ["user_id"])],
           }),
         },
         views: {
-          snake_view: Stdb.StdbFn.anonymousView("snake_view", {
+          snake_view: Stdb.Fn.anonymousView("snake_view", {
             returns: Stdb.array(
               Stdb.struct({ id: Stdb.string() }),
               testViewRowsLength,
@@ -1114,16 +1102,16 @@ describe("module validation diagnostics", (it) => {
           }).spec,
         },
         reducers: {
-          DoThing: Stdb.StdbFn.reducer("DoThing", {
+          DoThing: Stdb.Fn.reducer("DoThing", {
             params: Stdb.struct({
               created_at: Stdb.string(),
-              variant: BadVariant,
+              variant: Variant,
             }),
           }).spec,
         },
         procedures: {},
         httpHandlers: {
-          bad_handler: {
+          user_handler: {
             kind: "httpHandler" as const,
             path: "/bad",
             method: "POST" as const,
@@ -1135,63 +1123,13 @@ describe("module validation diagnostics", (it) => {
         lifecycle: {},
       }
 
-      const diagnostics = Stdb.validate(withWireNames(InvalidModule))
+      const diagnostics = Stdb.validate(withWireNames(module))
 
-      expect(diagnostics).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            code: "NonCanonicalDeclaredName",
-            path: ["tables", "User_Table", "name"],
-          }),
-          expect.objectContaining({
-            code: "NonCanonicalDeclaredName",
-            path: ["tables", "User_Table", "columns", "user_id"],
-          }),
-          expect.objectContaining({
-            code: "NonCanonicalDeclaredName",
-            path: ["tables", "User_Table", "columns", "payload", "created_at"],
-          }),
-          expect.objectContaining({
-            code: "NonCanonicalDeclaredName",
-            path: ["tables", "User_Table", "indexes", 0, "name"],
-          }),
-          expect.objectContaining({
-            code: "NonCanonicalDeclaredName",
-            path: ["tables", "User_Table", "constraints", 0, "name"],
-          }),
-          expect.objectContaining({
-            code: "NonCanonicalDeclaredName",
-            path: ["views", "snake_view"],
-          }),
-          expect.objectContaining({
-            code: "NonCanonicalDeclaredName",
-            path: ["reducers", "DoThing"],
-          }),
-          expect.objectContaining({
-            code: "NonCanonicalDeclaredName",
-            path: ["reducers", "DoThing", "params", "created_at"],
-          }),
-          expect.objectContaining({
-            code: "NonCanonicalDeclaredName",
-            path: ["reducers", "DoThing", "params", "variant", "BadTag"],
-          }),
-          expect.objectContaining({
-            code: "NonCanonicalDeclaredName",
-            path: [
-              "reducers",
-              "DoThing",
-              "params",
-              "variant",
-              "BadTag",
-              "nested_field",
-            ],
-          }),
-          expect.objectContaining({
-            code: "NonCanonicalDeclaredName",
-            path: ["httpHandlers", "bad_handler"],
-          }),
-        ]),
-      )
+      expect(
+        diagnostics.filter(
+          (entry) => entry.code === "NonCanonicalDeclaredName",
+        ),
+      ).toEqual([])
     }),
   )
 
@@ -1214,7 +1152,7 @@ describe("module validation diagnostics", (it) => {
           }),
         },
         views: {
-          reportRun: Stdb.StdbFn.anonymousView("reportRun", {
+          reportRun: Stdb.Fn.anonymousView("reportRun", {
             returns: Stdb.array(
               Stdb.struct({ id: Stdb.string() }),
               testViewRowsLength,
@@ -1222,10 +1160,10 @@ describe("module validation diagnostics", (it) => {
           }).spec,
         },
         reducers: {
-          report_run: Stdb.StdbFn.reducer("report_run", {
+          report_run: Stdb.Fn.reducer("report_run", {
             params: Stdb.struct({}),
           }).spec,
-          columns: Stdb.StdbFn.reducer("columns", {
+          columns: Stdb.Fn.reducer("columns", {
             params: Stdb.struct({
               userId: Stdb.string(),
               userID: Stdb.string(),
@@ -1273,7 +1211,7 @@ describe("module validation diagnostics", (it) => {
         },
         views: {},
         reducers: {
-          specials: Stdb.StdbFn.reducer("specials", {
+          specials: Stdb.Fn.reducer("specials", {
             params: Stdb.struct({
               scheduleAt: Stdb.scheduleAt(),
               uuid: Stdb.uuid(),
@@ -1310,7 +1248,7 @@ describe("module validation diagnostics", (it) => {
         },
         views: {},
         reducers: {
-          do_thing: Stdb.StdbFn.reducer("do_thing", {
+          do_thing: Stdb.Fn.reducer("do_thing", {
             params: Stdb.struct({ created_at: Stdb.string() }),
           }).spec,
         },
@@ -1334,7 +1272,7 @@ describe("module validation diagnostics", (it) => {
         tables: {},
         views: {},
         reducers: {
-          repeated_reducer: Stdb.StdbFn.reducer("repeated_reducer", {
+          repeated_reducer: Stdb.Fn.reducer("repeated_reducer", {
             params: Stdb.struct({
               first: raw,
               second: raw,
@@ -1369,10 +1307,10 @@ describe("module validation diagnostics", (it) => {
         tables: {},
         views: {},
         reducers: {
-          first_reducer: Stdb.StdbFn.reducer("first_reducer", {
+          first_reducer: Stdb.Fn.reducer("first_reducer", {
             params: Stdb.struct({ shared: raw }),
           }).spec,
-          second_reducer: Stdb.StdbFn.reducer("second_reducer", {
+          second_reducer: Stdb.Fn.reducer("second_reducer", {
             params: Stdb.struct({ shared: raw }),
           }).spec,
         },
@@ -1406,10 +1344,10 @@ describe("module validation diagnostics", (it) => {
         tables: {},
         views: {},
         reducers: {
-          first_reducer: Stdb.StdbFn.reducer("first_reducer", {
+          first_reducer: Stdb.Fn.reducer("first_reducer", {
             params: sharedParams,
           }).spec,
-          second_reducer: Stdb.StdbFn.reducer("second_reducer", {
+          second_reducer: Stdb.Fn.reducer("second_reducer", {
             params: sharedParams,
           }).spec,
         },
@@ -1464,7 +1402,7 @@ describe("module validation diagnostics", (it) => {
         Effect.try({
           try: () => Stdb.assertValid(withWireNames(InvalidModule)),
           catch: (cause) =>
-            cause instanceof Stdb.StdbValidationError
+            cause instanceof Stdb.StdbValidationDefect
               ? cause
               : new TestEffectCallbackError({
                   operation: "effect-spacetimedb/unit/module-validation",
@@ -1485,8 +1423,8 @@ describe("module validation diagnostics", (it) => {
       const failure = Cause.findErrorOption(exit.cause)
       expect(Option.isSome(failure)).toBe(true)
       if (Option.isSome(failure)) {
-        expect(failure.value).toBeInstanceOf(Stdb.StdbValidationError)
-        if (failure.value instanceof Stdb.StdbValidationError) {
+        expect(failure.value).toBeInstanceOf(Stdb.StdbValidationDefect)
+        if (failure.value instanceof Stdb.StdbValidationDefect) {
           expect(failure.value.diagnostics).toEqual(diagnostics)
         }
       }

@@ -10,7 +10,7 @@ import type {
   IndexRange,
 } from "../table-index-typing.ts"
 
-type IsSameColumnOrder<
+export type IsSameColumnOrder<
   Left extends readonly string[],
   Right extends readonly string[],
 > = Left extends readonly [
@@ -36,7 +36,7 @@ type UniqueConstraintSpec<Table extends AnyTableSpec> = Extract<
   { readonly kind: "unique" }
 >
 
-type HasOrderedUniqueConstraint<
+export type HasOrderedUniqueConstraint<
   Table extends AnyTableSpec,
   Columns extends readonly string[],
 > = true extends (
@@ -51,7 +51,7 @@ type HasOrderedUniqueConstraint<
   ? true
   : false
 
-type IsUniqueClientIndexColumns<
+export type IsUniqueClientIndexColumns<
   Table extends AnyTableSpec,
   Columns extends readonly string[],
 > = Columns extends readonly [infer Only extends string]
@@ -60,7 +60,7 @@ type IsUniqueClientIndexColumns<
     : HasOrderedUniqueConstraint<Table, Columns>
   : HasOrderedUniqueConstraint<Table, Columns>
 
-type UniqueClientIndex<
+export type UniqueClientIndex<
   Table extends AnyTableSpec,
   Columns extends readonly ColumnKey<Table>[],
 > = {
@@ -69,7 +69,7 @@ type UniqueClientIndex<
   ) => Effect.Effect<TableRow<Table> | undefined, StdbDecodeError>
 }
 
-type RangeClientIndex<
+export type RangeClientIndex<
   Table extends AnyTableSpec,
   Columns extends readonly ColumnKey<Table>[],
 > = {
@@ -78,7 +78,7 @@ type RangeClientIndex<
   ) => Effect.Effect<ReadonlyArray<TableRow<Table>>, StdbDecodeError>
 }
 
-type ExplicitClientIndex<
+export type ExplicitClientIndex<
   Table extends AnyTableSpec,
   Index extends ExplicitIndexSpec<Table>,
 > = Index extends {

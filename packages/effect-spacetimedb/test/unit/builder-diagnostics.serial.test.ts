@@ -166,57 +166,57 @@ class ExternalService extends Context.Service<
 ) {}
 
 const Errors = Stdb.errors(DeclaredFailure)
-const ProbeGroup = Stdb.StdbGroup.make("Probe").add(
-  Stdb.StdbFn.reducer("checked_error", {
+const ProbeGroup = Stdb.Group.make("Probe").add(
+  Stdb.Fn.reducer("checked_error", {
     params: Stdb.struct({}),
     errors: Errors,
   }),
-  Stdb.StdbFn.reducer("checked_service", {
+  Stdb.Fn.reducer("checked_service", {
     params: Stdb.struct({}),
   }),
 )
-const MultiServiceGroup = Stdb.StdbGroup.make("MultiService").add(
-  Stdb.StdbFn.reducer("multi_service", {
+const MultiServiceGroup = Stdb.Group.make("MultiService").add(
+  Stdb.Fn.reducer("multi_service", {
     params: Stdb.struct({}),
   }),
 )
-const ProbeModule = Stdb.StdbModule.make("diagnostic_probe", {})
+const ProbeModule = Stdb.Module.make("diagnostic_probe", {})
   .add(ProbeGroup)
   .add(MultiServiceGroup)
 const { Http, Tx } = ProbeModule
 
-const InlineUndeclared = Stdb.StdbBuilder.group(ProbeModule, "Probe", {
+const InlineUndeclared = Stdb.Builder.group(ProbeModule, "Probe", {
   checked_error: () => Effect.fail(UndeclaredFailure.make()),
   checked_service: () => Effect.void,
 })
 void InlineUndeclared
 
-const CheckedForbidden = Stdb.StdbBuilder.groupChecked(ProbeModule, "Probe", {
+const CheckedForbidden = Stdb.Builder.group(ProbeModule, "Probe", {
   checked_error: () => Effect.fail(DeclaredFailure.make()),
   checked_service: () => Http,
 })
 void CheckedForbidden
 
-const MultiForbidden = Stdb.StdbBuilder.groupChecked(ProbeModule, "MultiService", {
+const MultiForbidden = Stdb.Builder.group(ProbeModule, "MultiService", {
   multi_service: () => Effect.all([Http, Tx]),
 })
 void MultiForbidden
 
-const PrecheckedExternal = Stdb.StdbBuilder.groupPrechecked(ProbeModule, "Probe", {
+const PrecheckedExternal = Stdb.Builder.groupPrechecked(ProbeModule, "Probe", {
   checked_error: () => Effect.fail(DeclaredFailure.make()),
   checked_service: () => ExternalService,
 })
 void PrecheckedExternal
 
-const RuntimeGroup = Stdb.StdbGroup.make("Runtime").add(
-  Stdb.StdbFn.reducer("needs_runtime", {
+const RuntimeGroup = Stdb.Group.make("Runtime").add(
+  Stdb.Fn.reducer("needs_runtime", {
     params: Stdb.struct({}),
   }),
 )
-const RuntimeModule = Stdb.StdbModule.make("diagnostic_runtime", {}).add(
+const RuntimeModule = Stdb.Module.make("diagnostic_runtime", {}).add(
   RuntimeGroup,
 )
-const RuntimeLive = Stdb.StdbBuilder.group(RuntimeModule, "Runtime", {
+const RuntimeLive = Stdb.Builder.group(RuntimeModule, "Runtime", {
   needs_runtime: () => ExternalService,
 })
 void build(RuntimeModule, [RuntimeLive])
@@ -230,35 +230,34 @@ import * as Stdb from "effect-spacetimedb"
 import * as Server from "effect-spacetimedb/server"
 import { build } from "effect-spacetimedb/server-compiler"
 
-const SharedGroup = Stdb.StdbGroup.make("Shared").add(
-  Stdb.StdbFn.reducer("get", {
+const SharedGroup = Stdb.Group.make("Shared").add(
+  Stdb.Fn.reducer("get", {
     params: Stdb.struct({}),
   }),
 )
-const OtherGroup = Stdb.StdbGroup.make("Other").add(
-  Stdb.StdbFn.reducer("get", {
+const OtherGroup = Stdb.Group.make("Other").add(
+  Stdb.Fn.reducer("get", {
     params: Stdb.struct({}),
   }),
 )
 
-const ModuleA = Stdb.StdbModule.make("module_a", {}).add(SharedGroup)
-const ModuleB = Stdb.StdbModule.make("module_b", {}).add(SharedGroup)
-const ModuleBDifferent = Stdb.StdbModule.make("module_b_different", {}).add(OtherGroup)
+const ModuleA = Stdb.Module.make("module_a", {}).add(SharedGroup)
+const ModuleB = Stdb.Module.make("module_b", {}).add(SharedGroup)
+const ModuleBDifferent = Stdb.Module.make("module_b_different", {}).add(OtherGroup)
 const { Db: ModuleADb } = ModuleA
 
-const ModuleALive = Stdb.StdbBuilder.group(ModuleA, "Shared", {
+const ModuleALive = Stdb.Builder.group(ModuleA, "Shared", {
   get: () => Effect.void,
 })
 
 void build(ModuleB, [ModuleALive] as const) // build_same_name
-void Stdb.StdbBuilder.plan(ModuleB, [ModuleALive] as const) // plan_same_name
-void Stdb.StdbBuilder.handlersOf(ModuleB, ModuleALive) // handlers_same_name
+void Stdb.Builder.handlersOf(ModuleB, ModuleALive) // handlers_same_name
 void build(ModuleBDifferent, [ModuleALive] as const) // build_different_name
 
 const WidenedImpl: Stdb.GroupImpl<"Shared", unknown> = ModuleALive
 void build(ModuleB, [WidenedImpl] as const) // widened_impl
 
-const CrossModuleAccessor = Stdb.StdbBuilder.groupChecked(ModuleB, "Shared", {
+const CrossModuleAccessor = Stdb.Builder.group(ModuleB, "Shared", {
   get: () => ModuleADb,
 })
 void CrossModuleAccessor
@@ -268,19 +267,19 @@ const CrossModuleAnnotatedHandlers: Stdb.GroupCheckedHandlers<typeof ModuleB, "S
 }
 void CrossModuleAnnotatedHandlers
 
-const RawTagAccessor = Stdb.StdbBuilder.groupChecked(ModuleB, "Shared", {
+const RawTagAccessor = Stdb.Builder.group(ModuleB, "Shared", {
   get: () => Server.Db,
 })
 void RawTagAccessor
 
-const ViewGroup = Stdb.StdbGroup.make("Views").add(
-  Stdb.StdbFn.view("list", {
+const ViewGroup = Stdb.Group.make("Views").add(
+  Stdb.Fn.view("list", {
     returns: Stdb.array(Stdb.struct({}), { minimum: 0, maximum: 1_000 }),
   }),
 )
-const ViewModule = Stdb.StdbModule.make("view_module", {}).add(ViewGroup)
+const ViewModule = Stdb.Module.make("view_module", {}).add(ViewGroup)
 
-const RawReadonlyDbAccessor = Stdb.StdbBuilder.groupChecked(ViewModule, "Views", {
+const RawReadonlyDbAccessor = Stdb.Builder.group(ViewModule, "Views", {
   list: () =>
     Effect.gen(function* () {
       yield* Server.ReadonlyDb
@@ -289,27 +288,27 @@ const RawReadonlyDbAccessor = Stdb.StdbBuilder.groupChecked(ViewModule, "Views",
 })
 void RawReadonlyDbAccessor
 
-const TxGroup = Stdb.StdbGroup.make("TxPath").add(
-  Stdb.StdbFn.procedure("lookup", {
+const TxGroup = Stdb.Group.make("TxPath").add(
+  Stdb.Fn.procedure("lookup", {
     params: Stdb.struct({}),
     returns: Stdb.unit(),
   }),
 )
-const HttpTxGroup = Stdb.StdbHttpGroup.make("HttpTxPath").add(
-  Stdb.StdbHttp.post("lookupHttp", "/lookup-http"),
+const HttpTxGroup = Stdb.HttpGroup.make("HttpTxPath").add(
+  Stdb.Http.post("lookupHttp", "/lookup-http"),
 )
 
-const TxModuleA = Stdb.StdbModule.make("tx_module_a", {})
+const TxModuleA = Stdb.Module.make("tx_module_a", {})
   .add(TxGroup)
   .add(HttpTxGroup)
-const TxModuleB = Stdb.StdbModule.make("tx_module_b", {})
+const TxModuleB = Stdb.Module.make("tx_module_b", {})
   .add(TxGroup)
   .add(HttpTxGroup)
 const { Db: TxModuleADb, MutationCtx: TxModuleAMutationCtx } = TxModuleA
 const { Tx: TxModuleBTx, HttpTx: TxModuleBHttpTx, withTx: TxModuleBWithTx } =
   TxModuleB
 
-const CrossDbInsideTxRun = Stdb.StdbBuilder.groupChecked(TxModuleB, "TxPath", {
+const CrossDbInsideTxRun = Stdb.Builder.group(TxModuleB, "TxPath", {
   lookup: () =>
     Effect.gen(function* () {
       const tx = yield* TxModuleBTx
@@ -323,7 +322,7 @@ const CrossDbInsideTxRun = Stdb.StdbBuilder.groupChecked(TxModuleB, "TxPath", {
 })
 void CrossDbInsideTxRun
 
-const CrossMutationInsideWithTx = Stdb.StdbBuilder.groupChecked(
+const CrossMutationInsideWithTx = Stdb.Builder.group(
   TxModuleB,
   "TxPath",
   { // mutation_withtx_path
@@ -338,7 +337,7 @@ const CrossMutationInsideWithTx = Stdb.StdbBuilder.groupChecked(
 )
 void CrossMutationInsideWithTx
 
-const CrossDbInsideHttpTxRun = Stdb.StdbBuilder.groupChecked(
+const CrossDbInsideHttpTxRun = Stdb.Builder.group(
   TxModuleB,
   "HttpTxPath",
   { // http_tx_path
@@ -395,7 +394,7 @@ const wideClientGroupDecl = (index: number): string => {
     (_, endpointIndex) =>
       `${prefix}_${endpointIndex.toString().padStart(2, "0")}`,
   )
-  return `const ${groupName} = Stdb.StdbGroup.make("${groupName}").add(
+  return `const ${groupName} = Stdb.Group.make("${groupName}").add(
 ${endpoints.map((endpoint) => `  reducer("${endpoint}"),`).join("\n")}
 )`
 }
@@ -407,11 +406,11 @@ import * as Stdb from "effect-spacetimedb"
 
 const Params = Stdb.struct({ value: Stdb.string(Schema.String) })
 const reducer = <const Name extends string>(name: Name) =>
-  Stdb.StdbFn.reducer(name, { params: Params })
+  Stdb.Fn.reducer(name, { params: Params })
 
 ${Array.from({ length: 19 }, (_, index) => wideClientGroupDecl(index)).join("\n\n")}
 
-const WideModule = Stdb.StdbModule.make("wide_grouped_scale", {}).add(
+const WideModule = Stdb.Module.make("wide_grouped_scale", {}).add(
 ${Array.from(
   { length: 19 },
   (_, index) => `  WideGroup${index.toString().padStart(2, "0")},`,
@@ -434,7 +433,7 @@ const client = Stdb.project(${groupedAccesses ? "WideModule" : "FlatWideSpec"}).
 ${Array.from({ length: 19 }, (_, index) => {
   const suffix = index.toString().padStart(2, "0")
   return groupedAccesses && index === 0
-    ? `void client.WideGroup${suffix}.reducers.wide${suffix}_41({ value: "grouped" })`
+    ? `void client.groups.WideGroup${suffix}.reducers.wide${suffix}_41({ value: "grouped" })`
     : `void client.reducers.wide${suffix}_41({ value: "baseline" })`
 }).join("\n")}
 `
@@ -470,9 +469,9 @@ const ScaleUser = Stdb.table("scale_user", {
   },
 })
 const reducer = <const Name extends string>(name: Name) =>
-  Stdb.StdbFn.reducer(name, { params: ProbeParams, errors: Errors })
+  Stdb.Fn.reducer(name, { params: ProbeParams, errors: Errors })
 const resultProcedure = <const Name extends string>(name: Name) =>
-  Stdb.StdbFn.procedure(name, {
+  Stdb.Fn.procedure(name, {
     params: ProbeParams,
     returns: Stdb.string(),
     errors: Errors,
@@ -493,7 +492,7 @@ const group5 = <
   e3: E3,
   e4: E4,
 ) =>
-  Stdb.StdbGroup.make(id).add(
+  Stdb.Group.make(id).add(
     reducer(e0),
     reducer(e1),
     reducer(e2),
@@ -516,7 +515,7 @@ const procedureGroup5 = <
   e3: E3,
   e4: E4,
 ) =>
-  Stdb.StdbGroup.make(id).add(
+  Stdb.Group.make(id).add(
     resultProcedure(e0),
     resultProcedure(e1),
     resultProcedure(e2),
@@ -524,13 +523,13 @@ const procedureGroup5 = <
     resultProcedure(e4),
   )
 
-const ScaleModule = Stdb.StdbModule.make("diagnostic_scale", {}).addTables(
+const ScaleModule = Stdb.Module.make("diagnostic_scale", {}).addTables(
   ScaleUser,
 ).add(
 ${Array.from({ length: 12 }, (_, index) => groupDecl(index)).join(",\n")}
 )
 type ScaleModuleSpec = (typeof ScaleModule)["spec"]
-const ResultScaleModule = Stdb.StdbModule.make("result_scale", {}).add(
+const ResultScaleModule = Stdb.Module.make("result_scale", {}).add(
 ${Array.from({ length: 12 }, (_, index) => procedureGroupDecl(index)).join(",\n")}
 )
 type ScaleResultValues = StdbClient.ResultValuesOf<
@@ -551,7 +550,7 @@ declare const REMOTE_MODULE: RemoteModule<
   GeneratedSchema,
   GeneratedReducers,
   GeneratedProcedures,
-  "2.14.0"
+  "2.16.1"
 >
 type ErrorContext = ErrorContextInterface<typeof REMOTE_MODULE>
 declare class DbConnection extends DbConnectionImpl<typeof REMOTE_MODULE> {
@@ -561,7 +560,7 @@ declare class DbConnectionBuilder extends NativeDbConnectionBuilder<DbConnection
 
 const handler = () => Effect.void
 
-const ScaleLive = Stdb.StdbBuilder.groupPrechecked(ScaleModule, "Group11", {
+const ScaleLive = Stdb.Builder.groupPrechecked(ScaleModule, "Group11", {
   endpoint11_00: handler,
   endpoint11_01: handler,
   endpoint11_02: handler,
@@ -574,7 +573,7 @@ void ScaleProject.client.ws.layerGenerated({
   DbConnection,
   uri: "ws://localhost:3000",
   databaseName: "diagnostic_scale",
-  connectTimeoutMillis: 10_000,
+  connectDurationMax: 10_000,
 })
 declare const ScaleSession: StdbClient.WsSession<ScaleModuleSpec, ErrorContext>
 const scaleUserId = Schema.decodeUnknownSync(ScaleUserId)("user_1")
@@ -620,11 +619,11 @@ const environmentSpecScaleFixture = (shape: EnvironmentSpecShape): string => {
   const groups = groupIndexes.map(
     (
       group,
-    ) => `const Group${two(group)} = Stdb.StdbGroup.make("Group${two(group)}").add(
+    ) => `const Group${two(group)} = Stdb.Group.make("Group${two(group)}").add(
 ${endpointIndexes
   .map(
     (endpoint) =>
-      `  Stdb.StdbFn.procedure("g${two(group)}_${two(endpoint)}", { returns: Stdb.string() }),`,
+      `  Stdb.Fn.procedure("g${two(group)}_${two(endpoint)}", { returns: Stdb.string() }),`,
   )
   .join("\n")}
 )`,
@@ -634,7 +633,7 @@ ${endpointIndexes
   // re-walked, so the cost of the shape grows with handlers times spec size.
   const lives = groupIndexes.map((group) => {
     const table = `table${two(group % environmentSpecScaleTableCount)}`
-    return `const Group${two(group)}Live = Stdb.StdbBuilder.group(ScaleModule, "Group${two(group)}", {
+    return `const Group${two(group)}Live = Stdb.Builder.group(ScaleModule, "Group${two(group)}", {
 ${endpointIndexes
   .map(
     (endpoint) => `  g${two(group)}_${two(endpoint)}: () =>
@@ -686,7 +685,7 @@ void scaleEnvironment
 
 type ScaleSpec = Stdb.ModuleSpecFor<"environment_scale", ScaleTables, ScaleGroups, {}, never>${specEnvironment}
 
-const ScaleModule: Stdb.StdbModule<
+const ScaleModule: Stdb.Module<
   "environment_scale",
   ScaleTables,
   ScaleGroups,
@@ -699,7 +698,7 @@ const ScaleModule: Stdb.StdbModule<
   Stdb.GroupEndpointPairsOf<ScaleGroups>,
   ScaleSpec,
   ${environment.type}
-> = Stdb.StdbModule.make("environment_scale", ${environment.options})
+> = Stdb.Module.make("environment_scale", ${environment.options})
   .addTables(...scaleTables)
   .add(${groupIndexes.map((group) => `Group${two(group)}`).join(", ")})
 
@@ -793,7 +792,6 @@ describe("builder misuse diagnostics", (it) => {
 
         expect(result.status).not.toBe(0)
         expectDiagnosticAt(result.output, project, source, "build_same_name")
-        expectDiagnosticAt(result.output, project, source, "plan_same_name")
         expectDiagnosticAt(result.output, project, source, "handlers_same_name")
         expectDiagnosticAt(
           result.output,
@@ -846,7 +844,7 @@ describe("builder misuse diagnostics", (it) => {
           "Group impl was built for module 'module_a', not 'module_b_different'",
         )
         expect(result.output).toContain(
-          "Group impl 'Shared' has a widened module type; use the concrete return from StdbBuilder.group",
+          "Group impl 'Shared' has a widened module type; use the concrete return from Builder.group",
         )
         expect(result.output).toContain(
           "Handler 'get' uses module 'module_a' Db inside module 'module_b'",

@@ -8,7 +8,7 @@ export {
   primitiveFingerprint,
   productFingerprint,
   recursiveFingerprint,
-  SatsTypeNameCollisionError,
+  SatsTypeNameCollisionDefect,
   stableStructuralDigest,
   structuralFingerprint,
   sumFingerprint,

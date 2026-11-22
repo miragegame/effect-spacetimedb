@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 import { ExampleModule } from "../module"
 
-export const DeterminismFunctionsLive = Stdb.StdbBuilder.group(
+export const DeterminismFunctionsLive = Stdb.Builder.group(
   ExampleModule,
   "Determinism",
   {

@@ -1,6 +1,6 @@
 {
   "name": "effect-spacetimedb",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Effect-first toolkit for typed SpacetimeDB modules, clients, and generated bindings.",
   "keywords": [
     "effect",
@@ -75,6 +75,10 @@
       "types": "./src/testing/spacetime-sys.ts",
       "default": "./src/testing/spacetime-sys.ts"
     },
+    "./testing/internal": {
+      "types": "./src/testing/internal.ts",
+      "default": "./src/testing/internal.ts"
+    },
     "./testing/example-module": {
       "types": "./examples/publishable-module/src/canonical-example-module.ts",
       "default": "./examples/publishable-module/src/canonical-example-module.ts"
@@ -106,7 +110,7 @@
     "smoke:dev-server-node": "node scripts/dev-server-node-smoke.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
   },
   "dependencies": {
     "headers-polyfill": "^4"
@@ -117,7 +121,7 @@
     "esbuild": "^0.25 || ^0.26 || ^0.27 || ^0.28",
     "react": "^19",
     "scheduler": "*",
-    "spacetimedb": "~2.14.0"
+    "spacetimedb": "~2.16.1"
   },
   "peerDependenciesMeta": {
     "@effect/atom-react": {
@@ -134,6 +138,7 @@
     }
   },
   "devDependencies": {
+    "@spacetimedb/files": "0.1.0",
     "@effect/atom-react": "4.1.1",
     "@arethetypeswrong/cli": "0.18.3",
     "@biomejs/biome": "2.2.2",
@@ -156,7 +161,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "scheduler": "*",
-    "spacetimedb": "2.14.0",
+    "spacetimedb": "2.16.1",
     "typescript": "7.0.2",
     "undici": "^7.16.0",
     "vitest": "5.0.1"

@@ -13,7 +13,6 @@ const U64 = Stdb.u64(
 
 // Result sets returned by the fixture's views and procedures; the migration
 // suite seeds a handful of rows.
-const ResultRowsLength: Stdb.ArrayLengthBounds = { minimum: 0, maximum: 1_000 }
 
 const account = Stdb.table("account", {
   public: true,
@@ -35,16 +34,16 @@ const accountTag = Stdb.table("accountTag", {
 
 const tables = [account, accountTag] as const
 
-const AccountFunctions = Stdb.StdbGroup.make("Account")
+const AccountFunctions = Stdb.Group.make("Account")
   .add(
-    Stdb.StdbFn.reducer("accountCreate", {
+    Stdb.Fn.reducer("accountCreate", {
       params: Stdb.struct({
         owner: String255,
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("accountTagAdd", {
+    Stdb.Fn.reducer("accountTagAdd", {
       params: Stdb.struct({
         accountId: U64,
         tag: String255,
@@ -52,88 +51,84 @@ const AccountFunctions = Stdb.StdbGroup.make("Account")
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("accountOwners", {
+    Stdb.Fn.procedure("accountOwners", {
       params: Stdb.struct({}),
-      returns: Stdb.array(String255, ResultRowsLength),
+      returns: Stdb.array(String255),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("accountTags", {
+    Stdb.Fn.procedure("accountTags", {
       params: Stdb.struct({
         accountId: U64,
       }),
-      returns: Stdb.array(accountTag.row, ResultRowsLength),
+      returns: Stdb.array(accountTag.row),
     }),
   )
   .add(
-    Stdb.StdbFn.anonymousView("allAccounts", {
-      returns: Stdb.array(account.row, ResultRowsLength),
+    Stdb.Fn.anonymousView("allAccounts", {
+      returns: Stdb.array(account.row),
     }),
   )
 
-const MigrationModule = Stdb.StdbModule.make(moduleName, {})
+const MigrationModule = Stdb.Module.make(moduleName, {})
   .addTables(...tables)
   .add(AccountFunctions)
 
 const { Db, ReadonlyDb, Tx } = MigrationModule
 
-const AccountFunctionsLive = Stdb.StdbBuilder.group(
-  MigrationModule,
-  "Account",
-  {
-    accountCreate: Effect.fn(function* ({ owner }) {
-      const db = yield* Db
-      yield* db.account.insert({
-        id: 0n,
-        owner,
-        displayName: owner,
-      })
-    }),
-    accountTagAdd: Effect.fn(function* ({ accountId, tag }) {
-      const db = yield* Db
-      yield* db.accountTag.insert({
-        id: 0n,
-        accountId,
-        tag,
-      })
-    }),
-    accountOwners: Effect.fn(function* () {
-      const tx = yield* Tx
-      return yield* tx.run(
-        Effect.gen(function* () {
-          const db = yield* Db
-          const rows = yield* db.account.toArray()
-          return rows.map((row) => row.owner)
-        }),
-      )
-    }),
-    accountTags: Effect.fn(function* ({ accountId }) {
-      const tx = yield* Tx
-      return yield* tx.run(
-        Effect.gen(function* () {
-          const db = yield* Db
-          const rows = yield* db.accountTag.toArray()
-          return rows
-            .filter((row) => row.accountId === accountId)
-            .map((row) => ({
-              id: row.id ?? 0n,
-              accountId: row.accountId,
-              tag: row.tag,
-            }))
-        }),
-      )
-    }),
-    allAccounts: Effect.fn(function* () {
-      const db = yield* ReadonlyDb
-      const rows = yield* db.account.toArray()
-      return rows.map((row) => ({
-        id: row.id ?? 0n,
-        owner: row.owner,
-        displayName: row.displayName,
-      }))
-    }),
-  },
-)
+const AccountFunctionsLive = Stdb.Builder.group(MigrationModule, "Account", {
+  accountCreate: Effect.fn(function* ({ owner }) {
+    const db = yield* Db
+    yield* db.account.insert({
+      id: 0n,
+      owner,
+      displayName: owner,
+    })
+  }),
+  accountTagAdd: Effect.fn(function* ({ accountId, tag }) {
+    const db = yield* Db
+    yield* db.accountTag.insert({
+      id: 0n,
+      accountId,
+      tag,
+    })
+  }),
+  accountOwners: Effect.fn(function* () {
+    const tx = yield* Tx
+    return yield* tx.run(
+      Effect.gen(function* () {
+        const db = yield* Db
+        const rows = yield* db.account.toArray()
+        return rows.map((row) => row.owner)
+      }),
+    )
+  }),
+  accountTags: Effect.fn(function* ({ accountId }) {
+    const tx = yield* Tx
+    return yield* tx.run(
+      Effect.gen(function* () {
+        const db = yield* Db
+        const rows = yield* db.accountTag.toArray()
+        return rows
+          .filter((row) => row.accountId === accountId)
+          .map((row) => ({
+            id: row.id ?? 0n,
+            accountId: row.accountId,
+            tag: row.tag,
+          }))
+      }),
+    )
+  }),
+  allAccounts: Effect.fn(function* () {
+    const db = yield* ReadonlyDb
+    const rows = yield* db.account.toArray()
+    return rows.map((row) => ({
+      id: row.id ?? 0n,
+      owner: row.owner,
+      displayName: row.displayName,
+    }))
+  }),
+})
 
 const compiled = build(MigrationModule, [AccountFunctionsLive])
 

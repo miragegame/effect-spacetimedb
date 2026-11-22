@@ -3,14 +3,14 @@ import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 import { build } from "effect-spacetimedb/server-compiler"
 
-const HttpTypecheckFunctions = Stdb.StdbGroup.make("Functions")
+const HttpTypecheckFunctions = Stdb.Group.make("Functions")
   .add(
-    Stdb.StdbFn.reducer("ping", {
+    Stdb.Fn.reducer("ping", {
       params: Stdb.struct({}),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("echo", {
+    Stdb.Fn.procedure("echo", {
       params: Stdb.struct({
         message: Stdb.string(),
       }),
@@ -18,31 +18,27 @@ const HttpTypecheckFunctions = Stdb.StdbGroup.make("Functions")
     }),
   )
 
-const HttpTypecheckRoutes = Stdb.StdbHttpGroup.make("Http")
-  .add(Stdb.StdbHttp.post("raw", "/raw"))
+const HttpTypecheckRoutes = Stdb.HttpGroup.make("Http")
+  .add(Stdb.Http.post("raw", "/raw"))
   .add(
-    Stdb.StdbHttp.post("typed", "/typed", {
+    Stdb.Http.post("typed", "/typed", {
       request: Schema.Struct({ message: Schema.String }),
       response: Schema.Struct({ message: Schema.String }),
     }),
   )
 
-const HttpTypecheckModule = Stdb.StdbModule.make("http_typecheck", {})
+const HttpTypecheckModule = Stdb.Module.make("http_typecheck", {})
   .add(HttpTypecheckFunctions)
   .add(HttpTypecheckRoutes)
 
 const { Db, Http, HttpHandlerCtx, HttpTx, ReducerCtx, Tx } = HttpTypecheckModule
 
-const functionHandlers = Stdb.StdbBuilder.group(
-  HttpTypecheckModule,
-  "Functions",
-  {
-    ping: () => Effect.void,
-    echo: ({ message }) => Effect.succeed(message),
-  },
-)
+const functionHandlers = Stdb.Builder.group(HttpTypecheckModule, "Functions", {
+  ping: () => Effect.void,
+  echo: ({ message }) => Effect.succeed(message),
+})
 
-const httpHandlers = Stdb.StdbBuilder.group(HttpTypecheckModule, "Http", {
+const httpHandlers = Stdb.Builder.group(HttpTypecheckModule, "Http", {
   raw: Effect.fn(function* (_request: Stdb.Request) {
     const ctx = yield* HttpHandlerCtx
     const http = yield* Http
@@ -67,7 +63,7 @@ const httpHandlers = Stdb.StdbBuilder.group(HttpTypecheckModule, "Http", {
 void build(HttpTypecheckModule, [functionHandlers, httpHandlers])
 
 // @ts-expect-error HTTP handlers cannot require Db outside HttpTx.run
-const bareDbForbidden = Stdb.StdbBuilder.group(HttpTypecheckModule, "Http", {
+const bareDbForbidden = Stdb.Builder.group(HttpTypecheckModule, "Http", {
   raw: (_request: Stdb.Request) => Effect.succeed(new Stdb.SyncResponse("ok")),
   typed: () =>
     Effect.gen(function* () {
@@ -78,7 +74,7 @@ const bareDbForbidden = Stdb.StdbBuilder.group(HttpTypecheckModule, "Http", {
 void bareDbForbidden
 
 // @ts-expect-error HTTP handlers use HttpTx, not the procedure Tx runner
-const txForbidden = Stdb.StdbBuilder.group(HttpTypecheckModule, "Http", {
+const txForbidden = Stdb.Builder.group(HttpTypecheckModule, "Http", {
   raw: (_request: Stdb.Request) => Effect.succeed(new Stdb.SyncResponse("ok")),
   typed: () =>
     Effect.gen(function* () {
@@ -88,7 +84,7 @@ const txForbidden = Stdb.StdbBuilder.group(HttpTypecheckModule, "Http", {
 })
 void txForbidden
 
-const reducerCannotUseHttpHandlerCtx = Stdb.StdbBuilder.group(
+const reducerCannotUseHttpHandlerCtx = Stdb.Builder.group(
   HttpTypecheckModule,
   "Functions",
   // @ts-expect-error reducers must not access HttpHandlerCtx
@@ -99,7 +95,7 @@ const reducerCannotUseHttpHandlerCtx = Stdb.StdbBuilder.group(
 )
 void reducerCannotUseHttpHandlerCtx
 
-const procedureCannotUseHttpHandlerCtx = Stdb.StdbBuilder.group(
+const procedureCannotUseHttpHandlerCtx = Stdb.Builder.group(
   HttpTypecheckModule,
   "Functions",
   // @ts-expect-error procedures must not access HttpHandlerCtx

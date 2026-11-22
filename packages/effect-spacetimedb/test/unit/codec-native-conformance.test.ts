@@ -2,7 +2,7 @@ import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Hex from "effect/encoding/Hex"
 import * as Schema from "effect/Schema"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import {
   ConnectionId,
   Identity,
@@ -22,7 +22,7 @@ const { expect } = EffectVitest
 
 const nativePropertyParameters = { numRuns: 100, seed: 0xb5a7c0de }
 
-const T = StdbTesting.ContractType
+const T = StdbInternal.ContractType
 
 const I64Min = -(1n << 63n)
 const I64Max = (1n << 63n) - 1n
@@ -49,7 +49,7 @@ const ResultGolden = T.result(T.string(), T.string())
 
 type GoldenCase = {
   readonly name: string
-  readonly type: StdbTesting.ContractType.AnyValueType
+  readonly type: StdbInternal.ContractType.AnyValueType
   readonly value: unknown
   readonly hex: string
 }
@@ -350,10 +350,10 @@ const goldenCases: ReadonlyArray<GoldenCase> = [
 const bytesToHex = (bytes: Uint8Array): string => Hex.encode(bytes)
 
 const nativeDbHex = (
-  type: StdbTesting.ContractType.AnyValueType,
+  type: StdbInternal.ContractType.AnyValueType,
   value: unknown,
 ) =>
-  StdbTesting.ClientValueCodec.db
+  StdbInternal.ClientValueCodec.db
     .encode(type, value)
     .pipe(Effect.map((encoded) => bytesToHex(nativeBytes(type, encoded))))
 
@@ -371,12 +371,12 @@ EffectVitest.layer(TestLayer)("codec native conformance", (it) => {
         valueArbitrary,
         (value) =>
           Effect.gen(function* () {
-            const encoded = yield* StdbTesting.ClientValueCodec.db.encode(
+            const encoded = yield* StdbInternal.ClientValueCodec.db.encode(
               type,
               value,
             )
             const native = nativeRoundTrip(type, encoded)
-            const decoded = yield* StdbTesting.ClientValueCodec.db.decode(
+            const decoded = yield* StdbInternal.ClientValueCodec.db.decode(
               type,
               native,
             )

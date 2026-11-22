@@ -47,7 +47,7 @@ const readUndeclared = (env: EnvironmentValues) =>
   env.UNDECLARED
 void readUndeclared
 
-const NoEnvironmentModule = Stdb.StdbModule.make("no_environment")
+const NoEnvironmentModule = Stdb.Module.make("no_environment")
 type NoEnvironmentValues = Effect.Success<typeof NoEnvironmentModule.Env>
 type _noKeys = Assert<IsEqual<keyof NoEnvironmentValues, never>>
 const readFromEmpty = (env: NoEnvironmentValues) =>
@@ -57,12 +57,12 @@ void readFromEmpty
 
 // A module that declares nothing keeps its pre-environment handler types, so
 // its handlers cannot require Env.
-const EmptyCallables = Stdb.StdbGroup.make("Empty").add(
-  Stdb.StdbFn.reducer("touch", {}),
+const EmptyCallables = Stdb.Group.make("Empty").add(
+  Stdb.Fn.reducer("touch", {}),
 )
 const EmptyEnvironmentModule =
-  Stdb.StdbModule.make("empty_environment").add(EmptyCallables)
-const EmptyLive = Stdb.StdbBuilder.group(
+  Stdb.Module.make("empty_environment").add(EmptyCallables)
+const EmptyLive = Stdb.Builder.group(
   EmptyEnvironmentModule,
   "Empty",
   // @ts-expect-error a module without declarations does not provide Env.
@@ -77,22 +77,22 @@ const readGreeting = Effect.gen(function* () {
   return yield* env.GREETING
 })
 
-const Callables = Stdb.StdbGroup.make("Callables")
-  .add(Stdb.StdbFn.reducer("reducerRead", {}))
-  .add(Stdb.StdbFn.procedure("procedureRead", { returns: Stdb.string() }))
-  .add(Stdb.StdbFn.procedure("procedureTxRead", { returns: Stdb.string() }))
+const Callables = Stdb.Group.make("Callables")
+  .add(Stdb.Fn.reducer("reducerRead", {}))
+  .add(Stdb.Fn.procedure("procedureRead", { returns: Stdb.string() }))
+  .add(Stdb.Fn.procedure("procedureTxRead", { returns: Stdb.string() }))
   .add(
-    Stdb.StdbFn.anonymousView("viewRead", {
+    Stdb.Fn.anonymousView("viewRead", {
       returns: Stdb.array(Stdb.struct({ value: Stdb.string() }), {
         minimum: 0,
         maximum: 1,
       }),
     }),
   )
-const Routes = Stdb.StdbHttpGroup.make("Routes").add(
-  Stdb.StdbHttp.get("routeRead", "/read"),
+const Routes = Stdb.HttpGroup.make("Routes").add(
+  Stdb.Http.get("routeRead", "/read"),
 )
-const ReadingModule = Stdb.StdbModule.make("environment_reading", {
+const ReadingModule = Stdb.Module.make("environment_reading", {
   environment: { GREETING: Stdb.Environment.string() },
 })
   .add(Callables)
@@ -102,7 +102,7 @@ const ReadingEnv = Effect.gen(function* () {
   return yield* env.GREETING
 })
 
-const CallablesLive = Stdb.StdbBuilder.group(ReadingModule, "Callables", {
+const CallablesLive = Stdb.Builder.group(ReadingModule, "Callables", {
   reducerRead: () => Effect.asVoid(ReadingEnv),
   procedureRead: () => ReadingEnv,
   procedureTxRead: Effect.fn(function* () {
@@ -113,7 +113,7 @@ const CallablesLive = Stdb.StdbBuilder.group(ReadingModule, "Callables", {
 })
 void CallablesLive
 
-const RoutesLive = Stdb.StdbBuilder.group(ReadingModule, "Routes", {
+const RoutesLive = Stdb.Builder.group(ReadingModule, "Routes", {
   routeRead: Effect.fn(function* () {
     const tx = yield* ReadingModule.HttpTx
     const value = yield* tx.run(ReadingEnv)
@@ -122,7 +122,7 @@ const RoutesLive = Stdb.StdbBuilder.group(ReadingModule, "Routes", {
 })
 void RoutesLive
 
-const CrossModuleLive = Stdb.StdbBuilder.group(
+const CrossModuleLive = Stdb.Builder.group(
   ReadingModule,
   "Callables",
   // @ts-expect-error another module's Env carries that module's identity.
@@ -160,8 +160,8 @@ void outsideTheSet
 // half of this contract is held by the named-spec arm of the instantiation
 // budgets in test/unit/builder-diagnostics.serial.test.ts.
 const namedEnvironment = { REGION: Stdb.Environment.string() }
-const NamedCallables = Stdb.StdbGroup.make("NamedCallables").add(
-  Stdb.StdbFn.reducer("touch", {}),
+const NamedCallables = Stdb.Group.make("NamedCallables").add(
+  Stdb.Fn.reducer("touch", {}),
 )
 type NamedGroups = typeof NamedCallables
 type NamedSpec = Stdb.ModuleSpecFor<
@@ -175,7 +175,7 @@ type NamedSpec = Stdb.ModuleSpecFor<
 type NamedModuleOf<
   Spec extends Stdb.AnyModuleSpec,
   Environment extends Stdb.Environment.Declarations,
-> = Stdb.StdbModule<
+> = Stdb.Module<
   "named_environment",
   {},
   NamedGroups,
@@ -190,7 +190,7 @@ type NamedModuleOf<
   Environment
 >
 type NamedStdbModule = NamedModuleOf<NamedSpec, typeof namedEnvironment>
-const NamedModule: NamedStdbModule = Stdb.StdbModule.make("named_environment", {
+const NamedModule: NamedStdbModule = Stdb.Module.make("named_environment", {
   environment: namedEnvironment,
 }).add(NamedCallables)
 type NamedEnvironmentValues = Effect.Success<typeof NamedModule.Env>
@@ -205,7 +205,7 @@ const readNamedRegion = Effect.gen(function* () {
   const environment = yield* NamedModule.Env
   return yield* environment.REGION
 })
-const NamedLive = Stdb.StdbBuilder.group(NamedModule, "NamedCallables", {
+const NamedLive = Stdb.Builder.group(NamedModule, "NamedCallables", {
   touch: () => Effect.asVoid(readNamedRegion),
 })
 void NamedLive
@@ -213,20 +213,17 @@ void NamedLive
 // Only a module that declares the named environment is checked against it.
 // @ts-expect-error a module that declares no environment does not provide REGION.
 const EnvironmentlessNamed: NamedStdbModule =
-  Stdb.StdbModule.make("named_environment").add(NamedCallables)
+  Stdb.Module.make("named_environment").add(NamedCallables)
 void EnvironmentlessNamed
 const zoneEnvironment = { ZONE: Stdb.Environment.string() }
 // @ts-expect-error a module that declares other keys does not provide REGION.
-const OtherKeysNamed: NamedStdbModule = Stdb.StdbModule.make(
-  "named_environment",
-  {
-    environment: zoneEnvironment,
-  },
-).add(NamedCallables)
+const OtherKeysNamed: NamedStdbModule = Stdb.Module.make("named_environment", {
+  environment: zoneEnvironment,
+}).add(NamedCallables)
 void OtherKeysNamed
 const secretEnvironment = { REGION: Stdb.Environment.secret() }
 // @ts-expect-error a secret REGION reads as Redacted, not as the declared string.
-const SecretNamed: NamedStdbModule = Stdb.StdbModule.make("named_environment", {
+const SecretNamed: NamedStdbModule = Stdb.Module.make("named_environment", {
   environment: secretEnvironment,
 }).add(NamedCallables)
 void SecretNamed
@@ -241,7 +238,7 @@ const widerEnvironment = {
   ZONE: Stdb.Environment.string(),
 }
 type WiderEnvironmentModule = NamedModuleOf<NamedSpec, typeof widerEnvironment>
-const WiderEnvironmentNamed: WiderEnvironmentModule = Stdb.StdbModule.make(
+const WiderEnvironmentNamed: WiderEnvironmentModule = Stdb.Module.make(
   "named_environment",
   { environment: widerEnvironment },
 ).add(NamedCallables)
@@ -269,8 +266,10 @@ type NarrowerEnvironmentModule = NamedModuleOf<
   typeof namedEnvironment
 >
 // @ts-expect-error the spec declares ZONE, which this module does not provide.
-const NarrowerEnvironmentNamed: NarrowerEnvironmentModule =
-  Stdb.StdbModule.make("named_environment", {
+const NarrowerEnvironmentNamed: NarrowerEnvironmentModule = Stdb.Module.make(
+  "named_environment",
+  {
     environment: namedEnvironment,
-  }).add(NamedCallables)
+  },
+).add(NamedCallables)
 void NarrowerEnvironmentNamed

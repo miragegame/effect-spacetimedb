@@ -1,4 +1,4 @@
-// Module ids and `spec.name` are the same by construction: StdbModule.make
+// Module ids and `spec.name` are the same by construction: Module.make
 // assembles the spec from the module state id. This brand is compile-time only.
 export declare const ModuleBrandTypeId: unique symbol
 

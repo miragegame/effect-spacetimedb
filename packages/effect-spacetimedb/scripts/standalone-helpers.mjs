@@ -10,7 +10,7 @@ import {
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
-export const requiredSpacetimeCliVersion = "2.14.0"
+export const requiredSpacetimeCliVersion = "2.16.1"
 
 const configuredPackageRoot =
   process.env.EFFECT_SPACETIMEDB_PACKAGE_ROOT?.trim()
@@ -26,6 +26,7 @@ export const exampleModuleRoot = join(
   "examples",
   "publishable-module",
 )
+export const mountedModuleRoot = join(packageRoot, "examples", "mounted-module")
 export const exampleBundlePath = join(exampleModuleRoot, "dist", "bundle.js")
 export const exampleGeneratedClientDir = join(
   exampleModuleRoot,
