@@ -19,14 +19,13 @@ import type {
   TableRefValue,
 } from "effect-spacetimedb/client"
 import {
-  rowAtomFamily,
-  supervisedSessionAtom,
+  wsRowAtomFamily,
+  wsSupervisedSessionAtom,
   type TableAtomSession,
-  tableAtomFamily,
-  tableGroupAtomFamily,
-  tableGroupSnapshotAtom,
+  wsTableAtomFamily,
+  wsTableGroupAtomFamily,
+  wsTableGroupSnapshotAtom,
 } from "effect-spacetimedb/client/atom"
-import { SubscriptionTransportError } from "effect-spacetimedb/testing"
 import type { TableRow } from "../../src/contract/table.ts"
 import {
   CapturedTransportModule,
@@ -47,9 +46,9 @@ const BTable = Stdb.table("b", {
   public: true,
   columns: { id: Stdb.string(ThingId) },
 })
-const CacheKeyCollisionModule = Stdb.StdbModule.make(
+const CacheKeyCollisionModule = Stdb.Module.make(
   "snapshot_cache_key_collision",
-  {},
+  { settings: { caseConversionPolicy: "none" } },
 ).addTables(CommaTable, ATable, BTable).spec
 
 const { expect } = EffectVitest
@@ -136,10 +135,14 @@ const makeRegistry = Effect.acquireRelease(
     }),
 )
 
+const fakeRowsOwner = {}
+
 const makeThingSession = (
   acquire: () => Effect.Effect<ThingRef, never, Scope.Scope>,
 ): TableAtomSession<typeof MinimalModule> => ({
   moduleName: MinimalModule.name,
+  isRevoked: () => false,
+  rowsOwner: () => fakeRowsOwner,
   subscribeTableRef: (key) => {
     expect(key).toBe("thing")
     return acquire() as Effect.Effect<
@@ -161,6 +164,8 @@ const makeCapturedSession = (): TableAtomSession<
   typeof CapturedTransportModule
 > => ({
   moduleName: CapturedTransportModule.name,
+  isRevoked: () => false,
+  rowsOwner: () => fakeRowsOwner,
   subscribeTableRef: () => Effect.die("table ref was unexpectedly evaluated"),
   subscribeRowRef: () => Effect.die("row ref was unexpectedly evaluated"),
   subscribeTableGroupRef: () =>
@@ -172,6 +177,8 @@ const makeCacheKeyCollisionSession = (): TableAtomSession<
   typeof CacheKeyCollisionModule
 > => ({
   moduleName: CacheKeyCollisionModule.name,
+  isRevoked: () => false,
+  rowsOwner: () => fakeRowsOwner,
   subscribeTableRef: () => Effect.die("table ref was unexpectedly evaluated"),
   subscribeRowRef: () => Effect.die("row ref was unexpectedly evaluated"),
   subscribeTableGroupRef: () =>
@@ -185,6 +192,8 @@ const makeThingGroupSession = (options: {
   readonly onRelease: () => void
 }): TableAtomSession<typeof MinimalModule> => ({
   moduleName: MinimalModule.name,
+  isRevoked: () => false,
+  rowsOwner: () => fakeRowsOwner,
   subscribeTableRef: () => Effect.die("table refs are not used by this test"),
   subscribeRowRef: () => Effect.die("row refs are not used by this test"),
   subscribeTableGroupRef: (keys) => {
@@ -245,7 +254,7 @@ describe("client atom families", (it) => {
         >(AsyncResult.initial(true))
         let acquireCount = 0
         let releaseCount = 0
-        const atom = supervisedSessionAtom(
+        const atom = wsSupervisedSessionAtom(
           Effect.acquireRelease(
             Effect.suspend(() => {
               acquireCount += 1
@@ -332,7 +341,7 @@ describe("client atom families", (it) => {
         const updated = thing(2n)
         const ref = yield* SubscriptionRef.make(successRows([initial]))
         const session = makeThingSession(() => Effect.succeed(ref))
-        const atom = tableAtomFamily(session)("thing")
+        const atom = wsTableAtomFamily(session)("thing")
         const registry = yield* makeRegistry
         const values: Array<ThingValue> = []
 
@@ -376,7 +385,7 @@ describe("client atom families", (it) => {
             return ref
           }),
         )
-        const atom = tableAtomFamily(session)("thing")
+        const atom = wsTableAtomFamily(session)("thing")
         const registry = yield* makeRegistry
         const values: Array<ThingValue> = []
         const unsubscribe = registry.subscribe(
@@ -430,7 +439,7 @@ describe("client atom families", (it) => {
             return newRef
           }),
         )
-        const atom = tableAtomFamily(session)("thing")
+        const atom = wsTableAtomFamily(session)("thing")
         const registry = yield* makeRegistry
         const values: Array<ThingValue> = []
         const unsubscribe = registry.subscribe(
@@ -471,10 +480,10 @@ describe("client atom families", (it) => {
     () =>
       Effect.gen(function* () {
         const registry = yield* makeRegistry
-        const failing = tableAtomFamily(
+        const failing = wsTableAtomFamily(
           makeThingSession(() => Effect.die("acquire defect")),
         )("thing")
-        const interrupted = tableAtomFamily(
+        const interrupted = wsTableAtomFamily(
           makeThingSession(() => Effect.interrupt),
         )("thing")
 
@@ -508,7 +517,7 @@ describe("client atom families", (it) => {
             return ref
           }),
         )
-        const atom = tableAtomFamily(session)("thing")
+        const atom = wsTableAtomFamily(session)("thing")
         const registry = yield* makeRegistry
         const values: Array<ThingValue> = []
 
@@ -562,7 +571,7 @@ describe("client atom families", (it) => {
           successRows([thing(1n), thing(2n)]),
         )
         const session = makeThingSession(() => Effect.succeed(ref))
-        const atom = rowAtomFamily(session)("thing", 2n)
+        const atom = wsRowAtomFamily(session)("thing", 2n)
         const registry = yield* makeRegistry
         const values: Array<ThingRowValue> = []
 
@@ -595,9 +604,9 @@ describe("client atom families", (it) => {
   it.effect("keys atom families by structural table row and group inputs", () =>
     Effect.gen(function* () {
       const session = makeCapturedSession()
-      const tables = tableAtomFamily(session)
-      const rows = rowAtomFamily(session)
-      const groups = tableGroupAtomFamily(session)
+      const tables = wsTableAtomFamily(session)
+      const rows = wsRowAtomFamily(session)
+      const groups = wsTableGroupAtomFamily(session)
 
       expect(tables("user")).toBe(tables("user"))
       expect(tables("user")).not.toBe(tables("thing"))
@@ -621,8 +630,10 @@ describe("client atom families", (it) => {
           "connect failed",
         ),
       )
-      const first = tableGroupSnapshotAtom(connectionAtom, ["thing"] as const)
-      const second = tableGroupSnapshotAtom(connectionAtom, ["thing"] as const)
+      const first = wsTableGroupSnapshotAtom(connectionAtom, ["thing"] as const)
+      const second = wsTableGroupSnapshotAtom(connectionAtom, [
+        "thing",
+      ] as const)
       const registry = yield* makeRegistry
 
       expect(first).toBe(second)
@@ -636,11 +647,11 @@ describe("client atom families", (it) => {
       const connectionAtom = Atom.make(
         AsyncResult.success(makeCapturedSession()),
       )
-      const first = tableGroupSnapshotAtom(connectionAtom, [
+      const first = wsTableGroupSnapshotAtom(connectionAtom, [
         "user",
         "thing",
       ] as const)
-      const reordered = tableGroupSnapshotAtom(connectionAtom, [
+      const reordered = wsTableGroupSnapshotAtom(connectionAtom, [
         "thing",
         "user",
         "thing",
@@ -655,8 +666,10 @@ describe("client atom families", (it) => {
       const connectionAtom = Atom.make(
         AsyncResult.success(makeCacheKeyCollisionSession()),
       )
-      const commaKey = tableGroupSnapshotAtom(connectionAtom, ["a,b"] as const)
-      const splitKeys = tableGroupSnapshotAtom(connectionAtom, [
+      const commaKey = wsTableGroupSnapshotAtom(connectionAtom, [
+        "a,b",
+      ] as const)
+      const splitKeys = wsTableGroupSnapshotAtom(connectionAtom, [
         "a",
         "b",
       ] as const)
@@ -665,117 +678,95 @@ describe("client atom families", (it) => {
     }),
   )
 
-  it.effect(
-    "switches snapshot sessions without duplicate acquisition and preserves failures",
-    () =>
-      Effect.gen(function* () {
-        const successFirst = AsyncResult.success<
-          ThingGroupSnapshot,
-          TableRefFailure
-        >({ thing: [thing(1n)] })
-        const successSecond = AsyncResult.success<
-          ThingGroupSnapshot,
-          TableRefFailure
-        >({ thing: [thing(2n)] })
-        const refFirst =
-          yield* SubscriptionRef.make<
-            TableGroupRefValue<ThingGroupSnapshot, TableRefFailure>
-          >(successFirst)
-        const refSecond =
-          yield* SubscriptionRef.make<
-            TableGroupRefValue<ThingGroupSnapshot, TableRefFailure>
-          >(successSecond)
-        let acquiresFirst = 0
-        let releasesFirst = 0
-        let acquiresSecond = 0
-        let releasesSecond = 0
-        const sessionFirst = makeThingGroupSession({
-          ref: refFirst,
-          onAcquire: () => {
-            acquiresFirst = acquiresFirst + 1
-          },
-          onRelease: () => {
-            releasesFirst = releasesFirst + 1
-          },
-        })
-        const sessionSecond = makeThingGroupSession({
-          ref: refSecond,
-          onAcquire: () => {
-            acquiresSecond = acquiresSecond + 1
-          },
-          onRelease: () => {
-            releasesSecond = releasesSecond + 1
-          },
-        })
-        const connectionAtom = Atom.make<
-          AsyncResult.AsyncResult<
-            TableAtomSession<typeof MinimalModule>,
-            string
-          >
-        >(AsyncResult.success(sessionFirst))
-        const snapshotAtom = tableGroupSnapshotAtom(connectionAtom, [
-          "thing",
-        ] as const)
-        const registry = yield* makeRegistry
-        const values: Array<
-          AsyncResult.AsyncResult<ThingGroupSnapshot, string | TableRefFailure>
-        > = []
-        const unsubscribe = registry.subscribe(
-          snapshotAtom,
-          (value) => {
-            values.push(value)
-          },
-          { immediate: true },
-        )
+  it.effect("switches snapshot sessions without duplicate acquisition", () =>
+    Effect.gen(function* () {
+      const successFirst = AsyncResult.success<
+        ThingGroupSnapshot,
+        TableRefFailure
+      >({ thing: [thing(1n)] })
+      const successSecond = AsyncResult.success<
+        ThingGroupSnapshot,
+        TableRefFailure
+      >({ thing: [thing(2n)] })
+      const refFirst =
+        yield* SubscriptionRef.make<
+          TableGroupRefValue<ThingGroupSnapshot, TableRefFailure>
+        >(successFirst)
+      const refSecond =
+        yield* SubscriptionRef.make<
+          TableGroupRefValue<ThingGroupSnapshot, TableRefFailure>
+        >(successSecond)
+      let acquiresFirst = 0
+      let releasesFirst = 0
+      let acquiresSecond = 0
+      let releasesSecond = 0
+      const sessionFirst = makeThingGroupSession({
+        ref: refFirst,
+        onAcquire: () => {
+          acquiresFirst = acquiresFirst + 1
+        },
+        onRelease: () => {
+          releasesFirst = releasesFirst + 1
+        },
+      })
+      const sessionSecond = makeThingGroupSession({
+        ref: refSecond,
+        onAcquire: () => {
+          acquiresSecond = acquiresSecond + 1
+        },
+        onRelease: () => {
+          releasesSecond = releasesSecond + 1
+        },
+      })
+      const connectionAtom = Atom.make<
+        AsyncResult.AsyncResult<TableAtomSession<typeof MinimalModule>, string>
+      >(AsyncResult.success(sessionFirst))
+      const snapshotAtom = wsTableGroupSnapshotAtom(connectionAtom, [
+        "thing",
+      ] as const)
+      const registry = yield* makeRegistry
+      const values: Array<
+        AsyncResult.AsyncResult<ThingGroupSnapshot, string | TableRefFailure>
+      > = []
+      const unsubscribe = registry.subscribe(
+        snapshotAtom,
+        (value) => {
+          values.push(value)
+        },
+        { immediate: true },
+      )
 
-        yield* waitFor(
-          () => acquiresFirst === 1 && values.some(AsyncResult.isSuccess),
-          "first group was not acquired exactly once",
-        )
-        registry.set(
-          connectionAtom,
-          AsyncResult.waiting(AsyncResult.success(sessionFirst)),
-        )
-        yield* waitFor(
-          () => latestValue(values).waiting,
-          "connection waiting state was not propagated",
-        )
+      yield* waitFor(
+        () => acquiresFirst === 1 && values.some(AsyncResult.isSuccess),
+        "first group was not acquired exactly once",
+      )
+      registry.set(
+        connectionAtom,
+        AsyncResult.waiting(AsyncResult.success(sessionFirst)),
+      )
+      yield* waitFor(
+        () => latestValue(values).waiting,
+        "connection waiting state was not propagated",
+      )
 
-        const tableFailure = new SubscriptionTransportError({
-          cause: new Error("group failed"),
-        })
-        yield* SubscriptionRef.set(
-          refFirst,
-          AsyncResult.failWithPrevious(tableFailure, {
-            previous: Option.some(successFirst),
-          }),
-        )
-        yield* waitFor(
-          () => latestValue(values).pipe(AsyncResult.error, Option.isSome),
-          "table ref failure was not propagated",
-        )
-        expect(AsyncResult.value(latestValue(values))).toEqual(
-          Option.some(successFirst.value),
-        )
+      registry.set(connectionAtom, AsyncResult.success(sessionSecond))
+      yield* waitFor(
+        () =>
+          acquiresSecond === 1 &&
+          releasesFirst === 1 &&
+          AsyncResult.value(latestValue(values)).pipe(
+            Option.exists((snapshot) => snapshot.thing[0]?.id === 2n),
+          ),
+        "session switch did not release the prior group",
+      )
+      expect(acquiresFirst).toBe(1)
+      expect(acquiresSecond).toBe(1)
 
-        registry.set(connectionAtom, AsyncResult.success(sessionSecond))
-        yield* waitFor(
-          () =>
-            acquiresSecond === 1 &&
-            releasesFirst === 1 &&
-            AsyncResult.value(latestValue(values)).pipe(
-              Option.exists((snapshot) => snapshot.thing[0]?.id === 2n),
-            ),
-          "session switch did not release the prior group",
-        )
-        expect(acquiresFirst).toBe(1)
-        expect(acquiresSecond).toBe(1)
-
-        unsubscribe()
-        yield* waitFor(
-          () => releasesSecond === 1,
-          "second group was not released",
-        )
-      }),
+      unsubscribe()
+      yield* waitFor(
+        () => releasesSecond === 1,
+        "second group was not released",
+      )
+    }),
   )
 })

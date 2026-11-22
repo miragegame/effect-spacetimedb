@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { FullModule } from "../fixtures/full-module"
 import {
   makeFullModuleWsConnection,
@@ -10,29 +10,29 @@ import {
 import type { Assert, IsEqual } from "./helpers"
 import { testViewRowsLength } from "../helpers/array-bounds"
 
-void StdbTesting.ClientWs.make({
+void StdbInternal.ClientWs.make({
   module: FullModule,
   connection: makeFullModuleWsConnection(),
 })
 
 const userRelation =
   makeStaticRelationHandle<
-    StdbTesting.ClientWs.WsTableRow<typeof FullModule.tables.user>
+    StdbInternal.ClientWs.WsTableRow<typeof FullModule.tables.user>
   >()
 const presenceRelation =
   makeStaticRelationHandle<
-    StdbTesting.ClientWs.WsTableRow<typeof FullModule.tables.presenceEvent>
+    StdbInternal.ClientWs.WsTableRow<typeof FullModule.tables.presenceEvent>
   >()
 const allUsersRelation =
   makeStaticRelationHandle<
-    StdbTesting.ClientWs.WsTableRow<typeof FullModule.tables.user>
+    StdbInternal.ClientWs.WsTableRow<typeof FullModule.tables.user>
   >()
 
-const NonePolicyModule = Stdb.StdbModule.make("none_policy_views", {
+const NonePolicyModule = Stdb.Module.make("none_policy_views", {
   settings: { caseConversionPolicy: "none" },
 }).add(
-  Stdb.StdbGroup.make("Views").add(
-    Stdb.StdbFn.anonymousView("allUsers", {
+  Stdb.Group.make("Views").add(
+    Stdb.Fn.anonymousView("allUsers", {
       returns: Stdb.array(FullModule.tables.user.row, testViewRowsLength),
     }),
   ),
@@ -40,24 +40,36 @@ const NonePolicyModule = Stdb.StdbModule.make("none_policy_views", {
 
 const validNonePolicyDb = {
   allUsers: allUsersRelation,
-} satisfies StdbTesting.ClientWs.WsDbShape<typeof NonePolicyModule>
+} satisfies StdbInternal.ClientWs.WsDbShape<typeof NonePolicyModule>
 
 void validNonePolicyDb
 
-// The query-builder root is keyed by contract key under either name policy,
-// matching the camelCase accessors the generated client emits.
+const profiles = Stdb.Module.make("profiles").addTables(
+  Stdb.table("user_profile", {
+    public: true,
+    columns: { user_id: Stdb.string().primaryKey() },
+  }),
+)
+const profileDb = {
+  userProfile: makeStaticRelationHandle([{ userId: "one" }]),
+} satisfies StdbInternal.ClientWs.WsDbShape<typeof profiles.spec>
+void profileDb
+
+// The query-builder facade keeps the contract key under either name policy.
 type _snakePolicyViewQueryRootKeys = Assert<
-  IsEqual<keyof StdbTesting.ClientViewQueryRoot<typeof FullModule>, "allUsers">
+  IsEqual<keyof StdbInternal.ClientViewQueryRoot<typeof FullModule>, "allUsers">
 >
 type _nonePolicyViewQueryRootKeys = Assert<
   IsEqual<
-    keyof StdbTesting.ClientViewQueryRoot<typeof NonePolicyModule>,
+    keyof StdbInternal.ClientViewQueryRoot<typeof NonePolicyModule>,
     "allUsers"
   >
 >
 type _viewQueryRootRejectsWireName = Assert<
   IsEqual<
-    "all_users" extends keyof StdbTesting.ClientViewQueryRoot<typeof FullModule>
+    "all_users" extends keyof StdbInternal.ClientViewQueryRoot<
+      typeof FullModule
+    >
       ? true
       : false,
     false
@@ -71,14 +83,14 @@ const validConnection = {
     allUsers: allUsersRelation,
   },
   subscriptionBuilder: () => makeUnexpectedSubscriptionBuilder(),
-} satisfies StdbTesting.ClientWs.WsConnectionLike<typeof FullModule, unknown>
+} satisfies StdbInternal.ClientWs.WsConnectionLike<typeof FullModule, unknown>
 
-void StdbTesting.ClientWs.make({
+void StdbInternal.ClientWs.make({
   module: FullModule,
   connection: validConnection,
 })
 
-void StdbTesting.ClientWs.make({
+void StdbInternal.ClientWs.make({
   module: FullModule,
   connection: {
     db: {
@@ -91,7 +103,7 @@ void StdbTesting.ClientWs.make({
   },
 })
 
-void StdbTesting.ClientWs.make({
+void StdbInternal.ClientWs.make({
   module: FullModule,
   connection: {
     db: {
@@ -107,7 +119,7 @@ void StdbTesting.ClientWs.make({
   },
 })
 
-const invalidUserRow: StdbTesting.ClientWs.WsTableRow<
+const invalidUserRow: StdbInternal.ClientWs.WsTableRow<
   typeof FullModule.tables.user
 > = {
   // @ts-expect-error wrong public table row shapes no longer satisfy the ws row contract
@@ -129,7 +141,7 @@ const optionalWireRow = Stdb.table("optionalWireRow", {
   },
 })
 
-type OptionalWireRow = StdbTesting.ClientWs.WsTableRow<typeof optionalWireRow>
+type OptionalWireRow = StdbInternal.ClientWs.WsTableRow<typeof optionalWireRow>
 
 const omittedOptionalKeys: OptionalWireRow = { id: "required" }
 const explicitUndefinedKeys: OptionalWireRow = {

@@ -1,29 +1,23 @@
 import * as Effect from "effect/Effect"
-
 import * as Stream from "effect/Stream"
-
 import { fieldOptions } from "../contract/field.ts"
 import type { AnyModuleSpec } from "../contract/module.ts"
-import { type AnyTableSpec } from "../contract/table.ts"
+import type { AnyTableSpec } from "../contract/table.ts"
 import { sameIndexColumns } from "../table-index-typing.ts"
-import {
-  addDecodeContext,
-  StdbDecodeError,
-  type StdbDecodePhase,
-} from "../decode-error.ts"
-
 import type { OutboxSendContext } from "./outbox.ts"
 import type { DbShape } from "./runtime-types.ts"
-
 import {
   type EffectDbView,
-  isStdbHostFailure,
+  StdbTableOperationDefect,
+  StdbUniqueAlreadyExistsError,
+  StdbAutoIncOverflowError,
+  StdbNoSuchRowError,
+  StdbScheduleDelayTooLongError,
   type ReadonlyEffectDbView,
-  type StdbHostFailure,
+  type DbFailure,
   toHostFailure,
 } from "./services.ts"
 
-export { hostCall } from "./services.ts"
 export {
   cloneRangeLike,
   isRangeLike,
@@ -33,8 +27,8 @@ export {
 export type RawRecord = Record<PropertyKey, unknown>
 
 export type DecodeContext = {
-  readonly table?: string
-  readonly op?: string
+  readonly table: string
+  readonly op: string
 }
 
 // Keep the wrapper input structural; native Range<T> is nominal because of
@@ -61,6 +55,9 @@ export type LookupPlan =
     }
 
 export type TableCodec = {
+  readonly hasAutoIncrement: boolean
+  readonly hasUniqueConstraint: boolean
+  readonly scheduled: boolean
   readonly context: DecodeContext
   readonly encodeRow: (row: unknown) => unknown
   readonly decodeRow: (row: unknown) => unknown
@@ -103,52 +100,44 @@ export type DbHandleFactory<Module extends AnyModuleSpec> = {
   readonly readonly: (rawDb: DbShape<Module>) => ReadonlyEffectDbView<Module>
 }
 
-export const decodeSync = <A>(run: () => A, context: DecodeContext = {}): A => {
+const tableSync = <A>(table: string, op: string, run: () => A): A => {
   try {
     return run()
   } catch (cause) {
-    throw StdbDecodeError.is(cause)
-      ? addDecodeContext(cause, context)
-      : new StdbDecodeError({
-          phase: "row",
-          cause,
-          ...context,
-        })
+    throw new StdbTableOperationDefect({ table, op, cause })
   }
 }
 
-export const decodeCall = <A>(
-  run: () => A,
-  context: DecodeContext = {},
-): Effect.Effect<A, StdbDecodeError> =>
-  Effect.try({
-    try: () => decodeSync(run, context),
-    catch: (cause) =>
-      StdbDecodeError.is(cause)
-        ? cause
-        : new StdbDecodeError({
-            phase: "row",
-            cause,
-            ...context,
-          }),
-  })
-
-export const encodeCall = <A>(
-  phase: StdbDecodePhase,
-  run: () => A,
-  context: DecodeContext = {},
-): Effect.Effect<A, StdbDecodeError> =>
+export const tableCall = <A>(table: string, op: string, run: () => A) =>
   Effect.try({
     try: run,
-    catch: (cause) =>
-      StdbDecodeError.is(cause)
-        ? addDecodeContext(cause, context)
-        : new StdbDecodeError({
-            phase,
-            cause,
-            ...context,
-          }),
-  })
+    catch: (cause) => new StdbTableOperationDefect({ table, op, cause }),
+  }).pipe(Effect.orDie)
+
+export const writeCall = <A>(
+  codec: TableCodec,
+  op: string,
+  method: "insert" | "update",
+  run: () => A,
+): Effect.Effect<A, DbFailure> =>
+  Effect.try({ try: run, catch: (cause) => toHostFailure(op, cause) }).pipe(
+    Effect.catch((error): Effect.Effect<never, DbFailure> => {
+      if (
+        (StdbUniqueAlreadyExistsError.is(error) && codec.hasUniqueConstraint) ||
+        (StdbAutoIncOverflowError.is(error) && codec.hasAutoIncrement) ||
+        (StdbNoSuchRowError.is(error) && method === "update") ||
+        (StdbScheduleDelayTooLongError.is(error) && codec.scheduled)
+      )
+        return Effect.fail(error)
+      return Effect.die(
+        new StdbTableOperationDefect({
+          table: codec.context.table,
+          op,
+          cause: error.cause,
+        }),
+      )
+    }),
+  )
 
 export const asRecord = (value: unknown): RawRecord =>
   typeof value === "object" && value !== null
@@ -188,6 +177,7 @@ export const mapIteratorStep = (
 
 export const wrapIteratorObject = (
   iterator: unknown,
+  table: string,
   op: string,
   mapValue: (value: unknown) => unknown = (value) => value,
 ): unknown => {
@@ -209,15 +199,9 @@ export const wrapIteratorObject = (
       enumerable: false,
       writable: true,
       value: (...args: ReadonlyArray<unknown>) => {
-        try {
-          return mapIteratorStep(method.apply(rawIterator, args), mapValue)
-        } catch (cause) {
-          if (StdbDecodeError.is(cause)) {
-            throw cause
-          }
-
-          throw toHostFailure(`${op}.${key}`, cause)
-        }
+        return tableSync(table, `${op}.${key}`, () =>
+          mapIteratorStep(method.apply(rawIterator, args), mapValue),
+        )
       },
     })
   }
@@ -238,6 +222,7 @@ export const wrapIteratorObject = (
 
 export const wrapIteratorResult = (
   value: unknown,
+  table: string,
   op: string,
   mapValue: (value: unknown) => unknown = (value) => value,
 ): unknown => {
@@ -246,137 +231,61 @@ export const wrapIteratorResult = (
   }
 
   return typeof (value as RawRecord).next === "function"
-    ? wrapIteratorObject(value, op, mapValue)
+    ? wrapIteratorObject(value, table, op, mapValue)
     : value
 }
 
-export const closeIterator = (
+const closeIterator = (iterator: unknown, table: string, op: string) =>
+  tableCall(table, `${op}.return`, () => {
+    const method = asRecord(iterator).return
+    if (typeof method === "function") method.apply(iterator)
+  })
+
+const nextRow = (
   iterator: unknown,
+  table: string,
   op: string,
-): Effect.Effect<void> =>
-  Effect.suspend(() => {
-    if (typeof iterator !== "object" || iterator === null) {
-      return Effect.void
-    }
-
-    const method = (iterator as RawRecord).return
-    if (typeof method !== "function") {
-      return Effect.void
-    }
-
-    // Safe streams close by finalizing the native iterator; iterator.throw is
-    // reserved for explicit unsafe-iterator consumer errors.
-    return Effect.try({
-      try: () => {
-        method.apply(iterator)
-      },
-      catch: (cause) => toHostFailure(`${op}.return`, cause),
-    }).pipe(
-      Effect.catchIf(isStdbHostFailure, (error) =>
-        Effect.logWarning(
-          `Failed to close SpaceTimeDB iterator at ${error.op}`,
-        ),
-      ),
+  decode: (value: unknown) => unknown,
+) =>
+  tableCall(table, `${op}.next`, () => {
+    const step = callHostMethod<IteratorResult<unknown>>(
+      asRecord(iterator),
+      "next",
+      `${op}.next`,
+      [],
     )
+    return step.done ? undefined : ([decode(step.value), iterator] as const)
   })
 
 export const streamIterator = (
   iterator: unknown,
+  table: string,
   op: string,
-  mapValue: (value: unknown) => unknown = (value) => value,
-): Stream.Stream<unknown, StdbHostFailure | StdbDecodeError> =>
+  decode: (value: unknown) => unknown,
+): Stream.Stream<unknown> =>
   Stream.unwrap(
     Effect.acquireRelease(Effect.succeed(iterator), (current) =>
-      closeIterator(current, op),
+      closeIterator(current, table, op),
     ).pipe(
-      Effect.map((acquiredIterator) =>
-        Stream.unfold(acquiredIterator, (current) => {
-          if (typeof current !== "object" || current === null) {
-            return Effect.fail(
-              toHostFailure(
-                `${op}.next`,
-                new TypeError(`Missing iterator object at ${op}`),
-              ),
-            )
-          }
-          const method = (current as RawRecord).next
-          if (typeof method !== "function") {
-            return Effect.fail(
-              toHostFailure(
-                `${op}.next`,
-                new TypeError(`Missing iterator next method at ${op}`),
-              ),
-            )
-          }
-          return Effect.try({
-            try: () => {
-              const step = method.apply(current) as IteratorResult<
-                unknown,
-                unknown
-              >
-              if (step.done ?? false) {
-                return undefined
-              }
-
-              return [mapValue(step.value), current] as const
-            },
-            catch: (cause) =>
-              StdbDecodeError.is(cause)
-                ? cause
-                : toHostFailure(`${op}.next`, cause),
-          })
-        }),
+      Effect.map((acquired) =>
+        Stream.unfold(acquired, (current) =>
+          nextRow(current, table, op, decode),
+        ),
       ),
     ),
   )
 
-export const collectIterator = (
-  iterator: unknown,
-  op: string,
-  mapValue: (value: unknown) => unknown = (value) => value,
-): Effect.Effect<ReadonlyArray<unknown>, StdbHostFailure | StdbDecodeError> =>
-  streamIterator(iterator, op, mapValue).pipe(
-    Stream.runCollect,
-    Effect.map((values) => values as ReadonlyArray<unknown>),
-  )
-
 export const iteratorValueFirst = (
   iterator: unknown,
+  table: string,
   op: string,
-  mapValue: (value: unknown) => unknown = (value) => value,
-): Effect.Effect<unknown | undefined, StdbHostFailure | StdbDecodeError> =>
+  decode: (value: unknown) => unknown,
+) =>
   Effect.acquireUseRelease(
     Effect.succeed(iterator),
-    (current) => {
-      if (typeof current !== "object" || current === null) {
-        return Effect.fail(
-          toHostFailure(
-            `${op}.next`,
-            new TypeError(`Missing iterator object at ${op}`),
-          ),
-        )
-      }
-      const method = (current as RawRecord).next
-      if (typeof method !== "function") {
-        return Effect.fail(
-          toHostFailure(
-            `${op}.next`,
-            new TypeError(`Missing iterator next method at ${op}`),
-          ),
-        )
-      }
-      return Effect.try({
-        try: () => {
-          const step = method.apply(current) as IteratorResult<unknown, unknown>
-          return (step.done ?? false) ? undefined : mapValue(step.value)
-        },
-        catch: (cause) =>
-          StdbDecodeError.is(cause)
-            ? cause
-            : toHostFailure(`${op}.next`, cause),
-      })
-    },
-    (current) => closeIterator(current, op),
+    (current) =>
+      nextRow(current, table, op, decode).pipe(Effect.map((step) => step?.[0])),
+    (current) => closeIterator(current, table, op),
   )
 
 export const normalizeFindResult = <A>(

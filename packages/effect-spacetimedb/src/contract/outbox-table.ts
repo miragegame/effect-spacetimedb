@@ -1,7 +1,8 @@
+import type { TableCachePolicy } from "./table-cache-policy.ts"
 import * as Data from "effect/Data"
 import type { ColumnReferences } from "./column-reference.ts"
 import type { ConstraintSpec } from "./constraint.ts"
-import { makeStdbDiagnostic, StdbValidationError } from "./diagnostic.ts"
+import { makeStdbDiagnostic, StdbValidationDefect } from "./diagnostic.ts"
 import {
   type AnyFieldType,
   type FieldOptionsOf,
@@ -29,7 +30,9 @@ export const outboxRowBytesMaxCeiling = 1024 * 1024
  * The row may carry caller input, so the sender handles it: drops the call,
  * or refuses its own caller with a declared error of its own.
  */
-export class OutboxRowTooLarge extends Data.TaggedError("OutboxRowTooLarge")<{
+export class OutboxRowTooLargeError extends Data.TaggedError(
+  "OutboxRowTooLargeError",
+)<{
   readonly table: string
   readonly rowBytes: number
   readonly rowBytesMax: number
@@ -103,10 +106,9 @@ type ColumnsFromInputs<Fields extends Type.StructFields> = {
 }
 
 type FieldIndexUnion<Fields extends Record<string, AnyFieldType>> = {
-  readonly [Key in keyof Fields & string]: Exclude<
-    FieldOptionsOf<Fields[Key]>["index"],
-    undefined
-  > extends infer Algorithm extends IndexAlgorithm
+  readonly [Key in keyof Fields & string]: FieldOptionsOf<
+    Fields[Key]
+  >["index"] extends infer Algorithm extends IndexAlgorithm
     ? [Algorithm] extends [never]
       ? never
       : IndexSpec<Key, readonly [Key], Algorithm>
@@ -136,9 +138,9 @@ type ConstraintsOfCallback<Options> = Options extends {
     : readonly []
   : readonly []
 
-type OutboxIdValueType = Type.U64ValueType<bigint, bigint>
+export type OutboxIdValueType = Type.U64ValueType<bigint, bigint>
 
-type OutboxLeadingColumnInputs = {
+export type OutboxLeadingColumnInputs = {
   readonly msgId: FieldType<
     OutboxIdValueType,
     { readonly primaryKey: true; readonly autoInc: true }
@@ -146,23 +148,23 @@ type OutboxLeadingColumnInputs = {
   readonly target: ReturnType<typeof Type.identity>
 }
 
-type OutboxTrailingColumnInputs = {
+export type OutboxTrailingColumnInputs = {
   readonly enqueuedAt: ReturnType<typeof Type.timestamp>
 }
 
-type ReceiverParamFieldsOf<
+export type ReceiverParamFieldsOf<
   Interface extends AnyRemoteInterface,
   Reducer extends ReceiverKeysOf<Interface>,
 > = Type.StructFieldsOf<Interface["receivers"][Reducer]["params"]>
 
-type OutboxColumnInputs<
+export type OutboxColumnInputs<
   ParamFields extends Type.StructFields,
   Columns extends Type.StructFields,
 > = Expand<
   OutboxLeadingColumnInputs & ParamFields & Columns & OutboxTrailingColumnInputs
 >
 
-type OutboxTargetIndex = IndexSpec<
+export type OutboxTargetIndex = IndexSpec<
   typeof outboxTargetIndexName,
   readonly ["target", "msgId"],
   "btree"
@@ -187,7 +189,9 @@ type RejectOutboxColumnCollisions<Columns, ParamFields> = [
         ) as `outboxTable columns cannot include reserved column ${Key}`]: never
     }
 
-type OutboxTableCallbackOptions<Fields extends Record<string, AnyFieldType>> = {
+export type OutboxTableCallbackOptions<
+  Fields extends Record<string, AnyFieldType>,
+> = {
   readonly indexes?: (
     columns: ColumnReferences<Fields>,
   ) => ReadonlyArray<IndexSpec>
@@ -196,7 +200,7 @@ type OutboxTableCallbackOptions<Fields extends Record<string, AnyFieldType>> = {
   ) => ReadonlyArray<ConstraintSpec>
 }
 
-type OutboxFieldsOf<
+export type OutboxFieldsOf<
   Interface extends AnyRemoteInterface,
   Reducer extends ReceiverKeysOf<Interface>,
   Columns extends Type.StructFields,
@@ -231,8 +235,8 @@ const invalidOutboxTable = (
   name: string,
   path: ReadonlyArray<string | number>,
   message: string,
-): StdbValidationError =>
-  new StdbValidationError({
+): StdbValidationDefect =>
+  new StdbValidationDefect({
     diagnostics: [
       makeStdbDiagnostic(
         "InvalidOutboxTable",
@@ -250,7 +254,7 @@ const invalidOutboxTable = (
  * parameters under their own names, any local `columns` (never sent), and
  * `enqueuedAt` (the sending transaction's time). Inserting it in a transaction
  * sends the call once that transaction is durable; its settle reducer
- * (`StdbFn.outboxResult`) runs when the receiver answers, and the row is then
+ * (`Fn.outboxResult`) runs when the receiver answers, and the row is then
  * deleted. The table is always private and insert-only.
  */
 export function outboxTable<
@@ -267,6 +271,8 @@ export function outboxTable<
     readonly interface: Interface
     readonly reducer: Reducer
     readonly columns?: Columns
+    /** Storage policy for pending calls. Inherits the module default when omitted. */
+    readonly cachePolicy?: TableCachePolicy
     /** Encoded row size bound in bytes; see `outboxRowBytesMaxDefault`. */
     readonly rowBytesMax?: number
   } & Options &
@@ -288,6 +294,7 @@ export function outboxTable(
     readonly interface: AnyRemoteInterface
     readonly reducer: string
     readonly columns?: Type.StructFields
+    readonly cachePolicy?: TableCachePolicy
     readonly rowBytesMax?: number
     readonly indexes?: (columns: never) => ReadonlyArray<IndexSpec>
     readonly constraints?: (columns: never) => ReadonlyArray<ConstraintSpec>
@@ -295,7 +302,7 @@ export function outboxTable(
 ): AnyOutboxTableSpec {
   const receiver = options.interface.receivers[options.reducer]
   if (receiver === undefined) {
-    throw new StdbValidationError({
+    throw new StdbValidationDefect({
       diagnostics: [
         makeStdbDiagnostic(
           "OutboxReceiverUnknown",
@@ -342,6 +349,7 @@ export function outboxTable(
   const table = makeTable({
     name,
     public: false,
+    cachePolicy: options.cachePolicy,
     columns: {
       msgId: Type.u64().primaryKey().autoInc(),
       target: Type.identity(),

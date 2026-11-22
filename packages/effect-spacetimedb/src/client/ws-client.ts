@@ -1,3 +1,16 @@
+import {
+  lazyGroups,
+  groupMembers,
+  type ReducerKeysInGroup,
+  type ProcedureKeysInGroup,
+} from "./group-clients.ts"
+import { tableRelation } from "./websocket-contract.ts"
+import {
+  generatedMemberPath,
+  nestMembers,
+  readMember,
+  type MembersByPath,
+} from "../member-path.ts"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Match from "effect/Match"
@@ -29,14 +42,18 @@ import {
   type TableSubscriptionTarget,
 } from "../subscription-target.ts"
 import { typedEntries, typedFromEntries } from "../utils.ts"
-import { StdbDecodeError } from "./call-errors.ts"
+import { boundedCallDurationMax } from "./call-duration.ts"
+import { StdbDecodeError, type WsConnectionFailure } from "./call-errors.ts"
 import {
   callProcedure,
   callProcedureRaw,
   callReducer,
   callReducerRaw,
 } from "./call-runtime.ts"
-import { connectionStateFor } from "./connection-state.ts"
+import {
+  connectionStateFor,
+  subscriptionInvalidated,
+} from "./connection-state.ts"
 import { decodeStdbEventContext } from "./event-context.ts"
 import { type InsertEvent, type RelationHandle } from "./relation.ts"
 import { make as makeRpc, type ParamsOf } from "./rpc.ts"
@@ -72,10 +89,7 @@ import {
 } from "./websocket-contract.ts"
 import { makePublicTableCache } from "./ws-cache.ts"
 import { makeWsConnectionAwareCalls } from "./ws-call-liveness.ts"
-import {
-  SubscriptionInvalidatedError,
-  type SubscriptionFailure,
-} from "./ws-subscription.ts"
+import type { SubscriptionFailure } from "./ws-subscription.ts"
 import {
   bindHandleToConnection,
   type SubscriptionHandleLike,
@@ -116,6 +130,27 @@ export type {
 } from "./websocket-contract.ts"
 export type { WsTableRow } from "./ws-row.ts"
 
+const sinklessSubscriptionEndedMessage =
+  "A subscription with no failure sink of its own ended after it applied"
+
+export type WsGroupClients<
+  Module extends AnyModuleSpec,
+  Flat extends { reducers: object; procedures: object },
+> = {
+  readonly [Group in
+    | (Module["reducerGroups"][keyof Module["reducerGroups"]] & string)
+    | (Module["procedureGroups"][keyof Module["procedureGroups"]] & string)]: {
+    readonly reducers: Pick<
+      Flat["reducers"],
+      ReducerKeysInGroup<Module, Group> & keyof Flat["reducers"]
+    >
+    readonly procedures: Pick<
+      Flat["procedures"],
+      ProcedureKeysInGroup<Module, Group> & keyof Flat["procedures"]
+    >
+  }
+}
+
 export const makeFromModulePlan = <
   Module extends AnyModuleSpec,
   ErrorContext,
@@ -124,6 +159,14 @@ export const makeFromModulePlan = <
   readonly plan: ModulePlan<Module>
   readonly connection: WsConnectionLike<Module, ErrorContext, RelationContext>
   readonly transport?: WsCallableTransport | undefined
+  readonly callDurationMax?: Duration.Input | undefined
+  /**
+   * How a connection ends when a call overruns its bound, for an owner that can
+   * close it. A connection nobody here owns is only invalidated.
+   */
+  readonly endConnection?:
+    | ((message: string) => Effect.Effect<void>)
+    | undefined
 }) => {
   const module = options.plan.module
   const connectionState = connectionStateFor(options.connection)
@@ -133,13 +176,13 @@ export const makeFromModulePlan = <
       ? options.connection
       : undefined)
   const tableRowTypes = typedFromEntries(
-    typedEntries(module.tables).map(([key, tableSpec]) => [
+    typedEntries(options.plan.tables).map(([key, tableSpec]) => [
       key,
       rowType(tableSpec) as AnyValueType,
     ]),
   ) as Record<string, AnyValueType>
   const tableRowDecoders = typedFromEntries(
-    typedEntries(module.tables).map(([key]) => {
+    typedEntries(options.plan.tables).map(([key]) => {
       const decode = Type.dbCodec(tableRowTypes[key]!).decodeUnknownSync
 
       return [
@@ -188,8 +231,11 @@ export const makeFromModulePlan = <
     }),
   ) as Record<string, (row: unknown) => unknown>
   const viewRelation = <Key extends PublicViewKeys<Module>>(key: Key) =>
-    Reflect.get(options.connection.db, key) as RelationHandle<
-      WsViewRowOf<Module["views"][Key]>,
+    readMember(
+      options.connection.db,
+      generatedMemberPath(key),
+    ) as RelationHandle<
+      WsViewRowOf<MembersByPath<Module, "views">[Key]>,
       RelationContext
     >
   const subscriptionAdapter = subscriptionAdapterFromBuilder({
@@ -197,22 +243,41 @@ export const makeFromModulePlan = <
     messageFromError: subscriptionErrorMessage,
   })
 
+  // How the library ends this connection: an owner that can close it also
+  // disconnects; one nobody here owns is only invalidated.
+  const endConnection =
+    options.endConnection ??
+    ((message: string) =>
+      Effect.suspend(() => {
+        connectionState.invalidateFromTransport(message)
+        return Effect.void
+      }))
+
   const connectionAwareCalls = makeWsConnectionAwareCalls({
     connectionState,
     transport: rpcTransport,
+    callDurationMax: boundedCallDurationMax(
+      "WebSocket",
+      options.callDurationMax,
+    ),
+    endConnection,
   })
 
-  const decodeTableRow = <Key extends keyof Module["tables"] & string>(
+  const decodeTableRow = <
+    Key extends keyof MembersByPath<Module, "tables"> & string,
+  >(
     key: Key,
     row: unknown,
-  ): TableRow<Module["tables"][Key]> =>
-    tableRowDecoders[key]!(row) as TableRow<Module["tables"][Key]>
+  ): TableRow<MembersByPath<Module, "tables">[Key]> =>
+    tableRowDecoders[key]!(row) as TableRow<
+      MembersByPath<Module, "tables">[Key]
+    >
 
   const decodeViewRow = <Key extends PublicViewKeys<Module>>(
     key: Key,
     row: unknown,
-  ): ViewRowOf<Module["views"][Key]> =>
-    viewRowDecoders[key]!(row) as ViewRowOf<Module["views"][Key]>
+  ): ViewRowOf<MembersByPath<Module, "views">[Key]> =>
+    viewRowDecoders[key]!(row) as ViewRowOf<MembersByPath<Module, "views">[Key]>
 
   const subscribeQuerySource = (
     query: SubscriptionQuerySource<ClientQueryRoot<Module>>,
@@ -229,15 +294,26 @@ export const makeFromModulePlan = <
       "spacetimedb.transport": "ws",
     }
 
-    const invalidated = connectionState.awaitInvalidation().pipe(
-      Effect.flatMap((invalidation) =>
-        Effect.fail(
-          new SubscriptionInvalidatedError({
-            raw: invalidation.message,
-          }),
+    const invalidated = connectionState
+      .awaitInvalidation()
+      .pipe(
+        Effect.flatMap((invalidation) =>
+          Effect.fail(subscriptionInvalidated(invalidation)),
         ),
-      ),
-    )
+      )
+
+    // A subscription the server ends after it applied (an automatic
+    // reconnect's replay refused it) has already lost its rows from the
+    // cache. A caller that passed no sink of its own would hear nothing: the
+    // connection would stay live over a cache missing that data. Ending the
+    // connection, as a call overrun does, is the signal every owner already
+    // watches.
+    const appliedFailureSink =
+      onAppliedError ??
+      (() => {
+        // The SDK's callback is the boundary: nothing awaits this end.
+        Effect.runFork(endConnection(sinklessSubscriptionEndedMessage))
+      })
 
     return connectionState.assertActive().pipe(
       Effect.withSpan("spacetimedb.ws.subscription.assert_active", {
@@ -245,7 +321,7 @@ export const makeFromModulePlan = <
       }),
       Effect.andThen(
         Effect.acquireRelease(
-          subscriptionAdapter.subscribe(query, onAppliedError).pipe(
+          subscriptionAdapter.subscribe(query, appliedFailureSink).pipe(
             Effect.withSpan("spacetimedb.ws.subscription.request", {
               attributes,
             }),
@@ -284,9 +360,9 @@ export const makeFromModulePlan = <
   const subscribeTableTarget = <Key extends PublicPersistentTableKeys<Module>>(
     key: Key,
     onAppliedError?: (failure: SubscriptionFailure) => void,
-  ) => subscribe(options.plan.targets.tables[key], onAppliedError)
+  ) => subscribe(options.plan.flatTargets.tables[key], onAppliedError)
 
-  const rpc = makeRpc({
+  const rpc = makeRpc<Module, never, WsConnectionFailure>({
     reducers: options.plan.publicReducers,
     procedures: options.plan.publicProcedures,
     httpHandlers: {} as never,
@@ -382,7 +458,7 @@ export const makeFromModulePlan = <
     typedEntries(options.plan.publicViews).map(([key]) => {
       const relation = viewRelation(key)
       const decodeRows = (): ReadonlyArray<
-        ViewRowOf<Module["views"][typeof key]>
+        ViewRowOf<MembersByPath<Module, "views">[typeof key]>
       > => Array.from(relation.iter(), (row) => decodeViewRow(key, row))
       return [
         key,
@@ -408,7 +484,7 @@ export const makeFromModulePlan = <
 
   const viewReads = makeWsViewReads<Module, RelationContext>({
     connectionState,
-    targets: options.plan.targets.views,
+    targets: options.plan.flatTargets.views,
     views,
     viewRelation,
     subscribe,
@@ -418,11 +494,11 @@ export const makeFromModulePlan = <
     key: Key,
     streamOptions?: WsStreamOptions,
   ): Stream.Stream<
-    TableChange<TableRow<Module["tables"][Key]>>,
+    TableChange<TableRow<MembersByPath<Module, "tables">[Key]>>,
     SubscriptionFailure,
     Scope.Scope
   > {
-    const relation = options.connection.db[key]
+    const relation = tableRelation(options.connection, key)
 
     return streamTableChanges(
       connectionState,
@@ -436,7 +512,7 @@ export const makeFromModulePlan = <
   function streamRows<Key extends PublicPersistentTableKeys<Module>>(
     key: Key,
   ): Stream.Stream<
-    ReadonlyArray<TableRow<Module["tables"][Key]>>,
+    ReadonlyArray<TableRow<MembersByPath<Module, "tables">[Key]>>,
     SubscriptionFailure | StdbDecodeError,
     Scope.Scope
   > {
@@ -444,7 +520,7 @@ export const makeFromModulePlan = <
 
     return streamTableSnapshotSignals(
       connectionState,
-      options.connection.db[key],
+      tableRelation(options.connection, key),
       (onFailure) => subscribeTableTarget(key, onFailure),
     ).pipe(
       // Future yielding SDKs may emit extra snapshots here, never stale state.
@@ -459,11 +535,14 @@ export const makeFromModulePlan = <
     key: Key,
     streamOptions?: WsStreamOptions,
   ): Stream.Stream<
-    TableChangeWithContext<TableRow<Module["tables"][Key]>, RelationContext>,
+    TableChangeWithContext<
+      TableRow<MembersByPath<Module, "tables">[Key]>,
+      RelationContext
+    >,
     SubscriptionFailure,
     Scope.Scope
   > {
-    const relation = options.connection.db[key]
+    const relation = tableRelation(options.connection, key)
 
     return streamTableChangesWithContext(
       connectionState,
@@ -478,7 +557,7 @@ export const makeFromModulePlan = <
     key: Key,
     streamOptions?: WsStreamOptions,
   ): Stream.Stream<
-    StdbTableChangeEvent<TableRow<Module["tables"][Key]>>,
+    StdbTableChangeEvent<TableRow<MembersByPath<Module, "tables">[Key]>>,
     SubscriptionFailure,
     Scope.Scope
   > {
@@ -515,7 +594,11 @@ export const makeFromModulePlan = <
     const changes = streamTableGroupChanges(
       connectionState,
       keys.map(
-        (key) => options.connection.db[key] as RelationHandle<unknown, unknown>,
+        (key) =>
+          tableRelation(options.connection, key) as RelationHandle<
+            unknown,
+            unknown
+          >,
       ),
       (onFailure) =>
         Effect.forEach(keys, (key) => subscribeTableTarget(key, onFailure), {
@@ -540,17 +623,20 @@ export const makeFromModulePlan = <
     key: Key,
     streamOptions?: WsEventTableStreamOptions,
   ): Stream.Stream<
-    InsertEvent<TableRow<Module["tables"][Key]>, RelationContext>,
+    InsertEvent<
+      TableRow<MembersByPath<Module, "tables">[Key]>,
+      RelationContext
+    >,
     SubscriptionFailure,
     Scope.Scope
   > {
-    const relation = options.connection.db[key]
+    const relation = tableRelation(options.connection, key)
 
     return streamEventTable(
       connectionState,
       relation,
       (onFailure) =>
-        subscribe(options.plan.targets.eventTables[key], onFailure),
+        subscribe(options.plan.flatTargets.eventTables[key], onFailure),
       (row) => decodeTableRow(key, row),
       streamOptions?.buffer,
     )
@@ -560,7 +646,7 @@ export const makeFromModulePlan = <
     target: TableSubscriptionTarget<Module, Key>,
     streamOptions?: WsStreamOptions,
   ): Stream.Stream<
-    TableChange<TableRow<Module["tables"][Key]>>,
+    TableChange<TableRow<MembersByPath<Module, "tables">[Key]>>,
     SubscriptionFailure,
     Scope.Scope
   >
@@ -568,31 +654,33 @@ export const makeFromModulePlan = <
     target: EventTableSubscriptionTarget<Module, Key>,
     streamOptions?: WsEventTableStreamOptions,
   ): Stream.Stream<
-    InsertEvent<TableRow<Module["tables"][Key]>, RelationContext>,
+    InsertEvent<
+      TableRow<MembersByPath<Module, "tables">[Key]>,
+      RelationContext
+    >,
     SubscriptionFailure,
     Scope.Scope
   >
   function streamTarget(
     target:
-      | TableSubscriptionTarget<Module>
-      | EventTableSubscriptionTarget<Module>,
+      | Pick<TableSubscriptionTarget<Module>, "key" | "kind">
+      | Pick<EventTableSubscriptionTarget<Module>, "key" | "kind">,
     streamOptions?: WsStreamOptions,
   ): Stream.Stream<unknown, SubscriptionFailure, Scope.Scope> {
-    return Match.value(target).pipe(
-      Match.discriminatorsExhaustive("kind")({
-        table: (t) => streamTable(t.key, streamOptions),
-        eventTable: (t) =>
-          streamEventTableForKey(t.key, eventTableStreamOptions(streamOptions)),
-      }),
-    )
+    return target.kind === "table"
+      ? streamTable(target.key, streamOptions)
+      : streamEventTableForKey(
+          target.key,
+          eventTableStreamOptions(streamOptions),
+        )
   }
 
   const cache = {
-    tables,
-    views,
+    tables: nestMembers(tables),
+    views: nestMembers(views),
   } as PublicCache<Module>
   const tableRefAccess = makeTableRefAccess({
-    module,
+    plan: options.plan,
     connection: options.connection,
     connectionState,
     tables,
@@ -643,14 +731,31 @@ export const makeFromModulePlan = <
 
   return {
     moduleName: module.name,
+    groups: lazyGroups(
+      [
+        ...Object.values(module.reducerGroups),
+        ...Object.values(module.procedureGroups),
+      ],
+      (id) => ({
+        reducers: groupMembers(rpc.reducers, module.reducerGroups, id),
+        procedures: groupMembers(rpc.procedures, module.procedureGroups, id),
+      }),
+    ) as WsGroupClients<Module, Pick<typeof rpc, "reducers" | "procedures">>,
     cache,
     procedures: rpc.procedures,
     reducers: rpc.reducers,
     awaitInvalidation: connectionState.awaitInvalidation,
     isInvalidated: connectionState.isInvalidated,
+    isRevoked: connectionState.isRevoked,
+    // Read when asked, because a supervisor joins a connection to the sessions it
+    // replaces after building it. Typed `object` to keep the lineage internal.
+    rowsOwner: (): object => connectionState.rowLineage(),
     observeInvalidation: connectionState.observeInvalidation,
+    // The library's own end comes first: a call overrun on a caller-owned
+    // connection only invalidates it, so the SDK still reports it active
+    // while every call fails `ConnectionLostError`.
     isActive: () =>
-      options.connection.isActive ?? !connectionState.isInvalidated(),
+      !connectionState.isInvalidated() && (options.connection.isActive ?? true),
     subscribe,
     subscribeTableRef: tableRefAccess.subscribeTableRef,
     subscribeRowRef: tableRefAccess.subscribeRowRef,
@@ -681,4 +786,5 @@ export const make = <
     plan: makeModulePlan(options.module),
     connection: options.connection,
     transport: options.transport,
+    callDurationMax: options.callDurationMax,
   })

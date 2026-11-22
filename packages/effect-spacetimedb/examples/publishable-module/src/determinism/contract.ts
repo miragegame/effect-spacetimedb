@@ -1,18 +1,18 @@
 import * as Stdb from "effect-spacetimedb"
 
-export const DeterminismFunctions = Stdb.StdbGroup.make("Determinism")
+export const DeterminismFunctions = Stdb.Group.make("Determinism")
   .add(
-    Stdb.StdbFn.reducer("probeAsync", {
+    Stdb.Fn.reducer("probeAsync", {
       params: Stdb.struct({}),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("probeWallClock", {
+    Stdb.Fn.reducer("probeWallClock", {
       params: Stdb.struct({}),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("probeRandom", {
+    Stdb.Fn.reducer("probeRandom", {
       params: Stdb.struct({}),
     }),
   )

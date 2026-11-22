@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { testViewRowsLength } from "../helpers/array-bounds"
 import type { BoundViewExport } from "../../src/server/handler-types-inputs.ts"
 import type { Assert, IsEqual } from "./helpers"
@@ -10,16 +10,16 @@ const Author = Stdb.string(
 )
 const Post = Stdb.struct({ id: Stdb.string(), authorId: Author })
 
-const ViewsModule = Stdb.StdbModule.make("view_params_types", {}).add(
-  Stdb.StdbGroup.make("Views")
+const ViewsModule = Stdb.Module.make("view_params_types", {}).add(
+  Stdb.Group.make("Views")
     .add(
-      Stdb.StdbFn.anonymousView("postsByAuthor", {
+      Stdb.Fn.anonymousView("postsByAuthor", {
         params: Stdb.struct({ authorId: Author }),
         returns: Stdb.array(Post, testViewRowsLength),
       }),
     )
     .add(
-      Stdb.StdbFn.anonymousView("allPosts", {
+      Stdb.Fn.anonymousView("allPosts", {
         returns: Stdb.array(Post, testViewRowsLength),
       }),
     ),
@@ -50,7 +50,7 @@ void targets.views.postsByAuthor({})
 void targets.views.allPosts({})
 
 declare const session: ReturnType<
-  typeof StdbTesting.ClientWs.make<ViewsSpec, unknown, unknown>
+  typeof StdbInternal.ClientWs.make<ViewsSpec, unknown, unknown>
 >
 
 void session.viewGroup(["allPosts"] as const)

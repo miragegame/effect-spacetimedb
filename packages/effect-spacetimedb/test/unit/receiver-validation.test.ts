@@ -1,3 +1,4 @@
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
@@ -17,7 +18,7 @@ const diagnosticsOf = (run: () => unknown): ReadonlyArray<Diagnostic> => {
   try {
     run()
   } catch (cause) {
-    if (cause instanceof Stdb.StdbValidationError) {
+    if (cause instanceof Stdb.StdbValidationDefect) {
       return cause.diagnostics.map(({ code, path }) => ({ code, path }))
     }
     throw cause
@@ -28,10 +29,8 @@ const diagnosticsOf = (run: () => unknown): ReadonlyArray<Diagnostic> => {
 const moduleWithReceiver =
   (params: Stdb.StructLikeValueType, settings: Stdb.ModuleSettings = {}) =>
   () =>
-    Stdb.StdbModule.make("receiver_rules", { settings }).add(
-      Stdb.StdbGroup.make("Inbox").add(
-        Stdb.StdbFn.receiver("acceptCall", { params }),
-      ),
+    Stdb.Module.make("receiver_rules", { settings }).add(
+      Stdb.Group.make("Inbox").add(Stdb.Fn.receiver("acceptCall", { params })),
     ).spec
 
 describe("receivers", () => {
@@ -40,10 +39,9 @@ describe("receivers", () => {
     for (const caseConversionPolicy of ["none", "snake_case"] as const) {
       const spec = moduleWithReceiver(params, { caseConversionPolicy })()
       expect(spec.wireNames.functions.acceptCall).toBe("accept_call")
-      expect(spec.reducers.acceptCall.public).toBe(true)
     }
     expect(
-      Stdb.wireNameOf(
+      StdbInternal.wireNameOf(
         moduleWithReceiver(params, { caseConversionPolicy: "none" })(),
         "acceptCall",
       ),
@@ -137,32 +135,8 @@ describe("receivers", () => {
     ])
   })
 
-  it("refuses a hand-built receiver that is not client-callable", () => {
-    const declared = Stdb.StdbFn.receiver("acceptCall", {
-      params: Stdb.struct({ note: Stdb.string() }),
-    })
-    expect(
-      diagnosticsOf(
-        () =>
-          Stdb.StdbModule.make("private_receiver", {}).add(
-            Stdb.StdbGroup.make("Inbox").add({
-              ...declared,
-              spec: { ...declared.spec, public: false },
-            } as never),
-          ).spec,
-      ),
-    ).toEqual([
-      {
-        code: "InvalidReceiver",
-        path: ["reducers", "acceptCall", "public"],
-      },
-    ])
-  })
-
   it("requires every group implementing a receiver to declare a reducer guard", () => {
-    const Module = Stdb.StdbModule.make("guarded_inbox", {}).add(
-      IdcFixtureInbox,
-    )
+    const Module = Stdb.Module.make("guarded_inbox", {}).add(IdcFixtureInbox)
     const handlers = {
       receivePing: () => Effect.void,
       receiveDetails: () => Effect.void,
@@ -170,7 +144,7 @@ describe("receivers", () => {
 
     expect(
       diagnosticsOf(() =>
-        Stdb.StdbBuilder.group(Module, "IdcFixtureInbox", handlers),
+        Stdb.Builder.group(Module, "IdcFixtureInbox", handlers),
       ),
     ).toEqual([
       {
@@ -180,7 +154,7 @@ describe("receivers", () => {
     ])
     expect(
       diagnosticsOf(() =>
-        Stdb.StdbBuilder.group(Module, "IdcFixtureInbox", handlers, {
+        Stdb.Builder.group(Module, "IdcFixtureInbox", handlers, {
           middleware: { procedures: Effect.void },
         }),
       ),
@@ -192,14 +166,14 @@ describe("receivers", () => {
     ])
     expect(
       diagnosticsOf(() =>
-        Stdb.StdbBuilder.group(Module, "IdcFixtureInbox", handlers, {
+        Stdb.Builder.group(Module, "IdcFixtureInbox", handlers, {
           middleware: { reducers: Effect.void },
         }),
       ),
     ).toEqual([])
     expect(
       diagnosticsOf(() =>
-        Stdb.StdbBuilder.group(Module, "IdcFixtureInbox", handlers, {
+        Stdb.Builder.group(Module, "IdcFixtureInbox", handlers, {
           middleware: Effect.void,
         }),
       ),
@@ -289,9 +263,7 @@ describe("remote interfaces", () => {
   })
 
   it("refuses a group endpoint that is not a receiver", () => {
-    const Mixed = Stdb.StdbGroup.make("Mixed").add(
-      Stdb.StdbFn.reducer("plainCall", {}),
-    )
+    const Mixed = Stdb.Group.make("Mixed").add(Stdb.Fn.reducer("plainCall", {}))
     expect(
       diagnosticsOf(() =>
         Stdb.RemoteInterface.make({ name: "mixed", group: Mixed }),

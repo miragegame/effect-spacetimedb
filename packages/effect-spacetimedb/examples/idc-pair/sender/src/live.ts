@@ -14,7 +14,7 @@ export const resolveReceiver = Effect.gen(function* () {
   return Stdb.RemoteInterface.peer(PairInboxInterface, new Identity(hex))
 })
 
-export const IdcPairSendsLive = Stdb.StdbBuilder.group(
+export const IdcPairSendsLive = Stdb.Builder.group(
   IdcPairSenderModule,
   "IdcPairSends",
   {
@@ -26,7 +26,7 @@ export const IdcPairSendsLive = Stdb.StdbBuilder.group(
       yield* db.noteOutbox
         .insert({ target, note })
         .pipe(
-          Effect.catchTag("OutboxRowTooLarge", (tooLarge) =>
+          Effect.catchTag("OutboxRowTooLargeError", (tooLarge) =>
             Effect.fail(
               IdcPairNoteTooLarge.make({ rowBytes: tooLarge.rowBytes }),
             ),
@@ -42,7 +42,7 @@ const delivery = (result: StdbServer.OutboxResult) =>
     Refused: ({ message }) => ({ delivered: false, message }),
   })
 
-export const IdcPairSettlesLive = Stdb.StdbBuilder.group(
+export const IdcPairSettlesLive = Stdb.Builder.group(
   IdcPairSenderModule,
   "IdcPairSettles",
   {

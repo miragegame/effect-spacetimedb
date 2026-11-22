@@ -1,35 +1,38 @@
+import { wrapHttp } from "../../src/server/services.ts"
+import type { ProcedureHttpRequestOptions } from "effect-spacetimedb/server"
+import * as Effect from "effect/Effect"
+import * as Duration from "effect/Duration"
 import * as EffectVitest from "@effect/vitest"
-import { TimeDuration } from "spacetimedb"
 import {
   Headers,
-  type ProcedureHttpRequestOptions,
-} from "../../src/server/index.ts"
+  type RawProcedureHttp,
+} from "effect-spacetimedb/testing/internal"
 
 EffectVitest.describe("procedure HTTP types", () => {
-  EffectVitest.it("models outbound timeout options and response status", () => {
-    const options = {
-      method: "POST",
-      headers: { "X-Test": "value" },
-      body: "payload",
-      timeout: TimeDuration.fromMillis(5_000),
-    } satisfies ProcedureHttpRequestOptions
-    const fetch = (
-      _url: string,
-      init?: ProcedureHttpRequestOptions,
-    ): {
-      readonly status: number
-      readonly text: () => string
-      readonly json: () => unknown
-      readonly bytes: () => Uint8Array
-    } => ({
-      status: init?.timeout === undefined ? 200 : 201,
-      text: () => "",
-      json: () => ({}),
-      bytes: () => new Uint8Array(),
-    })
-
-    EffectVitest.expect(fetch("https://example.com", options).status).toBe(201)
-  })
+  EffectVitest.it.effect(
+    "forwards the deadline to the host in microseconds",
+    () =>
+      Effect.gen(function* () {
+        const deadlines: Array<bigint | undefined> = []
+        const http = wrapHttp({
+          fetch: (_url, init) => {
+            deadlines.push(init?.timeout?.micros)
+            return {
+              status: 201,
+              text: () => "",
+              json: () => ({}),
+              bytes: () => new Uint8Array(),
+            }
+          },
+        } satisfies RawProcedureHttp)
+        const response = yield* http.fetch("https://example.com", {
+          timeout: "1500 micros",
+        })
+        yield* http.fetch("https://example.com", { timeout: Duration.infinity })
+        EffectVitest.expect(response.status).toBe(201)
+        EffectVitest.expect(deadlines).toEqual([1500n, undefined])
+      }),
+  )
 
   EffectVitest.it(
     "accepts every body and header shape supported by the host",

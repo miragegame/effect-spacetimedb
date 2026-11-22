@@ -123,50 +123,62 @@ export const literal = <
 const isArrayLengthBound = (value: number): boolean =>
   Number.isSafeInteger(value) && value >= 0
 
-// Rejected eagerly because `Schema.isBetweenLength` silently floors and clamps
-// its arguments, which would turn an authoring mistake into a different bound.
-// The result is a copy so a caller mutating its options object afterwards
-// cannot desynchronise the recorded metadata from the check built from it.
-const checkedArrayLengthBounds = (
-  length: ArrayLengthBounds,
-): ArrayLengthBounds => {
-  if (!isArrayLengthBound(length.minimum)) {
+// Rejected eagerly because the Schema length checks silently floor and clamp
+// their arguments, which would turn an authoring mistake into a different
+// bound. The result is a copy so a caller mutating its options object
+// afterwards cannot desynchronise the recorded metadata from the check built
+// from it.
+const checkedArrayLengthBounds = ({
+  minimum,
+  maximum,
+}: ArrayLengthBounds): ArrayLengthBounds => {
+  if (minimum !== undefined && !isArrayLengthBound(minimum)) {
     throw new TypeError(
-      `Stdb.array(...) length minimum must be a non-negative safe integer; received ${String(length.minimum)}`,
+      `Stdb.array(...) length minimum must be a non-negative safe integer; received ${String(minimum)}`,
     )
   }
-  if (!isArrayLengthBound(length.maximum)) {
+  if (maximum !== undefined && !isArrayLengthBound(maximum)) {
     throw new TypeError(
-      `Stdb.array(...) length maximum must be a non-negative safe integer; received ${String(length.maximum)}`,
+      `Stdb.array(...) length maximum must be a non-negative safe integer; received ${String(maximum)}`,
     )
   }
-  if (length.minimum > length.maximum) {
+  if (minimum !== undefined && maximum !== undefined && minimum > maximum) {
     throw new TypeError(
-      `Stdb.array(...) length minimum ${length.minimum} exceeds maximum ${length.maximum}`,
+      `Stdb.array(...) length minimum ${minimum} exceeds maximum ${maximum}`,
     )
   }
-  return { minimum: length.minimum, maximum: length.maximum }
+  return {
+    ...(minimum === undefined ? {} : { minimum }),
+    ...(maximum === undefined ? {} : { maximum }),
+  }
+}
+
+const arrayLengthCheck = ({ minimum, maximum }: ArrayLengthBounds) => {
+  if (minimum !== undefined && maximum !== undefined) {
+    return Schema.isBetweenLength(minimum, maximum)
+  }
+  if (minimum !== undefined) {
+    return Schema.isMinLength(minimum)
+  }
+  return maximum === undefined ? undefined : Schema.isMaxLength(maximum)
 }
 
 /**
- * Array value type. The inclusive `length` bounds are required: every array
- * that crosses the module boundary states how many elements it may carry. They
- * are enforced on both decode and encode and recorded in the type metadata
- * (`describe(...)`), but never reach the wire, so arrays that differ only in
- * their bounds lower to the same SATS `array<T>`.
+ * Array value type. `length` is optional, and a side left out is not checked.
+ * Bounds that are present are inclusive, enforced on both decode and encode and
+ * recorded in the type metadata (`describe(...)`), but never reach the wire, so
+ * arrays that differ only in their bounds lower to the same SATS `array<T>`.
  */
 export const array = <Inner extends AnyValueType>(
   inner: Inner,
-  length: ArrayLengthBounds,
+  length: ArrayLengthBounds = {},
 ): ArrayValueType<Inner> => {
   const bounds = checkedArrayLengthBounds(length)
+  const items = inner.schema.pipe(narrowSchema, Schema.Array)
+  const lengthCheck = arrayLengthCheck(bounds)
 
   return attachStdbType(
-    inner.schema.pipe(
-      narrowSchema,
-      Schema.Array,
-      Schema.check(Schema.isBetweenLength(bounds.minimum, bounds.maximum)),
-    ),
+    lengthCheck === undefined ? items : items.pipe(Schema.check(lengthCheck)),
     (factories) => factories.array(typeBuilderWithFactories(inner, factories)),
     { kind: "array", item: inner, length: bounds },
   ) as ArrayValueType<Inner>

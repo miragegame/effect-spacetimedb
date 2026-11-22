@@ -21,10 +21,10 @@ export type TaggedErrorClass = Schema.Top & {
   new (...args: ReadonlyArray<never>): { readonly _tag: string }
 }
 
-type ErrorTagOf<ErrorClass extends TaggedErrorClass> =
+export type ErrorTagOf<ErrorClass extends TaggedErrorClass> =
   InstanceType<ErrorClass>["_tag"]
 
-type ErrorFields = Readonly<Record<string, AnyValueType>>
+export type ErrorFields = Readonly<Record<string, AnyValueType>>
 
 export type ErrorSpec<
   Fields extends ErrorFields = ErrorFields,
@@ -35,16 +35,16 @@ export type ErrorSpec<
   readonly status?: Status
 }
 
-type ErrorPayload<Fields extends ErrorFields> = {
+export type ErrorPayload<Fields extends ErrorFields> = {
   readonly [Key in keyof Fields]: Fields[Key]["Type"]
 }
 
-type GeneratedError<Tag extends string, Fields extends ErrorFields> = {
+export type GeneratedError<Tag extends string, Fields extends ErrorFields> = {
   readonly _tag: Tag
 } & ErrorPayload<Fields> &
   Effect.Effect<never, GeneratedError<Tag, Fields>, never>
 
-type GeneratedErrorClass<
+export type GeneratedErrorClass<
   Tag extends string = string,
   Fields extends ErrorFields = ErrorFields,
   Status extends number | undefined = number | undefined,
@@ -56,19 +56,19 @@ type GeneratedErrorClass<
   new (args: ErrorPayload<Fields>): GeneratedError<Tag, Fields>
 }
 
-type NamespacedTag<
+export type NamespacedTag<
   Namespace extends string,
   Key extends string,
 > = `${Namespace}${Key}`
 
-type ErrorStatusOf<Spec extends ErrorSpec> = Spec extends ErrorSpec<
+export type ErrorStatusOf<Spec extends ErrorSpec> = Spec extends ErrorSpec<
   ErrorFields,
   infer Status
 >
   ? Status
   : undefined
 
-type ErrorClassRecord<
+export type ErrorClassRecord<
   Namespace extends string,
   Specs extends ErrorSpecRecord,
 > = {
@@ -79,7 +79,7 @@ type ErrorClassRecord<
   >
 }
 
-type ErrorSpecRecord = Readonly<Record<string, ErrorSpec>>
+export type ErrorSpecRecord = Readonly<Record<string, ErrorSpec>>
 
 export type NamespacedErrorDefinition<
   Namespace extends string,
@@ -89,15 +89,28 @@ export type NamespacedErrorDefinition<
 > &
   ErrorClassRecord<Namespace, Specs>
 
-type ErrorInstanceOf<Errors extends readonly TaggedErrorClass[]> = InstanceType<
-  Errors[number]
->
+export type ErrorInstanceOf<Errors extends readonly TaggedErrorClass[]> =
+  InstanceType<Errors[number]>
 
-type ProcedureDeclaredErrorType = ReturnType<typeof Type.string>
+export type ProcedureDeclaredErrorType = ReturnType<typeof Type.string>
 
 export type ProcedureDeclaredErrorCarrier = string
 
 const DeclaredErrorEnvelopeVersion = 1 as const
+
+/**
+ * Why a procedure failed without a declared error: the caller's arguments did
+ * not decode, or anything else went wrong in the module.
+ */
+export type UndeclaredFailureReason = "BadArguments" | "Failed"
+
+/** A procedure failure that no declared error describes. */
+export type UndeclaredFailure = {
+  readonly reason: UndeclaredFailureReason
+  readonly message: string
+}
+
+const UndeclaredFailureEnvelopeVersion = 1 as const
 
 export type ErrorDefinition<
   Errors extends readonly TaggedErrorClass[] = readonly TaggedErrorClass[],
@@ -123,20 +136,20 @@ export type AnyErrorDefinition = {
   readonly type: ProcedureDeclaredErrorType
 }
 
-type ErrorsInputItem = AnyErrorDefinition | TaggedErrorClass
+export type ErrorsInputItem = AnyErrorDefinition | TaggedErrorClass
 
 export type ErrorsInput =
   | AnyErrorDefinition
   | TaggedErrorClass
   | readonly [ErrorsInputItem, ...ReadonlyArray<ErrorsInputItem>]
 
-type ClassesOfItem<Item> = Item extends AnyErrorDefinition
+export type ClassesOfItem<Item> = Item extends AnyErrorDefinition
   ? Item["errors"][number]
   : Item extends TaggedErrorClass
     ? Item
     : never
 
-type ClassesOfInput<Input extends ErrorsInput> = Input extends readonly [
+export type ClassesOfInput<Input extends ErrorsInput> = Input extends readonly [
   ErrorsInputItem,
   ...ReadonlyArray<ErrorsInputItem>,
 ]
@@ -166,15 +179,15 @@ export const declaredErrorGuard = <
   definition: ErrorDefinition<Errors>,
 ) => Schema.is(definition.schema)
 
-type NonEmptyErrorDefinitions = readonly [
+export type NonEmptyErrorDefinitions = readonly [
   AnyErrorDefinition,
   ...ReadonlyArray<AnyErrorDefinition>,
 ]
 
-type MergedErrorClasses<Definitions extends NonEmptyErrorDefinitions> =
+export type MergedErrorClasses<Definitions extends NonEmptyErrorDefinitions> =
   ReadonlyArray<Definitions[number]["errors"][number]>
 
-type PickedErrorClass<
+export type PickedErrorClass<
   ErrorClass,
   Tags extends string,
 > = ErrorClass extends TaggedErrorClass
@@ -183,7 +196,7 @@ type PickedErrorClass<
     : never
   : never
 
-type PickedErrorClasses<
+export type PickedErrorClasses<
   Errors extends readonly TaggedErrorClass[],
   Tags extends string,
 > = ReadonlyArray<PickedErrorClass<Errors[number], Tags>>
@@ -198,12 +211,12 @@ const ReservedDeclaredErrorTags = new Set([
   "StdbAutoIncOverflowError",
   "StdbNoSuchRowError",
   "StdbScheduleDelayTooLongError",
-  "StdbDeclaredErrorEncodingFailure",
-  "StdbSenderFailure",
+  "StdbDeclaredErrorEncodingError",
+  "StdbSenderError",
   "StdbValueCodecError",
-  "ReducerAsyncNotAllowedError",
-  "ReducerGlobalRandomNotAllowedError",
-  "RemoteRejectedBody",
+  "HandlerAsyncNotAllowedDefect",
+  "HandlerGlobalRandomNotAllowedDefect",
+  "RemoteRejectedBodyError",
   "SubscriptionRejectedError",
   "SubscriptionTransportError",
   "SubscriptionInvalidatedError",
@@ -240,6 +253,17 @@ const TaggedErrorEnvelopeStringSchema = Schema.fromJsonString(
     version: Schema.Literal(DeclaredErrorEnvelopeVersion),
     tag: Schema.String,
     error: Schema.Unknown,
+  }),
+)
+
+// As with declared errors, a future envelope version fails this schema and
+// reads as an opaque remote rejection.
+const UndeclaredFailureEnvelopeStringSchema = Schema.fromJsonString(
+  Schema.Struct({
+    _effectSpacetimeDb: Schema.Literal("UndeclaredFailure"),
+    version: Schema.Literal(UndeclaredFailureEnvelopeVersion),
+    reason: Schema.Literals(["BadArguments", "Failed"]),
+    message: Schema.String,
   }),
 )
 
@@ -514,6 +538,21 @@ export const peekStringEnvelopeTag = (value: string): string | undefined => {
     onSome: (envelope) => envelope.tag,
   })
 }
+
+export const encodeUndeclaredFailure = (failure: UndeclaredFailure): string =>
+  Schema.encodeSync(UndeclaredFailureEnvelopeStringSchema)({
+    _effectSpacetimeDb: "UndeclaredFailure",
+    version: UndeclaredFailureEnvelopeVersion,
+    reason: failure.reason,
+    message: failure.message,
+  })
+
+export const peekUndeclaredFailure = (
+  value: string,
+): UndeclaredFailure | undefined =>
+  Option.getOrUndefined(
+    Schema.decodeUnknownOption(UndeclaredFailureEnvelopeStringSchema)(value),
+  )
 
 export const encodeString = <Definition extends AnyErrorDefinition>(
   definition: Definition,

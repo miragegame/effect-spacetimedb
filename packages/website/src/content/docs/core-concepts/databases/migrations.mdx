@@ -17,6 +17,8 @@ publishing and upgrading databases. What follows is the part of the host model
 that decides whether a redeclaration of your contract can be published over a
 live database.
 
+For an existing effect-spacetimedb 0.8 application, follow [Upgrading from 0.8 to 0.9](/the-effect-layer/upgrading-from-0-8).
+
 ## What Publishing Can Change In Place
 
 Reducers, procedures, views, and HTTP handlers are not part of a migration plan
@@ -32,6 +34,7 @@ automatic:
   primary key;
 - adding or removing an auto-increment sequence — rejected if existing values
   already fall inside the new sequence's range;
+- changing a table between any two cache policies, retaining its rows and client bindings;
 - flipping a table between public and private;
 - appending columns **that declare a default**;
 - a layout-compatible column type change: a sum may gain variants appended at
@@ -52,7 +55,7 @@ and the database keeps its previous schema and its data.
 A new column has to be last and has to declare a default, because the host
 materializes that default into every existing row.
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
 const user = Stdb.table("user", {
@@ -69,7 +72,10 @@ Without a default the publish is refused while the plan is computed, before the
 database is touched. A default cannot be combined with `.primaryKey()`,
 `.unique()`, or `.autoInc()`, so a new key column is never an appended column.
 Appending rewrites every row of the table and disconnects connected clients; it
-is not a metadata-only change.
+is not a metadata-only change. After reconnecting, a client using the 2.16.1 SDK
+with pre-migration bindings reads the columns it knows in both the initial
+snapshot and subsequent updates. The decoder uses each row’s wire boundary
+to skip trailing fields.
 
 ## Adding A Unique Or Primary Key Constraint
 
@@ -95,7 +101,7 @@ database stores the table under, so changing it is a rename of the table itself
 — remove plus add — and it fails while the table holds rows. Changing a module's
 case-conversion policy rewrites every stored name the same way.
 
-Columns are the exception worth knowing, because `.name("db_name")` pins the
+Columns are the exception worth knowing, because `.columnName("db_name")` pins the
 database column name independently of the TypeScript field name. With the
 database name pinned, renaming the field renames only the accessor, which
 migrates in place.

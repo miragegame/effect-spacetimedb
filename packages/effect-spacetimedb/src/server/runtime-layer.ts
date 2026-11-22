@@ -1,6 +1,6 @@
-import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Data from "effect/Data"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Logger from "effect/Logger"
 import * as Match from "effect/Match"
@@ -9,32 +9,32 @@ import * as Scheduler from "effect/Scheduler"
 import { ensureServerPolyfills } from "../compat/polyfills.ts"
 import type { ServerRandom } from "./runtime-types.ts"
 import {
-  ReducerAsyncNotAllowedError,
-  ReducerGlobalRandomNotAllowedError,
-  ReducerWallClockNotAllowedError,
+  HandlerAsyncNotAllowedDefect,
+  HandlerGlobalRandomNotAllowedDefect,
+  HandlerWallClockNotAllowedDefect,
 } from "./services.ts"
 import { withDeterministicDefaultTracer } from "./tracing.ts"
 
-type TimestampCtx = {
+export type TimestampCtx = {
   readonly timestamp: {
     readonly microsSinceUnixEpoch: bigint
   }
 }
 
-type RandomCtx = {
+export type RandomCtx = {
   readonly random: ServerRandom
 }
 
 export type TimedRuntimeCtx = TimestampCtx & RandomCtx
 
-class ServerPolyfillInstallError extends Data.TaggedError(
-  "ServerPolyfillInstallError",
+class ServerPolyfillInstallDefect extends Data.TaggedError(
+  "ServerPolyfillInstallDefect",
 )<{
   readonly cause: unknown
 }> {}
 
-class ServerDevGuardInstallError extends Data.TaggedError(
-  "ServerDevGuardInstallError",
+class ServerDevGuardInstallDefect extends Data.TaggedError(
+  "ServerDevGuardInstallDefect",
 )<{
   readonly cause: unknown
 }> {}
@@ -63,7 +63,7 @@ const DevGuardTargets = [
     owner: globalThis,
     propertyKey: "setTimeout",
     value: (..._args: ReadonlyArray<unknown>) => {
-      throw new ReducerAsyncNotAllowedError()
+      throw new HandlerAsyncNotAllowedDefect()
     },
   },
   {
@@ -71,7 +71,7 @@ const DevGuardTargets = [
     owner: globalThis,
     propertyKey: "setInterval",
     value: (..._args: ReadonlyArray<unknown>) => {
-      throw new ReducerAsyncNotAllowedError()
+      throw new HandlerAsyncNotAllowedDefect()
     },
   },
   {
@@ -79,7 +79,7 @@ const DevGuardTargets = [
     owner: globalThis,
     propertyKey: "setImmediate",
     value: (..._args: ReadonlyArray<unknown>) => {
-      throw new ReducerAsyncNotAllowedError()
+      throw new HandlerAsyncNotAllowedDefect()
     },
   },
   {
@@ -87,7 +87,7 @@ const DevGuardTargets = [
     owner: globalThis,
     propertyKey: "queueMicrotask",
     value: (..._args: ReadonlyArray<unknown>) => {
-      throw new ReducerAsyncNotAllowedError()
+      throw new HandlerAsyncNotAllowedDefect()
     },
   },
   {
@@ -95,7 +95,7 @@ const DevGuardTargets = [
     owner: Math,
     propertyKey: "random",
     value: (..._args: ReadonlyArray<unknown>) => {
-      throw new ReducerGlobalRandomNotAllowedError()
+      throw new HandlerGlobalRandomNotAllowedDefect()
     },
   },
 ] as const satisfies ReadonlyArray<DevGuardTarget>
@@ -178,7 +178,7 @@ const makeGuardedDateConstructor = (
     apply: (target, thisArg, args) => Reflect.apply(target, thisArg, args),
     construct: (target, args, newTarget) => {
       if (args.length === 0) {
-        throw new ReducerWallClockNotAllowedError()
+        throw new HandlerWallClockNotAllowedDefect()
       }
 
       return Reflect.construct(target, args, newTarget)
@@ -189,7 +189,7 @@ const makeGuardedDateConstructor = (
       // replaced (e.g. fake timers) before dev-guarded mode was entered.
       if (propertyKey === "now") {
         return () => {
-          throw new ReducerWallClockNotAllowedError()
+          throw new HandlerWallClockNotAllowedDefect()
         }
       }
 
@@ -323,13 +323,13 @@ export const installServerPolyfills = Effect.try({
   try: () => {
     ensureServerPolyfills()
   },
-  catch: (cause) => new ServerPolyfillInstallError({ cause }),
+  catch: (cause) => new ServerPolyfillInstallDefect({ cause }),
 }).pipe(Effect.orDie)
 
 const installDevGuardsScoped = Effect.acquireRelease(
   Effect.try({
     try: () => installDevGuards(),
-    catch: (cause) => new ServerDevGuardInstallError({ cause }),
+    catch: (cause) => new ServerDevGuardInstallDefect({ cause }),
   }).pipe(Effect.orDie),
   (restore) =>
     Effect.suspend(() => {
@@ -370,6 +370,17 @@ const withHostLogger = <A, E, R>(
 ): Effect.Effect<A, E, R> =>
   Effect.provideService(effect, Logger.CurrentLoggers, hostLoggers)
 
+/**
+ * A handler runs to completion inside one synchronous host call, so a real
+ * sleep can only be a defect. A typed failure here would sit in a `never`
+ * channel, where `catch` swallows it and `retry` gives up after one attempt.
+ * `retry` and `repeat` without a delay sleep for zero, which is no wait at all.
+ */
+const sleepNotAllowed = (duration: Duration.Duration): Effect.Effect<void> =>
+  Duration.isZero(duration)
+    ? Effect.void
+    : Effect.die(new HandlerAsyncNotAllowedDefect())
+
 const makeFixedServerClock = (microsSinceUnixEpoch: bigint): Clock.Clock => {
   const millis = Number(microsSinceUnixEpoch / 1000n)
   const nanos = microsSinceUnixEpoch * 1000n
@@ -389,12 +400,7 @@ const makeFixedServerClock = (microsSinceUnixEpoch: bigint): Clock.Clock => {
     // contract permits an arbitrary origin, so a constant satisfies it.
     monotonicTimeNanosUnsafe: () => nanos,
     monotonicTimeNanos: Effect.succeed(nanos),
-    // Clock.sleep cannot carry the typed async-not-allowed error through the
-    // Clock service signature, so bind.ts translates this failure at the edge.
-    sleep: () =>
-      Effect.fail(
-        new ReducerAsyncNotAllowedError(),
-      ) as unknown as Effect.Effect<void>,
+    sleep: sleepNotAllowed,
   }
 }
 
@@ -426,10 +432,7 @@ export const makeProcedureServerClock = (
     monotonicTimeNanos: Effect.suspend(() =>
       Effect.succeed(monotonicTimeNanos()),
     ),
-    sleep: () =>
-      Effect.fail(
-        new ReducerAsyncNotAllowedError(),
-      ) as unknown as Effect.Effect<void>,
+    sleep: sleepNotAllowed,
   }
 }
 
@@ -438,19 +441,16 @@ export const makeProcedureServerClock = (
 export const makeUntimedServerClock = (): Clock.Clock => ({
   currentTimeMillisUnsafe: () => 0,
   currentTimeNanosUnsafe: () => 0n,
-  currentTimeMillis: Effect.die(new ReducerWallClockNotAllowedError()),
-  currentTimeNanos: Effect.die(new ReducerWallClockNotAllowedError()),
+  currentTimeMillis: Effect.die(new HandlerWallClockNotAllowedDefect()),
+  currentTimeNanos: Effect.die(new HandlerWallClockNotAllowedDefect()),
   // Same split as the wall-clock members above, and for the same reason: the
   // unsafe reader returns a fixed value so Effect's own tracing/logging
   // internals keep working inside a view, while the Effect-visible reader is a
   // defect so user code asking a view what time it is fails loudly. A view has
   // no timestamp at all, so a constant is the only deterministic answer.
   monotonicTimeNanosUnsafe: () => 0n,
-  monotonicTimeNanos: Effect.die(new ReducerWallClockNotAllowedError()),
-  sleep: () =>
-    Effect.fail(
-      new ReducerAsyncNotAllowedError(),
-    ) as unknown as Effect.Effect<void>,
+  monotonicTimeNanos: Effect.die(new HandlerWallClockNotAllowedDefect()),
+  sleep: sleepNotAllowed,
 })
 
 export const makeServerRandom = (ctx: RandomCtx): Random.Random => ({
@@ -464,39 +464,15 @@ export const makeServerRandom = (ctx: RandomCtx): Random.Random => ({
   nextDoubleUnsafe: () => ctx.random(),
 })
 
-/**
- * Report an escaping defect to the host, without handling it.
- *
- * A die inside a handler is an invariant violation, not a failure the caller
- * can act on, and the host only ever sees the thrown boundary error. An
- * observer hook lets an embedder — a fault-injection harness, a metrics sink —
- * see the cause itself. The tap re-raises the original cause, so the reducer
- * still throws and its transaction still aborts.
- */
-const withDefectObserver = <A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-  onDefect: (cause: Cause.Cause<unknown>) => void,
-): Effect.Effect<A, E, R> =>
-  Effect.tapCause(effect, (cause) => {
-    // A typed failure is a handled outcome, never a defect: only a die reason
-    // is reported. `Cause.isDieReason` rather than `cause.defects` so an
-    // interrupt-plus-die cause is still seen.
-    if (cause.reasons.some(Cause.isDieReason)) onDefect(cause)
-    return Effect.void
-  })
-
 export const provideConstrainedServerSupport = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   mode: ConstrainedServerRuntimeMode = serverRuntimeModeDefault,
-  onDefect?: ((cause: Cause.Cause<unknown>) => void) | undefined,
 ) => {
-  const observed =
-    onDefect === undefined ? effect : withDefectObserver(effect, onDefect)
   const provided = Match.value(mode).pipe(
     Match.when("dev-guarded", () =>
-      observed.pipe(withDevGuards, withServerPolyfills),
+      effect.pipe(withDevGuards, withServerPolyfills),
     ),
-    Match.when("runtime", () => withServerPolyfills(observed)),
+    Match.when("runtime", () => withServerPolyfills(effect)),
     Match.exhaustive,
   )
 
@@ -512,7 +488,6 @@ export const provideConstrainedServerRuntime = <A, E, R>(
   ctx: TimedRuntimeCtx,
   mode: ConstrainedServerRuntimeMode = serverRuntimeModeDefault,
   clock: Clock.Clock = makeServerClock(ctx),
-  onDefect?: ((cause: Cause.Cause<unknown>) => void) | undefined,
 ) =>
   provideConstrainedServerSupport(
     effect.pipe(
@@ -520,5 +495,4 @@ export const provideConstrainedServerRuntime = <A, E, R>(
       Effect.provideService(Random.Random, makeServerRandom(ctx)),
     ),
     mode,
-    onDefect,
   )

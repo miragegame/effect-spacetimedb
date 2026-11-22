@@ -6,13 +6,13 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Match from "effect/Match"
 import * as Option from "effect/Option"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { unsubscribeHandle } from "../../src/client/ws-subscription-adapter.ts"
 import { TestLayer } from "../helpers/test-layer"
 
 const { expect } = EffectVitest
 const describe = EffectVitest.layer(TestLayer)
-const testQuery = [] satisfies ReadonlyArray<StdbTesting.TypedQuery>
+const testQuery = [] satisfies ReadonlyArray<StdbInternal.TypedQuery>
 
 const subscriptionErrorMessage = (context: unknown, error?: Error): string =>
   error?.message ?? String(context)
@@ -26,7 +26,7 @@ const makeHandle = () => {
       unsubscribe: () => {
         unsubscribed = true
       },
-    } satisfies StdbTesting.NativeSubscriptionHandleLike,
+    } satisfies StdbInternal.NativeSubscriptionHandleLike,
     unsubscribed: () => unsubscribed,
   }
 }
@@ -58,7 +58,7 @@ describe("ws subscription adapter", (it) => {
         let received: unknown
         let onApplied: (() => void) | undefined
 
-        const builder: StdbTesting.SubscriptionBuilderLike<string, string> = {
+        const builder: StdbInternal.SubscriptionBuilderLike<string, string> = {
           onApplied: (callback) => {
             onApplied = callback
             return builder
@@ -69,7 +69,7 @@ describe("ws subscription adapter", (it) => {
             return handle
           },
         }
-        const adapter = StdbTesting.fromBuilder({
+        const adapter = StdbInternal.fromBuilder({
           build: () => builder,
           messageFromError: subscriptionErrorMessage,
         })
@@ -88,7 +88,7 @@ describe("ws subscription adapter", (it) => {
       const onAppliedRegistered = Deferred.makeUnsafe<() => void>()
       const { handle } = makeHandle()
 
-      const builder: StdbTesting.SubscriptionBuilderLike<string, string> = {
+      const builder: StdbInternal.SubscriptionBuilderLike<string, string> = {
         onApplied: (callback) => {
           Deferred.doneUnsafe(onAppliedRegistered, Effect.succeed(callback))
           return builder
@@ -97,7 +97,7 @@ describe("ws subscription adapter", (it) => {
         subscribe: () => handle,
       }
 
-      const adapter = StdbTesting.fromBuilder({
+      const adapter = StdbInternal.fromBuilder({
         build: () => builder,
         messageFromError: subscriptionErrorMessage,
       })
@@ -122,25 +122,26 @@ describe("ws subscription adapter", (it) => {
           const { handle, unsubscribed } = makeHandle()
           let applied: (() => void) | undefined
           let rejected: ((context: string, error?: Error) => void) | undefined
-          const builder: StdbTesting.SubscriptionBuilderLike<string, string> = {
-            onApplied: (registered) => {
-              applied = registered
-              return builder
-            },
-            onError: (registered) => {
-              rejected = registered
-              return builder
-            },
-            subscribe: () => {
-              Match.value(callback).pipe(
-                Match.when("onApplied", () => applied?.()),
-                Match.when("onError", () => rejected?.("rejected")),
-                Match.exhaustive,
-              )
-              return handle
-            },
-          }
-          const adapter = StdbTesting.fromBuilder({
+          const builder: StdbInternal.SubscriptionBuilderLike<string, string> =
+            {
+              onApplied: (registered) => {
+                applied = registered
+                return builder
+              },
+              onError: (registered) => {
+                rejected = registered
+                return builder
+              },
+              subscribe: () => {
+                Match.value(callback).pipe(
+                  Match.when("onApplied", () => applied?.()),
+                  Match.when("onError", () => rejected?.("rejected")),
+                  Match.exhaustive,
+                )
+                return handle
+              },
+            }
+          const adapter = StdbInternal.fromBuilder({
             build: () => builder,
             messageFromError: subscriptionErrorMessage,
           })
@@ -148,7 +149,9 @@ describe("ws subscription adapter", (it) => {
           const failure = yield* Effect.flip(
             adapter.subscribe(testQuery).pipe(Effect.scoped),
           )
-          expect(failure).toBeInstanceOf(StdbTesting.SubscriptionTransportError)
+          expect(failure).toBeInstanceOf(
+            StdbInternal.SubscriptionTransportError,
+          )
           expect(unsubscribed()).toBe(true)
         }),
     )
@@ -162,7 +165,7 @@ describe("ws subscription adapter", (it) => {
         >()
       const { handle, unsubscribed } = makeHandle()
 
-      const builder: StdbTesting.SubscriptionBuilderLike<string, string> = {
+      const builder: StdbInternal.SubscriptionBuilderLike<string, string> = {
         onApplied: () => builder,
         onError: (callback) => {
           Deferred.doneUnsafe(onErrorRegistered, Effect.succeed(callback))
@@ -171,7 +174,7 @@ describe("ws subscription adapter", (it) => {
         subscribe: () => handle,
       }
 
-      const adapter = StdbTesting.fromBuilder({
+      const adapter = StdbInternal.fromBuilder({
         build: () => builder,
         messageFromError: subscriptionErrorMessage,
       })
@@ -185,7 +188,7 @@ describe("ws subscription adapter", (it) => {
 
       const failure = failureFromExit(yield* Fiber.await(fiber))
 
-      expect(failure).toBeInstanceOf(StdbTesting.SubscriptionRejectedError)
+      expect(failure).toBeInstanceOf(StdbInternal.SubscriptionRejectedError)
       expect(failure).toMatchObject({
         raw: "rejected",
       })
@@ -204,7 +207,7 @@ describe("ws subscription adapter", (it) => {
         >()
       const { handle } = makeHandle()
 
-      const builder: StdbTesting.SubscriptionBuilderLike<
+      const builder: StdbInternal.SubscriptionBuilderLike<
         { readonly event?: Error },
         string
       > = {
@@ -216,7 +219,7 @@ describe("ws subscription adapter", (it) => {
         subscribe: () => handle,
       }
 
-      const adapter = StdbTesting.fromBuilder({
+      const adapter = StdbInternal.fromBuilder({
         build: () => builder,
         messageFromError: subscriptionErrorMessage,
       })
@@ -232,7 +235,7 @@ describe("ws subscription adapter", (it) => {
 
       const failure = failureFromExit(yield* Fiber.await(fiber))
 
-      expect(failure).toBeInstanceOf(StdbTesting.SubscriptionRejectedError)
+      expect(failure).toBeInstanceOf(StdbInternal.SubscriptionRejectedError)
       expect(failure).toMatchObject({
         raw: "native rejected",
       })
@@ -241,7 +244,7 @@ describe("ws subscription adapter", (it) => {
 
   it.effect("fails when subscribe throws synchronously", () =>
     Effect.gen(function* () {
-      const builder: StdbTesting.SubscriptionBuilderLike<string, string> = {
+      const builder: StdbInternal.SubscriptionBuilderLike<string, string> = {
         onApplied: () => builder,
         onError: () => builder,
         subscribe: () => {
@@ -249,7 +252,7 @@ describe("ws subscription adapter", (it) => {
         },
       }
 
-      const adapter = StdbTesting.fromBuilder({
+      const adapter = StdbInternal.fromBuilder({
         build: () => builder,
         messageFromError: subscriptionErrorMessage,
       })
@@ -258,7 +261,7 @@ describe("ws subscription adapter", (it) => {
         yield* Effect.exit(adapter.subscribe(testQuery).pipe(Effect.scoped)),
       )
 
-      expect(failure).toBeInstanceOf(StdbTesting.SubscriptionTransportError)
+      expect(failure).toBeInstanceOf(StdbInternal.SubscriptionTransportError)
     }),
   )
 
@@ -268,7 +271,7 @@ describe("ws subscription adapter", (it) => {
       Effect.gen(function* () {
         const onAppliedRegistered = Deferred.makeUnsafe<() => void>()
         let unsubscribeCalls = 0
-        const handle: StdbTesting.NativeSubscriptionHandleLike = {
+        const handle: StdbInternal.NativeSubscriptionHandleLike = {
           isEnded: () => false,
           unsubscribe: () => {
             unsubscribeCalls = unsubscribeCalls + 1
@@ -276,7 +279,7 @@ describe("ws subscription adapter", (it) => {
           },
         }
 
-        const builder: StdbTesting.SubscriptionBuilderLike<string, string> = {
+        const builder: StdbInternal.SubscriptionBuilderLike<string, string> = {
           onApplied: (callback) => {
             Deferred.doneUnsafe(onAppliedRegistered, Effect.succeed(callback))
             return builder
@@ -285,7 +288,7 @@ describe("ws subscription adapter", (it) => {
           subscribe: () => handle,
         }
 
-        const adapter = StdbTesting.fromBuilder({
+        const adapter = StdbInternal.fromBuilder({
           build: () => builder,
           messageFromError: subscriptionErrorMessage,
         })
@@ -316,7 +319,7 @@ describe("ws subscription adapter", (it) => {
         const messages: Array<string> = []
         const { handle } = makeHandle()
 
-        const builder: StdbTesting.SubscriptionBuilderLike<string, string> = {
+        const builder: StdbInternal.SubscriptionBuilderLike<string, string> = {
           onApplied: (callback) => {
             Deferred.doneUnsafe(onAppliedRegistered, Effect.succeed(callback))
             return builder
@@ -328,14 +331,18 @@ describe("ws subscription adapter", (it) => {
           subscribe: () => handle,
         }
 
-        const adapter = StdbTesting.fromBuilder({
+        const adapter = StdbInternal.fromBuilder({
           build: () => builder,
           messageFromError: subscriptionErrorMessage,
         })
 
         const fiber = yield* Effect.forkScoped(
           adapter.subscribe(testQuery, (error) => {
-            messages.push(error.raw)
+            messages.push(
+              StdbInternal.SubscriptionRejectedError.is(error)
+                ? error.raw
+                : String(error.cause),
+            )
           }),
         )
         const [onApplied, onError] = yield* Effect.all([
@@ -365,14 +372,14 @@ describe("ws subscription adapter", (it) => {
         let ended = false
         let renderedErrors = 0
         const messages: Array<string> = []
-        const handle: StdbTesting.NativeSubscriptionHandleLike = {
+        const handle: StdbInternal.NativeSubscriptionHandleLike = {
           isEnded: () => ended,
           unsubscribe: () => {
             ended = true
             onError?.("unsubscribe rejection")
           },
         }
-        const builder: StdbTesting.SubscriptionBuilderLike<string, string> = {
+        const builder: StdbInternal.SubscriptionBuilderLike<string, string> = {
           onApplied: (callback) => {
             onApplied = callback
             return builder
@@ -383,7 +390,7 @@ describe("ws subscription adapter", (it) => {
           },
           subscribe: () => handle,
         }
-        const adapter = StdbTesting.fromBuilder({
+        const adapter = StdbInternal.fromBuilder({
           build: () => builder,
           messageFromError: (context) => {
             renderedErrors = renderedErrors + 1
@@ -394,7 +401,11 @@ describe("ws subscription adapter", (it) => {
         yield* Effect.gen(function* () {
           const fiber = yield* Effect.forkScoped(
             adapter.subscribe(testQuery, (error) => {
-              messages.push(error.raw)
+              messages.push(
+                StdbInternal.SubscriptionRejectedError.is(error)
+                  ? error.raw
+                  : String(error.cause),
+              )
             }),
           )
           yield* Effect.yieldNow
@@ -411,13 +422,83 @@ describe("ws subscription adapter", (it) => {
       }),
   )
 
+  for (const delivery of [
+    "before applied",
+    "after applied",
+    "throwing error sink",
+  ] as const) {
+    it.effect(
+      "delivers callback failures to the subscription owner: " + delivery,
+      () =>
+        Effect.gen(function* () {
+          const { handle } = makeHandle()
+          const ready = Deferred.makeUnsafe<void>()
+          const applied = Deferred.makeUnsafe<() => void>()
+          const rejected = Deferred.makeUnsafe<(context: string) => void>()
+          const cause = new Error("callback failed")
+          const builder: StdbInternal.SubscriptionBuilderLike<string, string> =
+            {
+              onApplied: (callback) => {
+                Deferred.doneUnsafe(applied, Effect.succeed(callback))
+                return builder
+              },
+              onError: (callback) => {
+                Deferred.doneUnsafe(rejected, Effect.succeed(callback))
+                return builder
+              },
+              subscribe: () => {
+                queueMicrotask(() => Deferred.doneUnsafe(ready, Effect.void))
+                return handle
+              },
+            }
+          const adapter = StdbInternal.fromBuilder({
+            build: () => builder,
+            messageFromError: () => {
+              throw cause
+            },
+          })
+          const acquisition = yield* Effect.forkScoped(
+            adapter.subscribe(testQuery, () => {
+              if (delivery === "throwing error sink") throw cause
+            }),
+          )
+          yield* Deferred.await(ready)
+          const onError = yield* Deferred.await(rejected)
+          if (delivery === "before applied") {
+            onError("failed")
+            expect(
+              yield* acquisition.pipe(Fiber.join, Effect.flip),
+            ).toMatchObject({
+              _tag: "SubscriptionTransportError",
+              cause,
+            })
+            return
+          }
+          const onApplied = yield* Deferred.await(applied)
+          onApplied()
+          const subscription = yield* Fiber.join(acquisition)
+          onError("failed")
+          const completion = StdbInternal.unsubscribeThen(subscription)
+          if (delivery === "after applied") {
+            expect(yield* Effect.flip(completion)).toMatchObject({
+              _tag: "SubscriptionTransportError",
+              cause,
+            })
+          } else {
+            const exit = yield* Effect.exit(completion)
+            expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBe(cause)
+          }
+        }).pipe(Effect.scoped),
+    )
+  }
+
   it.effect("tracks native liveness and resolves unsubscribe completion", () =>
     Effect.gen(function* () {
       const applied = Deferred.makeUnsafe<() => void>()
       const endRegistered = Deferred.makeUnsafe<() => void>()
       let active = false
       let ended = false
-      const nativeHandle: StdbTesting.NativeSubscriptionHandleLike = {
+      const nativeHandle: StdbInternal.NativeSubscriptionHandleLike = {
         isEnded: () => ended,
         isActive: () => active,
         unsubscribe: () => {
@@ -428,7 +509,7 @@ describe("ws subscription adapter", (it) => {
           Deferred.doneUnsafe(endRegistered, Effect.succeed(onEnd))
         },
       }
-      const builder: StdbTesting.SubscriptionBuilderLike<string, string> = {
+      const builder: StdbInternal.SubscriptionBuilderLike<string, string> = {
         onApplied: (callback) => {
           Deferred.doneUnsafe(applied, Effect.succeed(callback))
           return builder
@@ -436,7 +517,7 @@ describe("ws subscription adapter", (it) => {
         onError: () => builder,
         subscribe: () => nativeHandle,
       }
-      const adapter = StdbTesting.fromBuilder({
+      const adapter = StdbInternal.fromBuilder({
         build: () => builder,
         messageFromError: subscriptionErrorMessage,
       })
@@ -453,7 +534,7 @@ describe("ws subscription adapter", (it) => {
         expect(handle).toBe(nativeHandle)
         expect(handle.isActive()).toBe(true)
 
-        const completion = yield* StdbTesting.unsubscribeThen(handle).pipe(
+        const completion = yield* StdbInternal.unsubscribeThen(handle).pipe(
           Effect.forkScoped,
         )
         const onEnd = yield* Deferred.await(endRegistered)
@@ -472,13 +553,13 @@ describe("ws subscription adapter", (it) => {
     Effect.gen(function* () {
       let onApplied: (() => void) | undefined
       let ended = false
-      const nativeHandle: StdbTesting.NativeSubscriptionHandleLike = {
+      const nativeHandle: StdbInternal.NativeSubscriptionHandleLike = {
         isEnded: () => ended,
         unsubscribe: () => {
           ended = true
         },
       }
-      const builder: StdbTesting.SubscriptionBuilderLike<string, string> = {
+      const builder: StdbInternal.SubscriptionBuilderLike<string, string> = {
         onApplied: (callback) => {
           onApplied = callback
           return builder
@@ -486,7 +567,7 @@ describe("ws subscription adapter", (it) => {
         onError: () => builder,
         subscribe: () => nativeHandle,
       }
-      const adapter = StdbTesting.fromBuilder({
+      const adapter = StdbInternal.fromBuilder({
         build: () => builder,
         messageFromError: subscriptionErrorMessage,
       })
@@ -497,7 +578,7 @@ describe("ws subscription adapter", (it) => {
         onApplied?.()
         const handle = yield* Fiber.join(fiber)
         expect(handle.isActive()).toBe(true)
-        yield* StdbTesting.unsubscribeThen(handle)
+        yield* StdbInternal.unsubscribeThen(handle)
         expect(handle.isActive()).toBe(false)
         expect(handle.isEnded()).toBe(true)
       }).pipe(Effect.scoped)
@@ -510,7 +591,7 @@ describe("ws subscription adapter", (it) => {
       const errorRegistered =
         Deferred.makeUnsafe<(context: string, error?: Error) => void>()
       const endRegistered = Deferred.makeUnsafe<() => void>()
-      const nativeHandle: StdbTesting.NativeSubscriptionHandleLike = {
+      const nativeHandle: StdbInternal.NativeSubscriptionHandleLike = {
         isEnded: () => false,
         isActive: () => true,
         unsubscribe: () => undefined,
@@ -518,7 +599,7 @@ describe("ws subscription adapter", (it) => {
           Deferred.doneUnsafe(endRegistered, Effect.succeed(onEnd))
         },
       }
-      const builder: StdbTesting.SubscriptionBuilderLike<string, string> = {
+      const builder: StdbInternal.SubscriptionBuilderLike<string, string> = {
         onApplied: (callback) => {
           Deferred.doneUnsafe(applied, Effect.succeed(callback))
           return builder
@@ -529,7 +610,7 @@ describe("ws subscription adapter", (it) => {
         },
         subscribe: () => nativeHandle,
       }
-      const adapter = StdbTesting.fromBuilder({
+      const adapter = StdbInternal.fromBuilder({
         build: () => builder,
         messageFromError: subscriptionErrorMessage,
       })
@@ -545,7 +626,7 @@ describe("ws subscription adapter", (it) => {
         yield* Effect.yieldNow
         onApplied()
         const handle = yield* Fiber.join(acquireFiber)
-        const completion = yield* StdbTesting.unsubscribeThen(handle).pipe(
+        const completion = yield* StdbInternal.unsubscribeThen(handle).pipe(
           Effect.forkScoped,
         )
         yield* Deferred.await(endRegistered)
@@ -553,7 +634,7 @@ describe("ws subscription adapter", (it) => {
         const failure = failureFromExit(
           yield* completion.pipe(Fiber.join, Effect.exit),
         )
-        expect(failure).toBeInstanceOf(StdbTesting.SubscriptionRejectedError)
+        expect(failure).toBeInstanceOf(StdbInternal.SubscriptionRejectedError)
       }).pipe(Effect.scoped)
     }),
   )

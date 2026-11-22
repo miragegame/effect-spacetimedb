@@ -59,7 +59,7 @@ describe("scheduled target registration", () => {
 
     // Two schedules on one table are our typed validation failure, not the
     // SDK's bare TypeError.
-    expect(observed.duplicateScheduleFailure.tag).toBe("StdbValidationError")
+    expect(observed.duplicateScheduleFailure.tag).toBe("StdbValidationDefect")
     expect(observed.duplicateScheduleFailure.diagnosticCodes).toContain(
       "DuplicateScheduleTarget",
     )

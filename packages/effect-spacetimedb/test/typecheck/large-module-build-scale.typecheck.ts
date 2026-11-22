@@ -10,7 +10,7 @@ const ScaleText = Stdb.string(Schema.String)
 const ScaleParams = Stdb.struct({ value: ScaleText })
 
 const reducer = <const Name extends string>(name: Name) =>
-  Stdb.StdbFn.reducer(name, { params: ScaleParams })
+  Stdb.Fn.reducer(name, { params: ScaleParams })
 
 const group10 = <
   const Id extends string,
@@ -37,7 +37,7 @@ const group10 = <
   e8: E8,
   e9: E9,
 ) =>
-  Stdb.StdbGroup.make(id).add(
+  Stdb.Group.make(id).add(
     reducer(e0),
     reducer(e1),
     reducer(e2),
@@ -50,7 +50,7 @@ const group10 = <
     reducer(e9),
   )
 
-const LargeScaleModule = Stdb.StdbModule.make("large_build_scale", {}).add(
+const LargeScaleModule = Stdb.Module.make("large_build_scale", {}).add(
   group10(
     "Group00",
     "endpoint00_00",
@@ -515,7 +515,7 @@ const Group11Handlers: Stdb.GroupCheckedHandlers<
   endpoint11_09: handler,
 }
 
-const Group00Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group00", {
+const Group00Live = Stdb.Builder.group(LargeScaleModule, "Group00", {
   endpoint00_00: runtimeHandler,
   endpoint00_01: runtimeHandler,
   endpoint00_02: runtimeHandler,
@@ -528,7 +528,7 @@ const Group00Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group00", {
   endpoint00_09: runtimeHandler,
 })
 
-const Group01Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group01", {
+const Group01Live = Stdb.Builder.group(LargeScaleModule, "Group01", {
   endpoint01_00: runtimeHandler,
   endpoint01_01: runtimeHandler,
   endpoint01_02: runtimeHandler,
@@ -541,7 +541,7 @@ const Group01Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group01", {
   endpoint01_09: runtimeHandler,
 })
 
-const Group02Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group02", {
+const Group02Live = Stdb.Builder.group(LargeScaleModule, "Group02", {
   endpoint02_00: runtimeHandler,
   endpoint02_01: runtimeHandler,
   endpoint02_02: runtimeHandler,
@@ -554,7 +554,7 @@ const Group02Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group02", {
   endpoint02_09: runtimeHandler,
 })
 
-const Group03Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group03", {
+const Group03Live = Stdb.Builder.group(LargeScaleModule, "Group03", {
   endpoint03_00: runtimeHandler,
   endpoint03_01: runtimeHandler,
   endpoint03_02: runtimeHandler,
@@ -567,7 +567,7 @@ const Group03Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group03", {
   endpoint03_09: runtimeHandler,
 })
 
-const Group04Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group04", {
+const Group04Live = Stdb.Builder.group(LargeScaleModule, "Group04", {
   endpoint04_00: runtimeHandler,
   endpoint04_01: runtimeHandler,
   endpoint04_02: runtimeHandler,
@@ -580,7 +580,7 @@ const Group04Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group04", {
   endpoint04_09: runtimeHandler,
 })
 
-const Group05Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group05", {
+const Group05Live = Stdb.Builder.group(LargeScaleModule, "Group05", {
   endpoint05_00: runtimeHandler,
   endpoint05_01: runtimeHandler,
   endpoint05_02: runtimeHandler,
@@ -593,7 +593,7 @@ const Group05Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group05", {
   endpoint05_09: runtimeHandler,
 })
 
-const Group06Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group06", {
+const Group06Live = Stdb.Builder.group(LargeScaleModule, "Group06", {
   endpoint06_00: runtimeHandler,
   endpoint06_01: runtimeHandler,
   endpoint06_02: runtimeHandler,
@@ -606,7 +606,7 @@ const Group06Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group06", {
   endpoint06_09: runtimeHandler,
 })
 
-const Group07Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group07", {
+const Group07Live = Stdb.Builder.group(LargeScaleModule, "Group07", {
   endpoint07_00: runtimeHandler,
   endpoint07_01: runtimeHandler,
   endpoint07_02: runtimeHandler,
@@ -619,7 +619,7 @@ const Group07Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group07", {
   endpoint07_09: runtimeHandler,
 })
 
-const Group08Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group08", {
+const Group08Live = Stdb.Builder.group(LargeScaleModule, "Group08", {
   endpoint08_00: runtimeHandler,
   endpoint08_01: runtimeHandler,
   endpoint08_02: runtimeHandler,
@@ -632,337 +632,253 @@ const Group08Live = Stdb.StdbBuilder.group(LargeScaleModule, "Group08", {
   endpoint08_09: runtimeHandler,
 })
 
-const Group09Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group09",
-  {
-    ...Group09Handlers,
-  },
-)
+const Group09Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group09", {
+  ...Group09Handlers,
+})
 
-const Group10Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group10",
-  {
-    ...Group10Handlers,
-  },
-)
+const Group10Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group10", {
+  ...Group10Handlers,
+})
 
-const Group11Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group11",
-  {
-    ...Group11Handlers,
-  },
-)
+const Group11Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group11", {
+  ...Group11Handlers,
+})
 
-const Group12Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group12",
-  {
-    endpoint12_00: handler,
-    endpoint12_01: handler,
-    endpoint12_02: handler,
-    endpoint12_03: handler,
-    endpoint12_04: handler,
-    endpoint12_05: handler,
-    endpoint12_06: handler,
-    endpoint12_07: handler,
-    endpoint12_08: handler,
-    endpoint12_09: handler,
-  },
-)
+const Group12Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group12", {
+  endpoint12_00: handler,
+  endpoint12_01: handler,
+  endpoint12_02: handler,
+  endpoint12_03: handler,
+  endpoint12_04: handler,
+  endpoint12_05: handler,
+  endpoint12_06: handler,
+  endpoint12_07: handler,
+  endpoint12_08: handler,
+  endpoint12_09: handler,
+})
 
-const Group13Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group13",
-  {
-    endpoint13_00: handler,
-    endpoint13_01: handler,
-    endpoint13_02: handler,
-    endpoint13_03: handler,
-    endpoint13_04: handler,
-    endpoint13_05: handler,
-    endpoint13_06: handler,
-    endpoint13_07: handler,
-    endpoint13_08: handler,
-    endpoint13_09: handler,
-  },
-)
+const Group13Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group13", {
+  endpoint13_00: handler,
+  endpoint13_01: handler,
+  endpoint13_02: handler,
+  endpoint13_03: handler,
+  endpoint13_04: handler,
+  endpoint13_05: handler,
+  endpoint13_06: handler,
+  endpoint13_07: handler,
+  endpoint13_08: handler,
+  endpoint13_09: handler,
+})
 
-const Group14Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group14",
-  {
-    endpoint14_00: handler,
-    endpoint14_01: handler,
-    endpoint14_02: handler,
-    endpoint14_03: handler,
-    endpoint14_04: handler,
-    endpoint14_05: handler,
-    endpoint14_06: handler,
-    endpoint14_07: handler,
-    endpoint14_08: handler,
-    endpoint14_09: handler,
-  },
-)
+const Group14Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group14", {
+  endpoint14_00: handler,
+  endpoint14_01: handler,
+  endpoint14_02: handler,
+  endpoint14_03: handler,
+  endpoint14_04: handler,
+  endpoint14_05: handler,
+  endpoint14_06: handler,
+  endpoint14_07: handler,
+  endpoint14_08: handler,
+  endpoint14_09: handler,
+})
 
-const Group15Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group15",
-  {
-    endpoint15_00: handler,
-    endpoint15_01: handler,
-    endpoint15_02: handler,
-    endpoint15_03: handler,
-    endpoint15_04: handler,
-    endpoint15_05: handler,
-    endpoint15_06: handler,
-    endpoint15_07: handler,
-    endpoint15_08: handler,
-    endpoint15_09: handler,
-  },
-)
+const Group15Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group15", {
+  endpoint15_00: handler,
+  endpoint15_01: handler,
+  endpoint15_02: handler,
+  endpoint15_03: handler,
+  endpoint15_04: handler,
+  endpoint15_05: handler,
+  endpoint15_06: handler,
+  endpoint15_07: handler,
+  endpoint15_08: handler,
+  endpoint15_09: handler,
+})
 
-const Group16Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group16",
-  {
-    endpoint16_00: handler,
-    endpoint16_01: handler,
-    endpoint16_02: handler,
-    endpoint16_03: handler,
-    endpoint16_04: handler,
-    endpoint16_05: handler,
-    endpoint16_06: handler,
-    endpoint16_07: handler,
-    endpoint16_08: handler,
-    endpoint16_09: handler,
-  },
-)
+const Group16Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group16", {
+  endpoint16_00: handler,
+  endpoint16_01: handler,
+  endpoint16_02: handler,
+  endpoint16_03: handler,
+  endpoint16_04: handler,
+  endpoint16_05: handler,
+  endpoint16_06: handler,
+  endpoint16_07: handler,
+  endpoint16_08: handler,
+  endpoint16_09: handler,
+})
 
-const Group17Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group17",
-  {
-    endpoint17_00: handler,
-    endpoint17_01: handler,
-    endpoint17_02: handler,
-    endpoint17_03: handler,
-    endpoint17_04: handler,
-    endpoint17_05: handler,
-    endpoint17_06: handler,
-    endpoint17_07: handler,
-    endpoint17_08: handler,
-    endpoint17_09: handler,
-  },
-)
+const Group17Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group17", {
+  endpoint17_00: handler,
+  endpoint17_01: handler,
+  endpoint17_02: handler,
+  endpoint17_03: handler,
+  endpoint17_04: handler,
+  endpoint17_05: handler,
+  endpoint17_06: handler,
+  endpoint17_07: handler,
+  endpoint17_08: handler,
+  endpoint17_09: handler,
+})
 
-const Group18Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group18",
-  {
-    endpoint18_00: handler,
-    endpoint18_01: handler,
-    endpoint18_02: handler,
-    endpoint18_03: handler,
-    endpoint18_04: handler,
-    endpoint18_05: handler,
-    endpoint18_06: handler,
-    endpoint18_07: handler,
-    endpoint18_08: handler,
-    endpoint18_09: handler,
-  },
-)
+const Group18Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group18", {
+  endpoint18_00: handler,
+  endpoint18_01: handler,
+  endpoint18_02: handler,
+  endpoint18_03: handler,
+  endpoint18_04: handler,
+  endpoint18_05: handler,
+  endpoint18_06: handler,
+  endpoint18_07: handler,
+  endpoint18_08: handler,
+  endpoint18_09: handler,
+})
 
-const Group19Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group19",
-  {
-    endpoint19_00: handler,
-    endpoint19_01: handler,
-    endpoint19_02: handler,
-    endpoint19_03: handler,
-    endpoint19_04: handler,
-    endpoint19_05: handler,
-    endpoint19_06: handler,
-    endpoint19_07: handler,
-    endpoint19_08: handler,
-    endpoint19_09: handler,
-  },
-)
+const Group19Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group19", {
+  endpoint19_00: handler,
+  endpoint19_01: handler,
+  endpoint19_02: handler,
+  endpoint19_03: handler,
+  endpoint19_04: handler,
+  endpoint19_05: handler,
+  endpoint19_06: handler,
+  endpoint19_07: handler,
+  endpoint19_08: handler,
+  endpoint19_09: handler,
+})
 
-const Group20Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group20",
-  {
-    endpoint20_00: handler,
-    endpoint20_01: handler,
-    endpoint20_02: handler,
-    endpoint20_03: handler,
-    endpoint20_04: handler,
-    endpoint20_05: handler,
-    endpoint20_06: handler,
-    endpoint20_07: handler,
-    endpoint20_08: handler,
-    endpoint20_09: handler,
-  },
-)
+const Group20Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group20", {
+  endpoint20_00: handler,
+  endpoint20_01: handler,
+  endpoint20_02: handler,
+  endpoint20_03: handler,
+  endpoint20_04: handler,
+  endpoint20_05: handler,
+  endpoint20_06: handler,
+  endpoint20_07: handler,
+  endpoint20_08: handler,
+  endpoint20_09: handler,
+})
 
-const Group21Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group21",
-  {
-    endpoint21_00: handler,
-    endpoint21_01: handler,
-    endpoint21_02: handler,
-    endpoint21_03: handler,
-    endpoint21_04: handler,
-    endpoint21_05: handler,
-    endpoint21_06: handler,
-    endpoint21_07: handler,
-    endpoint21_08: handler,
-    endpoint21_09: handler,
-  },
-)
+const Group21Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group21", {
+  endpoint21_00: handler,
+  endpoint21_01: handler,
+  endpoint21_02: handler,
+  endpoint21_03: handler,
+  endpoint21_04: handler,
+  endpoint21_05: handler,
+  endpoint21_06: handler,
+  endpoint21_07: handler,
+  endpoint21_08: handler,
+  endpoint21_09: handler,
+})
 
-const Group22Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group22",
-  {
-    endpoint22_00: handler,
-    endpoint22_01: handler,
-    endpoint22_02: handler,
-    endpoint22_03: handler,
-    endpoint22_04: handler,
-    endpoint22_05: handler,
-    endpoint22_06: handler,
-    endpoint22_07: handler,
-    endpoint22_08: handler,
-    endpoint22_09: handler,
-  },
-)
+const Group22Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group22", {
+  endpoint22_00: handler,
+  endpoint22_01: handler,
+  endpoint22_02: handler,
+  endpoint22_03: handler,
+  endpoint22_04: handler,
+  endpoint22_05: handler,
+  endpoint22_06: handler,
+  endpoint22_07: handler,
+  endpoint22_08: handler,
+  endpoint22_09: handler,
+})
 
-const Group23Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group23",
-  {
-    endpoint23_00: handler,
-    endpoint23_01: handler,
-    endpoint23_02: handler,
-    endpoint23_03: handler,
-    endpoint23_04: handler,
-    endpoint23_05: handler,
-    endpoint23_06: handler,
-    endpoint23_07: handler,
-    endpoint23_08: handler,
-    endpoint23_09: handler,
-  },
-)
+const Group23Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group23", {
+  endpoint23_00: handler,
+  endpoint23_01: handler,
+  endpoint23_02: handler,
+  endpoint23_03: handler,
+  endpoint23_04: handler,
+  endpoint23_05: handler,
+  endpoint23_06: handler,
+  endpoint23_07: handler,
+  endpoint23_08: handler,
+  endpoint23_09: handler,
+})
 
-const Group24Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group24",
-  {
-    endpoint24_00: handler,
-    endpoint24_01: handler,
-    endpoint24_02: handler,
-    endpoint24_03: handler,
-    endpoint24_04: handler,
-    endpoint24_05: handler,
-    endpoint24_06: handler,
-    endpoint24_07: handler,
-    endpoint24_08: handler,
-    endpoint24_09: handler,
-  },
-)
+const Group24Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group24", {
+  endpoint24_00: handler,
+  endpoint24_01: handler,
+  endpoint24_02: handler,
+  endpoint24_03: handler,
+  endpoint24_04: handler,
+  endpoint24_05: handler,
+  endpoint24_06: handler,
+  endpoint24_07: handler,
+  endpoint24_08: handler,
+  endpoint24_09: handler,
+})
 
-const Group25Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group25",
-  {
-    endpoint25_00: handler,
-    endpoint25_01: handler,
-    endpoint25_02: handler,
-    endpoint25_03: handler,
-    endpoint25_04: handler,
-    endpoint25_05: handler,
-    endpoint25_06: handler,
-    endpoint25_07: handler,
-    endpoint25_08: handler,
-    endpoint25_09: handler,
-  },
-)
+const Group25Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group25", {
+  endpoint25_00: handler,
+  endpoint25_01: handler,
+  endpoint25_02: handler,
+  endpoint25_03: handler,
+  endpoint25_04: handler,
+  endpoint25_05: handler,
+  endpoint25_06: handler,
+  endpoint25_07: handler,
+  endpoint25_08: handler,
+  endpoint25_09: handler,
+})
 
-const Group26Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group26",
-  {
-    endpoint26_00: handler,
-    endpoint26_01: handler,
-    endpoint26_02: handler,
-    endpoint26_03: handler,
-    endpoint26_04: handler,
-    endpoint26_05: handler,
-    endpoint26_06: handler,
-    endpoint26_07: handler,
-    endpoint26_08: handler,
-    endpoint26_09: handler,
-  },
-)
+const Group26Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group26", {
+  endpoint26_00: handler,
+  endpoint26_01: handler,
+  endpoint26_02: handler,
+  endpoint26_03: handler,
+  endpoint26_04: handler,
+  endpoint26_05: handler,
+  endpoint26_06: handler,
+  endpoint26_07: handler,
+  endpoint26_08: handler,
+  endpoint26_09: handler,
+})
 
-const Group27Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group27",
-  {
-    endpoint27_00: handler,
-    endpoint27_01: handler,
-    endpoint27_02: handler,
-    endpoint27_03: handler,
-    endpoint27_04: handler,
-    endpoint27_05: handler,
-    endpoint27_06: handler,
-    endpoint27_07: handler,
-    endpoint27_08: handler,
-    endpoint27_09: handler,
-  },
-)
+const Group27Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group27", {
+  endpoint27_00: handler,
+  endpoint27_01: handler,
+  endpoint27_02: handler,
+  endpoint27_03: handler,
+  endpoint27_04: handler,
+  endpoint27_05: handler,
+  endpoint27_06: handler,
+  endpoint27_07: handler,
+  endpoint27_08: handler,
+  endpoint27_09: handler,
+})
 
-const Group28Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group28",
-  {
-    endpoint28_00: handler,
-    endpoint28_01: handler,
-    endpoint28_02: handler,
-    endpoint28_03: handler,
-    endpoint28_04: handler,
-    endpoint28_05: handler,
-    endpoint28_06: handler,
-    endpoint28_07: handler,
-    endpoint28_08: handler,
-    endpoint28_09: handler,
-  },
-)
+const Group28Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group28", {
+  endpoint28_00: handler,
+  endpoint28_01: handler,
+  endpoint28_02: handler,
+  endpoint28_03: handler,
+  endpoint28_04: handler,
+  endpoint28_05: handler,
+  endpoint28_06: handler,
+  endpoint28_07: handler,
+  endpoint28_08: handler,
+  endpoint28_09: handler,
+})
 
-const Group29Live = Stdb.StdbBuilder.groupPrechecked(
-  LargeScaleModule,
-  "Group29",
-  {
-    endpoint29_00: handler,
-    endpoint29_01: handler,
-    endpoint29_02: handler,
-    endpoint29_03: handler,
-    endpoint29_04: handler,
-    endpoint29_05: handler,
-    endpoint29_06: handler,
-    endpoint29_07: handler,
-    endpoint29_08: handler,
-    endpoint29_09: handler,
-  },
-)
+const Group29Live = Stdb.Builder.groupPrechecked(LargeScaleModule, "Group29", {
+  endpoint29_00: handler,
+  endpoint29_01: handler,
+  endpoint29_02: handler,
+  endpoint29_03: handler,
+  endpoint29_04: handler,
+  endpoint29_05: handler,
+  endpoint29_06: handler,
+  endpoint29_07: handler,
+  endpoint29_08: handler,
+  endpoint29_09: handler,
+})
 
-const LargeScaleLifecycleLive = Stdb.StdbBuilder.lifecycle(LargeScaleModule, {
+const LargeScaleLifecycleLive = Stdb.Builder.lifecycle(LargeScaleModule, {
   init: handler,
 })
 

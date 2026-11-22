@@ -46,9 +46,9 @@ export const ExampleErrors = Stdb.errors.namespace("EffectSpacetimeDbExample")({
 
 export const UserMissingError = ExampleErrors.UserMissingError
 
-const CapturedCallables = Stdb.StdbGroup.make("CapturedCallables")
+const CapturedCallables = Stdb.Group.make("CapturedCallables")
   .add(
-    Stdb.StdbFn.reducer("userRequire", {
+    Stdb.Fn.reducer("userRequire", {
       params: Stdb.struct({
         userId: Stdb.string(UserId),
       }),
@@ -56,17 +56,17 @@ const CapturedCallables = Stdb.StdbGroup.make("CapturedCallables")
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("thingNoop", {
+    Stdb.Fn.reducer("thingNoop", {
       params: Stdb.struct({}),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("thingPanic", {
+    Stdb.Fn.reducer("thingPanic", {
       params: Stdb.struct({}),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("thingOutcome", {
+    Stdb.Fn.procedure("thingOutcome", {
       params: Stdb.struct({
         thingId: Stdb.string(ThingId),
       }),
@@ -74,7 +74,7 @@ const CapturedCallables = Stdb.StdbGroup.make("CapturedCallables")
     }),
   )
 
-export const CapturedTransportModule = Stdb.StdbModule.make(
+export const CapturedTransportModule = Stdb.Module.make(
   "captured_transport",
   {},
 )

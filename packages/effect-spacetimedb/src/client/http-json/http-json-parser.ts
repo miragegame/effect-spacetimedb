@@ -357,7 +357,7 @@ export const parseFailure = (
   cause: unknown,
 ): ParseResult.ParseError =>
   ParseResult.parseError(
-    new ParseResult.Type(
+    ParseResult.invalidValueIssue(
       input,
       cause instanceof Error ? cause.message : String(cause),
     ),

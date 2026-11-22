@@ -1,13 +1,13 @@
 import * as Stdb from "effect-spacetimedb"
 
-const CallableOnlyFunctions = Stdb.StdbGroup.make("CallableOnly")
+const CallableOnlyFunctions = Stdb.Group.make("CallableOnly")
   .add(
-    Stdb.StdbFn.reducer("ping", {
+    Stdb.Fn.reducer("ping", {
       params: Stdb.struct({}),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("echo", {
+    Stdb.Fn.procedure("echo", {
       params: Stdb.struct({
         value: Stdb.string(),
       }),
@@ -15,9 +15,8 @@ const CallableOnlyFunctions = Stdb.StdbGroup.make("CallableOnly")
     }),
   )
 
-export const CallableOnlyBuilder = Stdb.StdbModule.make(
-  "callable_only",
-  {},
-).add(CallableOnlyFunctions)
+export const CallableOnlyBuilder = Stdb.Module.make("callable_only", {}).add(
+  CallableOnlyFunctions,
+)
 
 export const CallableOnlyModule = CallableOnlyBuilder.spec

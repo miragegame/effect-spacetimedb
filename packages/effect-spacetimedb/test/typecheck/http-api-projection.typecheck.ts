@@ -70,42 +70,42 @@ const CreateWidgetResponse = Schema.Struct({
   widgetId: Schema.String,
 })
 
-const WebhooksGroup = Stdb.StdbHttpGroup.make("Webhooks").add(
-  Stdb.StdbHttp.post("rotateToken", "/server-tokens/rotate", {
+const WebhooksGroup = Stdb.HttpGroup.make("Webhooks").add(
+  Stdb.Http.post("rotateToken", "/server-tokens/rotate", {
     request: RotateTokenRequest,
     response: RotateTokenResponse,
     errors: ProjectionErrors,
   }),
-  Stdb.StdbHttp.post("issue_token", "/server-tokens/issue", {
+  Stdb.Http.post("issue_token", "/server-tokens/issue", {
     request: IssueTokenRequest,
     response: IssueTokenResponse,
   }),
-  Stdb.StdbHttp.post("raw_webhook", "/webhook"),
-  Stdb.StdbHttp.any("typed_any", "/typed-any", {
+  Stdb.Http.post("raw_webhook", "/webhook"),
+  Stdb.Http.any("typed_any", "/typed-any", {
     request: RotateTokenRequest,
     response: RotateTokenResponse,
   }),
-  Stdb.StdbHttp.get("typed_get", "/typed-get", {
+  Stdb.Http.get("typed_get", "/typed-get", {
     request: RotateTokenRequest,
     response: RotateTokenResponse,
   }),
 )
 
-const AdminGroup = Stdb.StdbHttpGroup.make("Admin").add(
-  Stdb.StdbHttp.post("create_widget", "/admin/widgets", {
+const AdminGroup = Stdb.HttpGroup.make("Admin").add(
+  Stdb.Http.post("create_widget", "/admin/widgets", {
     request: CreateWidgetRequest,
     response: CreateWidgetResponse,
   }),
 )
 
-const NonProjectableGroup = Stdb.StdbHttpGroup.make("Diagnostics").add(
-  Stdb.StdbHttp.get("health", "/health", {
+const NonProjectableGroup = Stdb.HttpGroup.make("Diagnostics").add(
+  Stdb.Http.get("health", "/health", {
     request: Schema.Struct({ verbose: Schema.Boolean }),
     response: Schema.Struct({ ok: Schema.Boolean }),
   }),
 )
 
-const ProjectionModule = Stdb.StdbModule.make(
+const ProjectionModule = Stdb.Module.make(
   "http_api_projection_typecheck",
   {},
 ).add(WebhooksGroup, AdminGroup, NonProjectableGroup).spec
@@ -196,7 +196,7 @@ const MissingGroupSpec = withWireNames({
   reducers: {},
   procedures: {},
   httpHandlers: {
-    orphan: Stdb.StdbHttp.post("orphan", "/orphan", {
+    orphan: Stdb.Http.post("orphan", "/orphan", {
       request: RotateTokenRequest,
       response: RotateTokenResponse,
     }).spec,
@@ -215,7 +215,7 @@ declare const missingGroupClient: MissingGroupClient
 // @ts-expect-error malformed specs without httpGroups entries do not surface routes
 void missingGroupClient.orphan({ payload: { scenario: "success" } })
 
-const EmptyModule = Stdb.StdbModule.make("empty_http_api", {}).spec
+const EmptyModule = Stdb.Module.make("empty_http_api", {}).spec
 const emptyApi = Stdb.toHttpApi(EmptyModule)
 type EmptyClient = HttpApiClient.ForApi<typeof emptyApi>
 type _EmptyClientHasNoKeys = Assert<IsEqual<keyof EmptyClient, never>>

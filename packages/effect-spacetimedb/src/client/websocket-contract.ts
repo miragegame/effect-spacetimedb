@@ -1,5 +1,16 @@
+import {
+  camelCaseName,
+  type GeneratedAccessor,
+} from "../contract/canonical-name.ts"
+import {
+  quotedIdentifier,
+  generatedMemberPath,
+  readMember,
+  type NestedMembers,
+  type MembersByPath,
+} from "../member-path.ts"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Match from "effect/Match"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type { AnyModuleSpec } from "../contract/module.ts"
@@ -16,13 +27,13 @@ import type {
 import type {
   ClientQueryRoot,
   ClientTableQueryRoot,
-  ClientViewQueryRoot,
   TypedQuery,
 } from "../query/types.ts"
 import type {
   MatchableSubscriptionTarget,
   PublicEventTableKeys,
   PublicPersistentTableKeys,
+  PublicTableKeys,
   SubscriptionTarget,
 } from "../subscription-target.ts"
 import {
@@ -47,30 +58,44 @@ import type {
   SubscriptionQuerySource,
 } from "./ws-subscription-adapter.ts"
 
-export type WsDbShape<
-  Module extends AnyModuleSpec,
-  RelationContext = unknown,
+export type GeneratedTables<
+  Tables extends Readonly<Record<string, AnyTableSpec>>,
+  C,
 > = {
-  readonly [Key in
-    | PublicPersistentTableKeys<Module>
-    | PublicEventTableKeys<Module>]: RelationHandle<
-    WsTableRow<Module["tables"][Key]>,
-    RelationContext
-  >
-} & WsViewDbShape<Module, RelationContext>
+  readonly [Key in keyof Tables & string as Tables[Key]["public"] extends true
+    ? GeneratedAccessor<Key>
+    : never]: RelationHandle<WsTableRow<Tables[Key]>, C>
+}
 
-/**
- * Views on the generated client's `db`, keyed the same way tables are: by
- * contract key. See `isCamelCaseCanonical` in `../contract/canonical-name.ts`
- * for why the contract key *is* the generated accessor key under every name
- * policy.
- */
-type WsViewDbShape<Module extends AnyModuleSpec, RelationContext> = {
-  readonly [Key in PublicViewKeys<Module>]: RelationHandle<
-    WsViewRowOf<Module["views"][Key]>,
-    RelationContext
+export type GeneratedViews<
+  Views extends Readonly<Record<string, AnyViewSpec>>,
+  C,
+> = {
+  readonly [Key in keyof Views &
+    string as GeneratedAccessor<Key>]: RelationHandle<
+    WsViewRowOf<Views[Key]>,
+    C
   >
 }
+
+export type WsDbShape<M extends AnyModuleSpec, C = unknown> = NestedMembers<
+  GeneratedTables<MembersByPath<M, "tables">, C> &
+    GeneratedViews<MembersByPath<M, "views">, C>
+>
+
+export const tableRelation = <
+  M extends AnyModuleSpec,
+  E,
+  C,
+  K extends PublicPersistentTableKeys<M> | PublicEventTableKeys<M>,
+>(
+  connection: WsConnectionLike<M, E, C>,
+  key: K,
+): RelationHandle<WsTableRow<MembersByPath<M, "tables">[K]>, C> =>
+  readMember(connection.db, generatedMemberPath(key)) as RelationHandle<
+    WsTableRow<MembersByPath<M, "tables">[K]>,
+    C
+  >
 
 export type WsConnectionLike<
   Module extends AnyModuleSpec,
@@ -85,7 +110,7 @@ export type WsConnectionLike<
   >
 }
 
-type WsCallableConnectionLike = {
+export type WsCallableConnectionLike = {
   readonly callReducerWithParams: (
     reducerName: string,
     paramsType: unknown,
@@ -112,6 +137,13 @@ export type WsClientOptions<
   readonly module: Module
   readonly connection: WsConnectionLike<Module, ErrorContext, RelationContext>
   readonly transport?: WsCallableTransport | undefined
+  /**
+   * The longest a call may wait for its answer. An overrun fails with
+   * `ConnectionLostError` and invalidates the connection, which stays yours to
+   * close. Defaults to `callDurationMaxDefault`, 30 seconds.
+   * Use `Duration.infinity` to disable the call deadline.
+   */
+  readonly callDurationMax?: Duration.Input | undefined
 }
 
 export type WsStreamOptions = {
@@ -124,10 +156,10 @@ export type ViewGroupArgs<
   Keys extends ReadonlyArray<PublicViewKeys<Module>>,
 > = {
   readonly [Key in Keys[number] as ViewTakesArgs<
-    Module["views"][Key]
+    MembersByPath<Module, "views">[Key]
   > extends true
     ? Key
-    : never]: ViewCallArgsOf<Module["views"][Key]>
+    : never]: ViewCallArgsOf<MembersByPath<Module, "views">[Key]>
 }
 
 /**
@@ -149,12 +181,12 @@ export type ViewGroupOptionsParam<
  * Whether any view `Key` names declares params. A union key is checked view
  * by view, so a key that may name a view with params requires `args`.
  */
-type SomeViewTakesArgs<
+export type SomeViewTakesArgs<
   Module extends AnyModuleSpec,
   Key extends PublicViewKeys<Module>,
 > = true extends (
   Key extends PublicViewKeys<Module>
-    ? ViewTakesArgs<Module["views"][Key]>
+    ? ViewTakesArgs<MembersByPath<Module, "views">[Key]>
     : never
 )
   ? true
@@ -164,12 +196,12 @@ type SomeViewTakesArgs<
  * The arguments a call through `Key` needs. A union key may name any of its
  * views, so its arguments satisfy every one: the intersection of theirs.
  */
-type ViewCallArgsForKey<
+export type ViewCallArgsForKey<
   Module extends AnyModuleSpec,
   Key extends PublicViewKeys<Module>,
 > = (
   Key extends PublicViewKeys<Module>
-    ? (args: ViewCallArgsOf<Module["views"][Key]>) => void
+    ? (args: ViewCallArgsOf<MembersByPath<Module, "views">[Key]>) => void
     : never
 ) extends (args: infer Args) => void
   ? Args
@@ -211,7 +243,7 @@ export const eventTableStreamOptions = (
   return bufferSize === undefined ? { buffer: {} } : { buffer: { bufferSize } }
 }
 
-type TableCacheClient<Table extends AnyTableSpec> = {
+export type TableCacheClient<Table extends AnyTableSpec> = {
   readonly count: () => bigint
   readonly toArray: () => Effect.Effect<
     ReadonlyArray<TableRow<Table>>,
@@ -225,11 +257,11 @@ type TableCacheClient<Table extends AnyTableSpec> = {
 
 export type PublicTableCache<Module extends AnyModuleSpec> = {
   readonly [Key in PublicPersistentTableKeys<Module>]: TableCacheClient<
-    Module["tables"][Key]
+    MembersByPath<Module, "tables">[Key]
   >
 }
 
-type ViewCacheClient<View extends AnyViewSpec> = {
+export type ViewCacheClient<View extends AnyViewSpec> = {
   readonly count: () => bigint
   readonly toArray: () => Effect.Effect<
     ReadonlyArray<ViewRowOf<View>>,
@@ -243,20 +275,22 @@ type ViewCacheClient<View extends AnyViewSpec> = {
 
 export type PublicViewCache<Module extends AnyModuleSpec> = {
   readonly [Key in PublicViewKeys<Module>]: ViewCacheClient<
-    Module["views"][Key]
+    MembersByPath<Module, "views">[Key]
   >
 }
 
 export type PublicCache<Module extends AnyModuleSpec> = {
-  readonly tables: PublicTableCache<Module>
-  readonly views: PublicViewCache<Module>
+  readonly tables: NestedMembers<PublicTableCache<Module>>
+  readonly views: NestedMembers<PublicViewCache<Module>>
 }
 
 export type TableGroupSnapshot<
   Module extends AnyModuleSpec,
   Keys extends ReadonlyArray<PublicPersistentTableKeys<Module>>,
 > = {
-  readonly [Key in Keys[number]]: ReadonlyArray<TableRow<Module["tables"][Key]>>
+  readonly [Key in Keys[number]]: ReadonlyArray<
+    TableRow<MembersByPath<Module, "tables">[Key]>
+  >
 }
 
 export type TableGroup<
@@ -280,7 +314,9 @@ export type ViewGroupSnapshot<
   Module extends AnyModuleSpec,
   Keys extends ReadonlyArray<PublicViewKeys<Module>>,
 > = {
-  readonly [Key in Keys[number]]: ReadonlyArray<ViewRowOf<Module["views"][Key]>>
+  readonly [Key in Keys[number]]: ReadonlyArray<
+    ViewRowOf<MembersByPath<Module, "views">[Key]>
+  >
 }
 
 export type ViewGroup<
@@ -305,10 +341,9 @@ export type StdbTableChangeEvent<Row> = TableChangeWithContext<
   StdbEventContext
 >
 
-export const hasWsCallableTransport = (
-  connection: WsConnectionLike<AnyModuleSpec, unknown, unknown>,
-): connection is WsConnectionLike<AnyModuleSpec, unknown, unknown> &
-  WsCallableConnectionLike =>
+export const hasWsCallableTransport = <T extends object>(
+  connection: T,
+): connection is T & WsCallableConnectionLike =>
   "callReducerWithParams" in connection &&
   "callProcedureWithParams" in connection
 
@@ -318,8 +353,7 @@ export const subscriptionErrorMessage = (
 ): string => {
   const fromError =
     error != null && error.message.length > 0 ? error.message : undefined
-  const fromContext = messageFromUnknown(context) ?? String(context)
-  return fromError ?? fromContext
+  return fromError ?? messageFromUnknown(context) ?? String(context)
 }
 
 export const ensureWsParamsObject = (
@@ -347,23 +381,14 @@ export const subscriptionTargetLabel = <Module extends AnyModuleSpec>(
   plan: ModulePlan<Module>,
   target: SubscriptionTarget<Module>,
 ): string => {
-  const matchableTarget: MatchableSubscriptionTarget<Module> = target
-  return Match.value(matchableTarget).pipe(
-    Match.discriminatorsExhaustive("kind")({
-      table: (value) => `table:${value.key}`,
-      eventTable: (value) => `eventTable:${value.key}`,
-      query: (value) => `query:${value.key}`,
-      view: (value) => `view:${value.key}`,
-      allPublicTables: (value) =>
-        value.keys
-          .map((key) =>
-            key in plan.publicEventTables
-              ? `eventTable:${key}`
-              : `table:${key}`,
-          )
-          .join(","),
-    }),
-  )
+  const matchableTarget = target as MatchableSubscriptionTarget<Module>
+  if (matchableTarget.kind !== "allPublicTables")
+    return `${matchableTarget.kind}:${matchableTarget.key}`
+  return matchableTarget.keys
+    .map((key) =>
+      key in plan.publicEventTables ? `eventTable:${key}` : `table:${key}`,
+    )
+    .join(",")
 }
 
 /**
@@ -377,7 +402,7 @@ export const targetQuerySource = <Module extends AnyModuleSpec>(
   SubscriptionQuerySource<ClientQueryRoot<Module>>,
   StdbDecodeError
 > => {
-  const matchableTarget: MatchableSubscriptionTarget<Module> = target
+  const matchableTarget = target as MatchableSubscriptionTarget<Module>
   return matchableTarget.kind === "view" &&
     viewTakesArgs(matchableTarget.params)
     ? viewCallSql(
@@ -391,32 +416,59 @@ export const targetQuerySource = <Module extends AnyModuleSpec>(
 const targetToQuerySource = <Module extends AnyModuleSpec>(
   target: SubscriptionTarget<Module>,
 ): SubscriptionQuerySource<ClientQueryRoot<Module>> => {
-  const matchableTarget: MatchableSubscriptionTarget<Module> = target
-  const sourceForKey =
-    (
-      key: PublicPersistentTableKeys<Module> | PublicEventTableKeys<Module>,
-    ): SubscriptionQuerySource<ClientQueryRoot<Module>> =>
-    (tables: ClientTableQueryRoot<Module>) =>
-      tables[key]
-  const sourceForView =
-    (
-      key: PublicViewKeys<Module>,
-    ): SubscriptionQuerySource<ClientQueryRoot<Module>> =>
-    (relations: ClientViewQueryRoot<Module>) =>
-      viewQueryForKey(relations, key)
-
-  return Match.value(matchableTarget).pipe(
-    Match.discriminatorsExhaustive("kind")({
-      table: (value) => sourceForKey(value.key),
-      eventTable: (value) => sourceForKey(value.key),
-      query: (value) => (tables: ClientTableQueryRoot<Module>) =>
-        tables[value.key].where(value.predicate),
-      view: (value) => sourceForView(value.key),
-      allPublicTables: (value) => (tables: ClientTableQueryRoot<Module>) =>
-        value.keys.map((key) => tables[key]),
-    }),
-  )
+  const matchableTarget = target as MatchableSubscriptionTarget<Module>
+  // The SDK groups subscription callbacks by the first canonical namespace.
+  // The rest of the canonical name is a single key, including deeper mounts.
+  const tableFor = (
+    root: ClientTableQueryRoot<Module>,
+    key: PublicTableKeys<Module>,
+    name: string,
+  ) => {
+    const dot = name.indexOf(".")
+    return (
+      dot < 0
+        ? Reflect.get(root, camelCaseName(key))
+        : readMember(root, [name.slice(0, dot), name.slice(dot + 1)])
+    ) as TypedQuery & {
+      where(
+        predicate: Extract<
+          MatchableSubscriptionTarget<Module>,
+          { kind: "query" }
+        >["predicate"],
+      ): TypedQuery
+    }
+  }
+  const relationQuery = (value: {
+    readonly key: string
+    readonly name: string
+  }) =>
+    value.key.includes(".")
+      ? "SELECT * FROM " + quotedIdentifier(value.name)
+      : (relations: ClientQueryRoot<Module>): TypedQuery =>
+          Reflect.get(relations, camelCaseName(value.key))
+  switch (matchableTarget.kind) {
+    case "table":
+    case "eventTable":
+    case "view":
+      return relationQuery(matchableTarget)
+    case "query":
+      return (tables) =>
+        tableFor(tables, matchableTarget.key, matchableTarget.name).where(
+          (row) =>
+            matchableTarget.predicate(
+              new Proxy(row, {
+                get: (target, column) =>
+                  Reflect.get(
+                    target,
+                    typeof column === "string" ? camelCaseName(column) : column,
+                  ),
+              }),
+            ),
+        )
+    case "allPublicTables":
+      return (tables) =>
+        matchableTarget.keys.map((key) =>
+          tableFor(tables, key, matchableTarget.names?.[key] ?? key),
+        )
+  }
 }
-
-const viewQueryForKey = (relations: object, key: string): TypedQuery =>
-  Reflect.get(relations, key)

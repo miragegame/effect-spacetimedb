@@ -1,4 +1,4 @@
-export { StdbBuilder } from "./builder/build-plan.ts"
+export { Builder } from "./builder/build-plan.ts"
 export { declOf, wireNameForDecl, wireNameOf } from "./builder/calling.ts"
 export type {
   AnonymousViewDecl,
@@ -25,7 +25,7 @@ export type {
 export type {
   ArgsFor,
   AnyBuilderImpl,
-  AnyStdbModule,
+  AnyModule,
   BuildArgsWithoutRuntime,
   BuildArgsWithRuntime,
   BuildArgsWithRuntimeMode,
@@ -59,7 +59,7 @@ export type {
   ReducerSuccessFor,
   RowOf,
   RuntimeROfImpls,
-  StdbBuildPlan,
+  BuildPlan,
   SuccessFor,
   ViewArgsFor,
   ViewErrorsFor,
@@ -71,11 +71,11 @@ export {
 } from "./builder/handler-types.ts"
 export type { ModuleBrand, ModuleBrandTypeId } from "./identity-brand.ts"
 export {
-  StdbFn,
-  StdbGroup,
-  StdbHttp,
-  StdbHttpGroup,
-  StdbModule,
+  Fn,
+  Group,
+  Http,
+  HttpGroup,
+  Module,
 } from "./builder/http-builders.ts"
 export {
   moduleExports,

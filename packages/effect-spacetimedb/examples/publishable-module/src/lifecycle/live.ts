@@ -32,23 +32,20 @@ const insertAuditLog = Effect.fn(function* (args: {
   })
 })
 
-export const LifecycleFunctionsLive = Stdb.StdbBuilder.lifecycle(
-  ExampleModule,
-  {
-    init: () => insertAuditLog({ kind: "init", subject: "module" }),
-    clientConnected: Effect.fn(function* () {
-      const ctx = yield* MutationCtx
-      yield* insertAuditLog({
-        kind: "connected",
-        subject: toHexString(ctx.sender),
-      })
-    }),
-    clientDisconnected: Effect.fn(function* () {
-      const ctx = yield* MutationCtx
-      yield* insertAuditLog({
-        kind: "disconnected",
-        subject: toHexString(ctx.sender),
-      })
-    }),
-  },
-)
+export const LifecycleFunctionsLive = Stdb.Builder.lifecycle(ExampleModule, {
+  init: () => insertAuditLog({ kind: "init", subject: "module" }),
+  clientConnected: Effect.fn(function* () {
+    const ctx = yield* MutationCtx
+    yield* insertAuditLog({
+      kind: "connected",
+      subject: toHexString(ctx.sender),
+    })
+  }),
+  clientDisconnected: Effect.fn(function* () {
+    const ctx = yield* MutationCtx
+    yield* insertAuditLog({
+      kind: "disconnected",
+      subject: toHexString(ctx.sender),
+    })
+  }),
+})

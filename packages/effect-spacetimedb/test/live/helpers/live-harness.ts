@@ -29,12 +29,12 @@ import type {
   WsBuilderConfig,
   WsCallableTransport,
   WsGeneratedConfig,
-} from "effect-spacetimedb/testing"
+} from "effect-spacetimedb/testing/internal"
 import {
   ClientGeneratedWsAdapter,
   makeModulePlan,
   makeScopedFromModulePlan,
-} from "effect-spacetimedb/testing"
+} from "effect-spacetimedb/testing/internal"
 import * as ExampleGeneratedClient from "effect-spacetimedb/testing/example-client"
 import {
   buildModuleWithSpacetime,
@@ -365,7 +365,7 @@ const makeLiveHarness = Effect.fn(function* () {
       DbConnection: generatedClient.DbConnection,
       uri: runtime.baseUrl,
       databaseName: runtime.databaseName,
-      connectTimeoutMillis: fixtureConnectTimeoutMillis,
+      connectDurationMax: fixtureConnectTimeoutMillis,
       token,
       compression: "none",
       createWebSocket: makeLiveWebSocket,
@@ -479,7 +479,8 @@ export const sendLiveReducer = (
     catch: testEffectCallbackError("effect-spacetimedb/helpers/live-harness"),
   })
 
-export const callLiveProcedure = <A = unknown>(
+/** What a procedure answers: its success or the string carrier of a failure. */
+export const callLiveProcedureResult = <A = unknown>(
   connection: Pick<LiveCallableTransport, "callProcedureWithParams">,
   name: string,
   args: object,
@@ -491,9 +492,29 @@ export const callLiveProcedure = <A = unknown>(
         undefined,
         args,
         undefined,
-      )) as A,
+      )) as { readonly ok: A } | { readonly err: string },
     catch: testEffectCallbackError("effect-spacetimedb/helpers/live-harness"),
   })
+
+export class LiveProcedureRejected extends Data.TaggedError(
+  "LiveProcedureRejected",
+)<{
+  readonly err: string
+}> {}
+
+/** A procedure's success, for a call that is expected to succeed. */
+export const callLiveProcedure = <A = unknown>(
+  connection: Pick<LiveCallableTransport, "callProcedureWithParams">,
+  name: string,
+  args: object,
+) =>
+  callLiveProcedureResult<A>(connection, name, args).pipe(
+    Effect.flatMap((result) =>
+      "ok" in result
+        ? Effect.succeed(result.ok)
+        : Effect.fail(new LiveProcedureRejected({ err: result.err })),
+    ),
+  )
 
 export const expectRejectedLiveCall = (
   call: () => Promise<unknown>,

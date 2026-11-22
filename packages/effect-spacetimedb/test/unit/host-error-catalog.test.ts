@@ -5,7 +5,7 @@ import {
   SpacetimeHostErrorCodes,
   SpacetimeHostErrors,
   SpacetimeHostErrorsByCode,
-} from "../../src/server/index.ts"
+} from "effect-spacetimedb/testing/internal"
 
 const { describe, expect, it } = EffectVitest
 

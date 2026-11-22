@@ -12,10 +12,10 @@ const { describe, expect, it } = EffectVitest
  */
 describe("module spec memoization", () => {
   const makeModule = () =>
-    Stdb.StdbModule.make("spec_memo", {}).add(
-      Stdb.StdbGroup.make("Group")
-        .add(Stdb.StdbFn.reducer("someReducer", {}))
-        .add(Stdb.StdbFn.procedure("someProcedure", { returns: Stdb.unit() })),
+    Stdb.Module.make("spec_memo", {}).add(
+      Stdb.Group.make("Group")
+        .add(Stdb.Fn.reducer("someReducer", {}))
+        .add(Stdb.Fn.procedure("someProcedure", { returns: Stdb.unit() })),
     )
 
   it("returns the identical spec object across repeated reads", () => {
@@ -32,7 +32,7 @@ describe("module spec memoization", () => {
     const base = makeModule()
     const baseSpec = base.spec
     const extended = base.add(
-      Stdb.StdbGroup.make("Later").add(Stdb.StdbFn.reducer("laterReducer", {})),
+      Stdb.Group.make("Later").add(Stdb.Fn.reducer("laterReducer", {})),
     )
 
     // The memo must live per module instance: deriving a new module from an
@@ -48,9 +48,9 @@ describe("module spec memoization", () => {
   })
 
   it("re-throws assembly failures on every read instead of caching them", () => {
-    const duplicated = Stdb.StdbModule.make("spec_memo_duplicate", {}).add(
-      Stdb.StdbGroup.make("First").add(Stdb.StdbFn.reducer("collide", {})),
-      Stdb.StdbGroup.make("Second").add(Stdb.StdbFn.reducer("collide", {})),
+    const duplicated = Stdb.Module.make("spec_memo_duplicate", {}).add(
+      Stdb.Group.make("First").add(Stdb.Fn.reducer("collide", {})),
+      Stdb.Group.make("Second").add(Stdb.Fn.reducer("collide", {})),
     )
 
     expect(() => duplicated.spec).toThrow()

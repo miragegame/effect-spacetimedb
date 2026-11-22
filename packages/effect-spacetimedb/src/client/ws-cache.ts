@@ -1,3 +1,5 @@
+import { tableRelation } from "./websocket-contract.ts"
+import type { MembersByPath } from "../member-path.ts"
 import * as Effect from "effect/Effect"
 import * as Match from "effect/Match"
 import type { AnyModuleSpec } from "../contract/module.ts"
@@ -23,17 +25,19 @@ export const makePublicTableCache = <
   readonly plan: ModulePlan<Module>
   readonly connection: WsConnectionLike<Module, ErrorContext, RelationContext>
   readonly tableRowTypes: Record<string, AnyValueType>
-  readonly decodeTableRow: <Key extends keyof Module["tables"] & string>(
+  readonly decodeTableRow: <
+    Key extends keyof MembersByPath<Module, "tables"> & string,
+  >(
     key: Key,
-    row: WsTableRow<Module["tables"][Key]>,
-  ) => TableRow<Module["tables"][Key]>
+    row: WsTableRow<MembersByPath<Module, "tables">[Key]>,
+  ) => TableRow<MembersByPath<Module, "tables">[Key]>
 }): PublicTableCache<Module> =>
   typedFromEntries(
     typedEntries(options.plan.publicTables).map(([key, table]) => {
-      const relation = options.connection.db[key]
+      const relation = tableRelation(options.connection, key)
       const indexCodec = indexValueCodecOf(table, `cache.tables.${key}`)
       const decodeRows = (): ReadonlyArray<
-        TableRow<Module["tables"][typeof key]>
+        TableRow<MembersByPath<Module, "tables">[typeof key]>
       > =>
         Array.from(relation.iter(), (row) => options.decodeTableRow(key, row))
       const decodeNativeRows = (
@@ -43,7 +47,7 @@ export const makePublicTableCache = <
           Effect.flatMap((rows) =>
             Effect.forEach(rows, (row) =>
               ValueCodec.db
-                .decode<TableRow<Module["tables"][typeof key]>>(
+                .decode<TableRow<MembersByPath<Module, "tables">[typeof key]>>(
                   options.tableRowTypes[key]!,
                   row,
                 )
@@ -104,7 +108,12 @@ export const makePublicTableCache = <
                               ? Effect.void
                               : ValueCodec.db
                                   .decode<
-                                    TableRow<Module["tables"][typeof key]>
+                                    TableRow<
+                                      MembersByPath<
+                                        Module,
+                                        "tables"
+                                      >[typeof key]
+                                    >
                                   >(options.tableRowTypes[key]!, row)
                                   .pipe(
                                     Effect.mapError((error) =>

@@ -28,23 +28,23 @@ export class IdcPairNoteTooLarge extends Schema.TaggedError<IdcPairNoteTooLarge>
   { rowBytes: Schema.Int },
 ) {}
 
-export const IdcPairSends = Stdb.StdbGroup.make("IdcPairSends", {
+export const IdcPairSends = Stdb.Group.make("IdcPairSends", {
   errors: Stdb.errors(IdcPairNoteTooLarge),
 }).add(
-  Stdb.StdbFn.reducer("sendNote", {
+  Stdb.Fn.reducer("sendNote", {
     params: Stdb.struct({ note: Stdb.string() }),
   }),
 )
 
-export const IdcPairSettles = Stdb.StdbGroup.make("IdcPairSettles").add(
-  Stdb.StdbFn.outboxResult("noteSettled", { table: noteOutbox }),
+export const IdcPairSettles = Stdb.Group.make("IdcPairSettles").add(
+  Stdb.Fn.outboxResult("noteSettled", { table: noteOutbox }),
 )
 
 /**
  * The sending database. `IDC_PAIR_RECEIVER` is the receiver's hex identity:
  * its peer resolver reads it, never a call argument.
  */
-export const IdcPairSenderModule = Stdb.StdbModule.make("idc_pair_sender", {
+export const IdcPairSenderModule = Stdb.Module.make("idc_pair_sender", {
   environment: {
     IDC_PAIR_RECEIVER: Stdb.Environment.string(),
   },

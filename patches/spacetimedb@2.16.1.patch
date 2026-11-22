@@ -1,0 +1,356 @@
+# Patch notes for spacetimedb@2.16.1:
+# - Preserve branded primitives on input to Prettify and native builder
+#   inference while keeping generic rows spreadable.
+# - Upstream TableCache still compares object-backed range operands with raw
+#   JavaScript ordering; normalize every supported native scalar first.
+# - Upstream server index uniqueness checks use subset membership, causing a
+#   prefix index of a composite unique constraint to lose its range methods;
+#   require exact column-set equality.
+# - Every disposition was re-verified against the published 2.16.1
+#   tarball: every transform below matched the unpatched upstream text, so
+#   each defect is still present. Bun patches apply only to workspace
+#   installs; a published npm consumer does not receive these fixes
+#   automatically.
+# - Regenerate this patch for each SpacetimeDB version bump.
+
+diff --git a/dist/index.browser.mjs b/dist/index.browser.mjs
+index ac4bea69c9e185b3b242a40d7f368858f7ac0179..b7e021ed5becbc2c0aaeb5af28e6aa2d64fbd885 100644
+--- a/dist/index.browser.mjs
++++ b/dist/index.browser.mjs
+@@ -4652,9 +4652,31 @@ var EventEmitter = class {
+ };
+ 
+ // src/sdk/table_cache.ts
++var tableCacheComparableBigIntKeys = [
++  "__connection_id__",
++  "__identity__",
++  "__time_duration_micros__",
++  "__timestamp_micros_since_unix_epoch__",
++  "__uuid__"
++];
++var toTableCacheComparableValue = (value) => {
++  if (value instanceof Uint8Array) {
++    return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
++  }
++  if (value && typeof value === "object") {
++    for (const key of tableCacheComparableBigIntKeys) {
++      const candidate = value[key];
++      if (typeof candidate === "bigint") return candidate;
++    }
++    if (typeof value.toHexString === "function") return value.toHexString();
++  }
++  return value;
++};
+ var scalarCompare = (x, y) => {
+-  if (x === y) return 0;
+-  return x < y ? -1 : 1;
++  const comparableX = toTableCacheComparableValue(x);
++  const comparableY = toTableCacheComparableValue(y);
++  if (comparableX === comparableY) return 0;
++  return comparableX < comparableY ? -1 : 1;
+ };
+ var isRange = (arg) => arg && typeof arg === "object" && "from" in arg && "to" in arg;
+ var inRange = (value, range) => {
+diff --git a/dist/index.cjs b/dist/index.cjs
+index dfdfdda03e64ec00ae400f0c7d571be190e09c6d..ad1c010a7297d57e54a0ebe4cf1d059da11dac86 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -4654,9 +4654,31 @@ var EventEmitter = class {
+ };
+ 
+ // src/sdk/table_cache.ts
++var tableCacheComparableBigIntKeys = [
++  "__connection_id__",
++  "__identity__",
++  "__time_duration_micros__",
++  "__timestamp_micros_since_unix_epoch__",
++  "__uuid__"
++];
++var toTableCacheComparableValue = (value) => {
++  if (value instanceof Uint8Array) {
++    return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
++  }
++  if (value && typeof value === "object") {
++    for (const key of tableCacheComparableBigIntKeys) {
++      const candidate = value[key];
++      if (typeof candidate === "bigint") return candidate;
++    }
++    if (typeof value.toHexString === "function") return value.toHexString();
++  }
++  return value;
++};
+ var scalarCompare = (x, y) => {
+-  if (x === y) return 0;
+-  return x < y ? -1 : 1;
++  const comparableX = toTableCacheComparableValue(x);
++  const comparableY = toTableCacheComparableValue(y);
++  if (comparableX === comparableY) return 0;
++  return comparableX < comparableY ? -1 : 1;
+ };
+ var isRange = (arg) => arg && typeof arg === "object" && "from" in arg && "to" in arg;
+ var inRange = (value, range) => {
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 10656b8a5d451b7fdb9f506d1edcde4baf7c17ac..0322b643eedf5853302e1e93076d3469f89ad750 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -4652,9 +4652,31 @@ var EventEmitter = class {
+ };
+ 
+ // src/sdk/table_cache.ts
++var tableCacheComparableBigIntKeys = [
++  "__connection_id__",
++  "__identity__",
++  "__time_duration_micros__",
++  "__timestamp_micros_since_unix_epoch__",
++  "__uuid__"
++];
++var toTableCacheComparableValue = (value) => {
++  if (value instanceof Uint8Array) {
++    return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
++  }
++  if (value && typeof value === "object") {
++    for (const key of tableCacheComparableBigIntKeys) {
++      const candidate = value[key];
++      if (typeof candidate === "bigint") return candidate;
++    }
++    if (typeof value.toHexString === "function") return value.toHexString();
++  }
++  return value;
++};
+ var scalarCompare = (x, y) => {
+-  if (x === y) return 0;
+-  return x < y ? -1 : 1;
++  const comparableX = toTableCacheComparableValue(x);
++  const comparableY = toTableCacheComparableValue(y);
++  if (comparableX === comparableY) return 0;
++  return comparableX < comparableY ? -1 : 1;
+ };
+ var isRange = (arg) => arg && typeof arg === "object" && "from" in arg && "to" in arg;
+ var inRange = (value, range) => {
+diff --git a/dist/lib/type_util.d.ts b/dist/lib/type_util.d.ts
+index 12fffa7bec8066b6ab64c2f1e49368d9714a0fc7..ae3d84c2afd3048fe9ad6bc75b1f4b194fe52b4f 100644
+--- a/dist/lib/type_util.d.ts
++++ b/dist/lib/type_util.d.ts
+@@ -14,7 +14,7 @@ type Primitive = string | number | boolean | bigint | symbol | null | undefined;
+  * members that no longer satisfies `string`. The outer `object` check keeps a
+  * generic `Prettify<T>` spreadable.
+  */
+-export type Prettify<T> = T extends object ? T extends DoNotPrettify | Primitive ? T : {
++export type Prettify<T> = T extends infer O extends object ? O extends DoNotPrettify | Primitive ? T : {
+     [K in keyof T]: T[K];
+ } & {} : T;
+ /**
+diff --git a/dist/sdk/index.browser.mjs b/dist/sdk/index.browser.mjs
+index c0e0c463dc194467617b3f2152dc9b0968f63810..8a95bbb636487e887b6df75836b3591fee2fe667 100644
+--- a/dist/sdk/index.browser.mjs
++++ b/dist/sdk/index.browser.mjs
+@@ -4507,9 +4507,31 @@ var EventEmitter = class {
+ };
+ 
+ // src/sdk/table_cache.ts
++var tableCacheComparableBigIntKeys = [
++  "__connection_id__",
++  "__identity__",
++  "__time_duration_micros__",
++  "__timestamp_micros_since_unix_epoch__",
++  "__uuid__"
++];
++var toTableCacheComparableValue = (value) => {
++  if (value instanceof Uint8Array) {
++    return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
++  }
++  if (value && typeof value === "object") {
++    for (const key of tableCacheComparableBigIntKeys) {
++      const candidate = value[key];
++      if (typeof candidate === "bigint") return candidate;
++    }
++    if (typeof value.toHexString === "function") return value.toHexString();
++  }
++  return value;
++};
+ var scalarCompare = (x, y) => {
+-  if (x === y) return 0;
+-  return x < y ? -1 : 1;
++  const comparableX = toTableCacheComparableValue(x);
++  const comparableY = toTableCacheComparableValue(y);
++  if (comparableX === comparableY) return 0;
++  return comparableX < comparableY ? -1 : 1;
+ };
+ var isRange = (arg) => arg && typeof arg === "object" && "from" in arg && "to" in arg;
+ var inRange = (value, range) => {
+diff --git a/dist/sdk/index.cjs b/dist/sdk/index.cjs
+index 0bc6d0d077781f6324e8a20619c81385c11658d6..0e07d7a69606ebf85e211730f689c1f8c96ea63e 100644
+--- a/dist/sdk/index.cjs
++++ b/dist/sdk/index.cjs
+@@ -4509,9 +4509,31 @@ var EventEmitter = class {
+ };
+ 
+ // src/sdk/table_cache.ts
++var tableCacheComparableBigIntKeys = [
++  "__connection_id__",
++  "__identity__",
++  "__time_duration_micros__",
++  "__timestamp_micros_since_unix_epoch__",
++  "__uuid__"
++];
++var toTableCacheComparableValue = (value) => {
++  if (value instanceof Uint8Array) {
++    return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
++  }
++  if (value && typeof value === "object") {
++    for (const key of tableCacheComparableBigIntKeys) {
++      const candidate = value[key];
++      if (typeof candidate === "bigint") return candidate;
++    }
++    if (typeof value.toHexString === "function") return value.toHexString();
++  }
++  return value;
++};
+ var scalarCompare = (x, y) => {
+-  if (x === y) return 0;
+-  return x < y ? -1 : 1;
++  const comparableX = toTableCacheComparableValue(x);
++  const comparableY = toTableCacheComparableValue(y);
++  if (comparableX === comparableY) return 0;
++  return comparableX < comparableY ? -1 : 1;
+ };
+ var isRange = (arg) => arg && typeof arg === "object" && "from" in arg && "to" in arg;
+ var inRange = (value, range) => {
+diff --git a/dist/sdk/index.mjs b/dist/sdk/index.mjs
+index 80c89bbf60c1bd86a84b6adfc480cd6eedbe453e..8d756d1e682e354744e1965302e9b367e1081218 100644
+--- a/dist/sdk/index.mjs
++++ b/dist/sdk/index.mjs
+@@ -4507,9 +4507,31 @@ var EventEmitter = class {
+ };
+ 
+ // src/sdk/table_cache.ts
++var tableCacheComparableBigIntKeys = [
++  "__connection_id__",
++  "__identity__",
++  "__time_duration_micros__",
++  "__timestamp_micros_since_unix_epoch__",
++  "__uuid__"
++];
++var toTableCacheComparableValue = (value) => {
++  if (value instanceof Uint8Array) {
++    return Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("");
++  }
++  if (value && typeof value === "object") {
++    for (const key of tableCacheComparableBigIntKeys) {
++      const candidate = value[key];
++      if (typeof candidate === "bigint") return candidate;
++    }
++    if (typeof value.toHexString === "function") return value.toHexString();
++  }
++  return value;
++};
+ var scalarCompare = (x, y) => {
+-  if (x === y) return 0;
+-  return x < y ? -1 : 1;
++  const comparableX = toTableCacheComparableValue(x);
++  const comparableY = toTableCacheComparableValue(y);
++  if (comparableX === comparableY) return 0;
++  return comparableX < comparableY ? -1 : 1;
+ };
+ var isRange = (arg) => arg && typeof arg === "object" && "from" in arg && "to" in arg;
+ var inRange = (value, range) => {
+diff --git a/dist/server/index.mjs b/dist/server/index.mjs
+index f366274f41eeaa44e3a9a1b4431bbb75ede4af54..c97fb602d50a0ada38223afd7204bbae6eed8671 100644
+--- a/dist/server/index.mjs
++++ b/dist/server/index.mjs
+@@ -8214,7 +8214,7 @@ function makeTableView(typespace, table2, backendOrNamePrefix = hostBackend, nam
+     const columnSet = new Set(column_ids);
+     const isUnique = table2.constraints.filter((x) => x.data.tag === "Unique").some((x) => {
+       const constraintColumns = new Set(x.data.value.columns);
+-      return [...columnSet].every((column) => constraintColumns.has(column));
++      return columnSet.size === constraintColumns.size && [...columnSet].every((column) => constraintColumns.has(column));
+     });
+     const isPrimaryKey = isUnique && column_ids.length === table2.primaryKey.length && column_ids.every((id, i) => table2.primaryKey[i] === id);
+     const indexSerializers = column_ids.map(
+diff --git a/dist/server/test-utils/index.mjs b/dist/server/test-utils/index.mjs
+index f725333f2e8f621819667140fff7a65fa4deda67..6892607bae00e190f12a973cea33bcedf86a05ae 100644
+--- a/dist/server/test-utils/index.mjs
++++ b/dist/server/test-utils/index.mjs
+@@ -5533,7 +5533,7 @@ function makeTableView(typespace, table, backendOrNamePrefix = hostBackend, name
+     const columnSet = new Set(column_ids);
+     const isUnique = table.constraints.filter((x) => x.data.tag === "Unique").some((x) => {
+       const constraintColumns = new Set(x.data.value.columns);
+-      return [...columnSet].every((column) => constraintColumns.has(column));
++      return columnSet.size === constraintColumns.size && [...columnSet].every((column) => constraintColumns.has(column));
+     });
+     const isPrimaryKey = isUnique && column_ids.length === table.primaryKey.length && column_ids.every((id, i) => table.primaryKey[i] === id);
+     const indexSerializers = column_ids.map(
+diff --git a/src/lib/type_util.ts b/src/lib/type_util.ts
+index 6c69050811421689e66d6bc6988a0b4e2d2f419d..e7a352318c8e1cea8462d43ad2c57560392d06ad 100644
+--- a/src/lib/type_util.ts
++++ b/src/lib/type_util.ts
+@@ -23,8 +23,8 @@ type Primitive = string | number | boolean | bigint | symbol | null | undefined;
+  * members that no longer satisfies `string`. The outer `object` check keeps a
+  * generic `Prettify<T>` spreadable.
+  */
+-export type Prettify<T> = T extends object
+-  ? T extends DoNotPrettify | Primitive
++export type Prettify<T> = T extends infer O extends object
++  ? O extends DoNotPrettify | Primitive
+     ? T
+     : { [K in keyof T]: T[K] } & {}
+   : T;
+diff --git a/src/sdk/table_cache.ts b/src/sdk/table_cache.ts
+index a7b67e0d7de8f1343efec63833ad35d45d0f965d..f62424bc31b1d8a44ba85515156c529aa0517845 100644
+--- a/src/sdk/table_cache.ts
++++ b/src/sdk/table_cache.ts
+@@ -42,10 +42,36 @@ export type PendingCallback = {
+ };
+ 
+ // Strict scalar compare for index term values.
++const tableCacheComparableBigIntKeys = [
++  '__connection_id__',
++  '__identity__',
++  '__time_duration_micros__',
++  '__timestamp_micros_since_unix_epoch__',
++  '__uuid__',
++] as const;
++
++const toTableCacheComparableValue = (value: any): any => {
++  if (value instanceof Uint8Array) {
++    return Array.from(value, byte =>
++      byte.toString(16).padStart(2, '0')
++    ).join('');
++  }
++  if (value && typeof value === 'object') {
++    for (const key of tableCacheComparableBigIntKeys) {
++      const candidate = value[key];
++      if (typeof candidate === 'bigint') return candidate;
++    }
++    if (typeof value.toHexString === 'function') return value.toHexString();
++  }
++  return value;
++};
++
+ const scalarCompare = (x: any, y: any): number => {
+-  if (x === y) return 0;
++  const comparableX = toTableCacheComparableValue(x);
++  const comparableY = toTableCacheComparableValue(y);
++  if (comparableX === comparableY) return 0;
+   // Compare booleans/numbers/bigints/strings with JS ordering.
+-  return x < y ? -1 : 1;
++  return comparableX < comparableY ? -1 : 1;
+ };
+ 
+ const isRange = (arg: any): arg is Range<any> =>
+diff --git a/src/server/runtime.ts b/src/server/runtime.ts
+index 6caaa58cbb60d92f9cf2c2a29f834d693482476c..1872f1ea8f9bb59d7b41f221cca2b8372fc8bd0b 100644
+--- a/src/server/runtime.ts
++++ b/src/server/runtime.ts
+@@ -1378,7 +1378,10 @@ export function makeTableView(
+       .filter(x => x.data.tag === 'Unique')
+       .some(x => {
+         const constraintColumns = new Set(x.data.value.columns);
+-        return [...columnSet].every(column => constraintColumns.has(column));
++        return (
++          columnSet.size === constraintColumns.size &&
++          [...columnSet].every(column => constraintColumns.has(column))
++        );
+       });
+ 
+     const isPrimaryKey =

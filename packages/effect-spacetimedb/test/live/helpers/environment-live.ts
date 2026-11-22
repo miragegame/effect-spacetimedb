@@ -115,7 +115,7 @@ const execute = (
     ),
   )
 
-const postJson = (
+export const postJson = (
   runtime: PublishedModuleRuntime,
   suffix: string,
   body: string,
@@ -131,8 +131,9 @@ const postJson = (
   )
 }
 
+// A procedure's result: the host's JSON writes `ok` as variant 0 and its value.
 const decodeJsonString = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.String),
+  Schema.fromJsonString(Schema.Tuple([Schema.Literal(0), Schema.String])),
 )
 const encodeStringArgs = Schema.encodeSync(
   Schema.fromJsonString(Schema.Array(Schema.String)),
@@ -166,9 +167,12 @@ export const callProcedure = (
     `/call/${wireFunction(name)}`,
     "[]",
     "application/json",
-  ).pipe(Effect.flatMap(decodeJsonString))
+  ).pipe(
+    Effect.flatMap(decodeJsonString),
+    Effect.map(([, value]) => value),
+  )
 
-const sqlRows = (runtime: PublishedModuleRuntime, query: string) =>
+export const sqlRows = (runtime: PublishedModuleRuntime, query: string) =>
   postJson(runtime, "/sql", query, "text/plain").pipe(
     Effect.flatMap(decodeSqlResults),
     Effect.map((results) => results.flatMap((result) => result.rows)),

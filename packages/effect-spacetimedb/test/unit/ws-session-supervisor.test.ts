@@ -5,12 +5,17 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
+import * as Random from "effect/Random"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as TestClock from "effect/testing/TestClock"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
-import { WsUnsupportedBuilderFeatureError } from "effect-spacetimedb/client"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import {
+  connectDurationMaxDefault,
+  WsUnsupportedBuilderFeatureError,
+  type WsSessionSupervisorPolicy,
+} from "effect-spacetimedb/client"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { Identity } from "spacetimedb"
 import { FullModule, UserId, UserName } from "../fixtures/full-module"
 import { TestLayer } from "../helpers/test-layer"
@@ -19,15 +24,15 @@ import { makeFullModuleWsConnection } from "../helpers/ws-fixtures"
 const { expect } = EffectVitest
 const describe = EffectVitest.layer(TestLayer)
 
-const plan = StdbTesting.makeModulePlan(FullModule)
+const plan = StdbInternal.makeModulePlan(FullModule)
 const uri = "ws://localhost:3000"
 const databaseName = "test"
 
-type FullBuilder = StdbTesting.GeneratedWsBuilderLike<
+type FullBuilder = StdbInternal.GeneratedWsBuilderLike<
   typeof FullModule,
   unknown
 >
-type FullConnection = StdbTesting.ManagedWsConnection<
+type FullConnection = StdbInternal.ManagedWsConnection<
   typeof FullModule,
   unknown
 >
@@ -39,6 +44,19 @@ type PendingSubscription = {
   readonly attempt: number
   readonly apply: () => void
 }
+
+const stabilityPolicy = {
+  reconnectDelayFirst: Duration.millis(100),
+  reconnectDelayMax: { seconds: 1 },
+  reconnectJitter: false,
+  stabilityWindow: Duration.seconds(5),
+}
+
+/** Every draw is `draw`: `0` is jitter's lowest factor, `0.5` multiplies by one. */
+const constantDraw = (draw: number): Random.Random => ({
+  nextDoubleUnsafe: () => draw,
+  nextIntUnsafe: () => 0,
+})
 
 const makeSupervisorHarness = Effect.fn(function* (
   connectFailureAttempts: ReadonlySet<number> = new Set(),
@@ -80,9 +98,9 @@ const makeSupervisorHarness = Effect.fn(function* (
         Queue.offerUnsafe(builds, attempt)
         let onApplied: (() => void) | undefined
         let onError: ((context: unknown, error?: Error) => void) | undefined
-        const subscriptionBuilder: StdbTesting.SubscriptionBuilderLike<
+        const subscriptionBuilder: StdbInternal.SubscriptionBuilderLike<
           unknown,
-          StdbTesting.ClientQueryRoot<typeof FullModule>
+          StdbInternal.ClientQueryRoot<typeof FullModule>
         > = {
           onApplied: (callback) => {
             onApplied = callback
@@ -177,15 +195,46 @@ const makeSupervisorHarness = Effect.fn(function* (
 
 const awaitPhase = <Failure>(
   phase: SubscriptionRef.SubscriptionRef<
-    StdbTesting.WsSessionSupervisorPhase<Failure>
+    StdbInternal.WsSessionSupervisorPhase<Failure>
   >,
-  predicate: (value: StdbTesting.WsSessionSupervisorPhase<Failure>) => boolean,
+  predicate: (value: StdbInternal.WsSessionSupervisorPhase<Failure>) => boolean,
 ) =>
   SubscriptionRef.changes(phase).pipe(
     Stream.filter(predicate),
     Stream.runHead,
     Effect.map(Option.getOrThrow),
   )
+
+/**
+ * The server ends the live session `index + 1`, and its replacement is built
+ * exactly `delayMillis` later, which is what these suites mean by a delay.
+ */
+const expectReplacementAfter =
+  <Failure>(
+    harness: {
+      readonly buildCount: () => number
+      readonly disconnect: (attempt: number, message: string) => void
+    },
+    phase: SubscriptionRef.SubscriptionRef<
+      StdbInternal.WsSessionSupervisorPhase<Failure>
+    >,
+  ) =>
+  (delayMillis: number, index: number) =>
+    Effect.gen(function* () {
+      const attempt = index + 1
+      harness.disconnect(attempt, "server ended the session")
+      yield* awaitPhase(
+        phase,
+        (value) => value.status === "reconnecting" && value.attempt === attempt,
+      )
+      yield* TestClock.adjust(Duration.millis(delayMillis - 1))
+      expect(harness.buildCount()).toBe(attempt)
+      yield* TestClock.adjust(Duration.millis(1))
+      yield* awaitPhase(
+        phase,
+        (value) => value.status === "live" && value.attempt === attempt + 1,
+      )
+    })
 
 /**
  * Gives `globalThis` a page-like event target for the enclosing scope, then
@@ -237,17 +286,17 @@ describe("ws session supervisor", (it) => {
 
       yield* Effect.gen(function* () {
         const supervisor =
-          yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
             plan,
             config: {
               builder: harness.builder,
               uri,
               databaseName,
-              connectTimeoutMillis: 1_000,
+              connectDurationMax: 1_000,
             },
             policy: {
-              reconnectDelayMillisFirst: 100,
-              reconnectDelayMillisMax: 1_000,
+              reconnectDelayFirst: 100,
+              reconnectDelayMax: 1_000,
               reconnectJitter: false,
             },
           })
@@ -278,17 +327,17 @@ describe("ws session supervisor", (it) => {
 
       yield* Effect.gen(function* () {
         const supervisor =
-          yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
             plan,
             config: {
               builder: harness.builder,
               uri,
               databaseName,
-              connectTimeoutMillis: 1_000,
+              connectDurationMax: 1_000,
             },
             policy: {
-              reconnectDelayMillisFirst: 100,
-              reconnectDelayMillisMax: 150,
+              reconnectDelayFirst: 100,
+              reconnectDelayMax: 150,
               reconnectJitter: false,
             },
           })
@@ -329,58 +378,237 @@ describe("ws session supervisor", (it) => {
     }),
   )
 
-  it.effect("uses the first reconnect delay after a live session ends", () =>
+  it.effect(
+    "starts the reconnect delay over once a session outlives the stability window",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeSupervisorHarness(new Set([1, 2]))
+
+        yield* Effect.gen(function* () {
+          const supervisor =
+            yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
+              plan,
+              config: {
+                builder: harness.builder,
+                uri,
+                databaseName,
+                connectDurationMax: 1_000,
+              },
+              policy: stabilityPolicy,
+            })
+
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "reconnecting" && phase.attempt === 1,
+          )
+          yield* TestClock.adjust(Duration.millis(100))
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "reconnecting" && phase.attempt === 2,
+          )
+          yield* TestClock.adjust(Duration.millis(200))
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "live" && phase.attempt === 3,
+          )
+          expect(harness.buildCount()).toBe(3)
+
+          yield* TestClock.adjust(stabilityPolicy.stabilityWindow)
+          harness.disconnect(3, "server rebooted after a stable session")
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "reconnecting" && phase.attempt === 3,
+          )
+
+          yield* TestClock.adjust(Duration.millis(99))
+          expect(harness.buildCount()).toBe(3)
+          yield* TestClock.adjust(Duration.millis(1))
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "live" && phase.attempt === 4,
+          )
+          expect(harness.buildCount()).toBe(4)
+        }).pipe(Effect.scoped)
+      }),
+  )
+
+  it.effect(
+    "keeps the reconnect delay growing past a session just short of the window",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeSupervisorHarness(new Set([1, 2]))
+
+        yield* Effect.gen(function* () {
+          const supervisor =
+            yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
+              plan,
+              config: {
+                builder: harness.builder,
+                uri,
+                databaseName,
+                connectDurationMax: 1_000,
+              },
+              policy: stabilityPolicy,
+            })
+
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "reconnecting" && phase.attempt === 1,
+          )
+          yield* TestClock.adjust(Duration.millis(100))
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "reconnecting" && phase.attempt === 2,
+          )
+          yield* TestClock.adjust(Duration.millis(200))
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "live" && phase.attempt === 3,
+          )
+
+          yield* TestClock.adjust(
+            Duration.subtract(
+              stabilityPolicy.stabilityWindow,
+              Duration.millis(1),
+            ),
+          )
+          harness.disconnect(3, "server dropped the session again")
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "reconnecting" && phase.attempt === 3,
+          )
+
+          // The third delay of the run, not the first of a new one.
+          yield* TestClock.adjust(Duration.millis(399))
+          expect(harness.buildCount()).toBe(3)
+          yield* TestClock.adjust(Duration.millis(1))
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "live" && phase.attempt === 4,
+          )
+        }).pipe(Effect.scoped)
+      }),
+  )
+
+  it.effect(
+    "backs off a server that ends every session as soon as it goes live",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeSupervisorHarness()
+
+        yield* Effect.gen(function* () {
+          const supervisor =
+            yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
+              plan,
+              config: {
+                builder: harness.builder,
+                uri,
+                databaseName,
+                connectDurationMax: 1_000,
+              },
+              policy: stabilityPolicy,
+            })
+
+          yield* awaitPhase(
+            supervisor.phase,
+            (phase) => phase.status === "live" && phase.attempt === 1,
+          )
+          yield* Effect.forEach(
+            [100, 200, 400, 800, 1_000, 1_000],
+            expectReplacementAfter(harness, supervisor.phase),
+            { discard: true },
+          )
+        }).pipe(Effect.scoped)
+      }),
+  )
+
+  it.effect("spreads its jitter below the delay ceiling", () =>
     Effect.gen(function* () {
-      const harness = yield* makeSupervisorHarness(new Set([1, 2]))
+      const harness = yield* makeSupervisorHarness()
 
       yield* Effect.gen(function* () {
         const supervisor =
-          yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
             plan,
             config: {
               builder: harness.builder,
               uri,
               databaseName,
-              connectTimeoutMillis: 1_000,
+              connectDurationMax: 1_000,
             },
-            policy: {
-              reconnectDelayMillisFirst: 100,
-              reconnectDelayMillisMax: 1_000,
-              reconnectJitter: false,
-            },
+            policy: { ...stabilityPolicy, reconnectJitter: true },
           })
 
         yield* awaitPhase(
           supervisor.phase,
-          (phase) => phase.status === "reconnecting" && phase.attempt === 1,
+          (phase) => phase.status === "live" && phase.attempt === 1,
         )
-        yield* TestClock.adjust(Duration.millis(100))
-        yield* awaitPhase(
-          supervisor.phase,
-          (phase) => phase.status === "reconnecting" && phase.attempt === 2,
+        // A middle draw at the ceiling lands short of it: a cap on the drawn delay
+        // would put every draw from here up on exactly the ceiling.
+        yield* Effect.forEach(
+          [100, 200, 400, 800, 834, 834],
+          expectReplacementAfter(harness, supervisor.phase),
+          { discard: true },
         )
-        yield* TestClock.adjust(Duration.millis(200))
-        yield* awaitPhase(
-          supervisor.phase,
-          (phase) => phase.status === "live" && phase.attempt === 3,
-        )
-        expect(harness.buildCount()).toBe(3)
-
-        harness.disconnect(3, "server rebooted after a stable session")
-        yield* awaitPhase(
-          supervisor.phase,
-          (phase) => phase.status === "reconnecting" && phase.attempt === 3,
-        )
-
-        yield* TestClock.adjust(Duration.millis(99))
-        expect(harness.buildCount()).toBe(3)
-        yield* TestClock.adjust(Duration.millis(1))
-        yield* awaitPhase(
-          supervisor.phase,
-          (phase) => phase.status === "live" && phase.attempt === 4,
-        )
-        expect(harness.buildCount()).toBe(4)
       }).pipe(Effect.scoped)
+    }).pipe(Effect.provideService(Random.Random, constantDraw(0.5))),
+  )
+
+  it.effect("keeps a low jitter draw at two thirds of the ceiling", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeSupervisorHarness()
+
+      yield* Effect.gen(function* () {
+        const supervisor =
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
+            plan,
+            config: {
+              builder: harness.builder,
+              uri,
+              databaseName,
+              connectDurationMax: 1_000,
+            },
+            policy: { ...stabilityPolicy, reconnectJitter: true },
+          })
+
+        yield* awaitPhase(
+          supervisor.phase,
+          (phase) => phase.status === "live" && phase.attempt === 1,
+        )
+        yield* Effect.forEach(
+          [80, 160, 320, 640, 667, 667],
+          expectReplacementAfter(harness, supervisor.phase),
+          { discard: true },
+        )
+      }).pipe(Effect.scoped)
+    }).pipe(Effect.provideService(Random.Random, constantDraw(0))),
+  )
+
+  it.effect("refuses a backoff that does not bound anything", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeSupervisorHarness()
+      const supervising =
+        (policy: Omit<WsSessionSupervisorPolicy<unknown>, "isRetryable">) =>
+        () =>
+          StdbInternal.makeWsSessionSupervisorFromModulePlan({
+            plan,
+            config: {
+              builder: harness.builder,
+              uri,
+              databaseName,
+              connectDurationMax: 1_000,
+            },
+            policy,
+          })
+
+      expect(supervising({ stabilityWindow: 0 })).toThrow(TypeError)
+      expect(supervising({ stabilityWindow: -1 })).toThrow(TypeError)
+      expect(supervising({ stabilityWindow: Number.NaN })).toThrow(TypeError)
+      expect(supervising({ stabilityWindow: Infinity })).toThrow(TypeError)
+      expect(supervising({ reconnectDelayMax: Number.NaN })).toThrow(TypeError)
+      expect(supervising({ reconnectDelayFirst: Infinity })).toThrow(TypeError)
+      expect(supervising({ reconnectDelayFirst: -1 })).toThrow(TypeError)
+      expect(harness.buildCount()).toBe(0)
     }),
   )
 
@@ -394,13 +622,13 @@ describe("ws session supervisor", (it) => {
 
         yield* Effect.gen(function* () {
           const supervisor =
-            yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+            yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
               plan,
               config: {
                 builder: harness.builder,
                 uri,
                 databaseName,
-                connectTimeoutMillis: 1_000,
+                connectDurationMax: 1_000,
               },
               subscriptionTargets: [plan.targets.tables.user],
               setup: () =>
@@ -416,8 +644,8 @@ describe("ws session supervisor", (it) => {
                     }),
                 ),
               policy: {
-                reconnectDelayMillisFirst: 100,
-                reconnectDelayMillisMax: 1_000,
+                reconnectDelayFirst: 100,
+                reconnectDelayMax: 1_000,
                 reconnectJitter: false,
               },
             })
@@ -492,18 +720,18 @@ describe("ws session supervisor", (it) => {
           // installs one for its own scope and puts back whatever was there.
           const page = yield* installPageEventTarget
           const supervisor =
-            yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+            yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
               plan,
               config: {
                 builder: harness.builder,
                 uri,
                 databaseName,
-                connectTimeoutMillis: 1_000,
+                connectDurationMax: 1_000,
               },
               subscriptionTargets: [plan.targets.tables.user],
               policy: {
-                reconnectDelayMillisFirst: 100,
-                reconnectDelayMillisMax: 1_000,
+                reconnectDelayFirst: 100,
+                reconnectDelayMax: 1_000,
                 reconnectJitter: false,
               },
             })
@@ -541,18 +769,18 @@ describe("ws session supervisor", (it) => {
 
       yield* Effect.gen(function* () {
         const supervisor =
-          yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
             plan,
             config: {
               builder: harness.builder,
               uri,
               databaseName,
-              connectTimeoutMillis: 1_000,
+              connectDurationMax: 1_000,
             },
             subscriptionTargets: [plan.targets.tables.user],
             policy: {
-              reconnectDelayMillisFirst: 100,
-              reconnectDelayMillisMax: 1_000,
+              reconnectDelayFirst: 100,
+              reconnectDelayMax: 1_000,
               reconnectJitter: false,
             },
           })
@@ -584,18 +812,18 @@ describe("ws session supervisor", (it) => {
 
       yield* Effect.gen(function* () {
         const supervisor =
-          yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
             plan,
             config: {
               builder: harness.builder,
               uri,
               databaseName,
-              connectTimeoutMillis: 100,
+              connectDurationMax: 100,
             },
             setup: () => Effect.never,
             policy: {
-              reconnectDelayMillisFirst: 100,
-              reconnectDelayMillisMax: 1_000,
+              reconnectDelayFirst: 100,
+              reconnectDelayMax: 1_000,
               reconnectJitter: false,
             },
           })
@@ -611,6 +839,33 @@ describe("ws session supervisor", (it) => {
     }),
   )
 
+  it.effect("bounds an activation by the default with no timeout set", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeSupervisorHarness()
+
+      yield* Effect.gen(function* () {
+        const supervisor =
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
+            plan,
+            config: { builder: harness.builder, uri, databaseName },
+            setup: () => Effect.never,
+            policy: {
+              reconnectDelayFirst: 100,
+              reconnectDelayMax: 1_000,
+              reconnectJitter: false,
+            },
+          })
+
+        expect(yield* harness.nextBuild).toBe(1)
+        yield* TestClock.adjust(connectDurationMaxDefault)
+        yield* awaitPhase(
+          supervisor.phase,
+          (phase) => phase.status === "reconnecting" && phase.attempt === 1,
+        )
+      }).pipe(Effect.scoped)
+    }),
+  )
+
   it.effect("retries when the session disconnects during setup", () =>
     Effect.gen(function* () {
       const harness = yield* makeSupervisorHarness()
@@ -618,21 +873,21 @@ describe("ws session supervisor", (it) => {
 
       yield* Effect.gen(function* () {
         const supervisor =
-          yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
             plan,
             config: {
               builder: harness.builder,
               uri,
               databaseName,
-              connectTimeoutMillis: 1_000,
+              connectDurationMax: 1_000,
             },
             setup: () =>
               Deferred.succeed(setupStarted, undefined).pipe(
                 Effect.andThen(Effect.never),
               ),
             policy: {
-              reconnectDelayMillisFirst: 100,
-              reconnectDelayMillisMax: 1_000,
+              reconnectDelayFirst: 100,
+              reconnectDelayMax: 1_000,
               reconnectJitter: false,
             },
           })
@@ -658,21 +913,21 @@ describe("ws session supervisor", (it) => {
 
       yield* Effect.gen(function* () {
         const supervisor =
-          yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
             plan,
             config: {
               builder: harness.builder,
               uri,
               databaseName,
-              connectTimeoutMillis: 1_000,
+              connectDurationMax: 1_000,
             },
             setup: () =>
               Effect.succeed(
                 harness.disconnect(1, "closed as setup completed"),
               ),
             policy: {
-              reconnectDelayMillisFirst: 100,
-              reconnectDelayMillisMax: 1_000,
+              reconnectDelayFirst: 100,
+              reconnectDelayMax: 1_000,
               reconnectJitter: false,
             },
           })
@@ -694,13 +949,13 @@ describe("ws session supervisor", (it) => {
 
       yield* Effect.gen(function* () {
         const supervisor =
-          yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
             plan,
             config: {
               builder: harness.builder,
               uri,
               databaseName,
-              connectTimeoutMillis: 1_000,
+              connectDurationMax: 1_000,
             },
             setup: () => Effect.die("setup defect"),
           })
@@ -713,9 +968,9 @@ describe("ws session supervisor", (it) => {
         expect(fatal.status).toBe("fatal")
         if (fatal.status === "fatal") {
           expect(
-            StdbTesting.WsSessionSupervisorDefectError.is(fatal.failure),
+            StdbInternal.WsSessionSupervisorFatalError.is(fatal.failure),
           ).toBe(true)
-          if (StdbTesting.WsSessionSupervisorDefectError.is(fatal.failure)) {
+          if (StdbInternal.WsSessionSupervisorFatalError.is(fatal.failure)) {
             expect(Cause.hasDies(fatal.failure.cause)).toBe(true)
           }
         }
@@ -730,13 +985,13 @@ describe("ws session supervisor", (it) => {
 
       yield* Effect.gen(function* () {
         const supervisor =
-          yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
             plan,
             config: {
               builder: harness.builder,
               uri,
               databaseName,
-              connectTimeoutMillis: 1_000,
+              connectDurationMax: 1_000,
             },
             policy: {
               isRetryable: () => false,
@@ -760,16 +1015,18 @@ describe("ws session supervisor", (it) => {
       const harness = yield* makeSupervisorHarness()
 
       yield* Effect.gen(function* () {
-        const supervisor = yield* StdbTesting.makeWsSessionSupervisorGenerated({
-          module: FullModule,
-          config: {
-            DbConnection: { builder: harness.builder },
-            uri,
-            databaseName,
-            createWebSocket: () => ({}),
-            connectTimeoutMillis: 1_000,
+        const supervisor = yield* StdbInternal.makeWsSessionSupervisorGenerated(
+          {
+            module: FullModule,
+            config: {
+              DbConnection: { builder: harness.builder },
+              uri,
+              databaseName,
+              createWebSocket: () => ({}),
+              connectDurationMax: 1_000,
+            },
           },
-        })
+        )
 
         const fatal = yield* awaitPhase(
           supervisor.phase,
@@ -778,8 +1035,8 @@ describe("ws session supervisor", (it) => {
         expect(fatal.attempt).toBe(1)
         expect(fatal.status).toBe("fatal")
         if (fatal.status === "fatal") {
-          expect(StdbTesting.WsConnectError.is(fatal.failure)).toBe(true)
-          if (StdbTesting.WsConnectError.is(fatal.failure)) {
+          expect(StdbInternal.WsConnectError.is(fatal.failure)).toBe(true)
+          if (StdbInternal.WsConnectError.is(fatal.failure)) {
             expect(
               WsUnsupportedBuilderFeatureError.is(fatal.failure.cause),
             ).toBe(true)
@@ -796,14 +1053,14 @@ describe("ws session supervisor", (it) => {
 
       yield* Effect.gen(function* () {
         const supervisor =
-          yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
             plan,
             config: {
               builder: harness.builder,
               uri,
               databaseName,
               createWebSocket: () => ({}),
-              connectTimeoutMillis: 1_000,
+              connectDurationMax: 1_000,
             },
             policy: { isRetryable: undefined },
           })
@@ -815,8 +1072,8 @@ describe("ws session supervisor", (it) => {
         expect(fatal.attempt).toBe(1)
         expect(fatal.status).toBe("fatal")
         if (fatal.status === "fatal") {
-          expect(StdbTesting.WsConnectError.is(fatal.failure)).toBe(true)
-          if (StdbTesting.WsConnectError.is(fatal.failure)) {
+          expect(StdbInternal.WsConnectError.is(fatal.failure)).toBe(true)
+          if (StdbInternal.WsConnectError.is(fatal.failure)) {
             expect(
               WsUnsupportedBuilderFeatureError.is(fatal.failure.cause),
             ).toBe(true)
@@ -833,13 +1090,13 @@ describe("ws session supervisor", (it) => {
 
       yield* Effect.gen(function* () {
         const supervisor =
-          yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
             plan,
             config: {
               builder: harness.builder,
               uri,
               databaseName,
-              connectTimeoutMillis: 1_000,
+              connectDurationMax: 1_000,
             },
             policy: {
               isRetryable: () => false,
@@ -873,17 +1130,17 @@ describe("ws session supervisor", (it) => {
 
         yield* Effect.gen(function* () {
           const supervisor =
-            yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+            yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
               plan,
               config: {
                 builder: harness.builder,
                 uri,
                 databaseName,
-                connectTimeoutMillis: 1_000,
+                connectDurationMax: 1_000,
               },
               policy: {
-                reconnectDelayMillisFirst: 100,
-                reconnectDelayMillisMax: 1_000,
+                reconnectDelayFirst: 100,
+                reconnectDelayMax: 1_000,
                 reconnectJitter: false,
               },
             })
@@ -901,11 +1158,11 @@ describe("ws session supervisor", (it) => {
 
           expect(
             reconnecting.status === "reconnecting" &&
-              StdbTesting.ConnectionLostError.is(reconnecting.failure),
+              StdbInternal.ConnectionLostError.is(reconnecting.failure),
           ).toBe(true)
           if (
             reconnecting.status === "reconnecting" &&
-            StdbTesting.ConnectionLostError.is(reconnecting.failure)
+            StdbInternal.ConnectionLostError.is(reconnecting.failure)
           ) {
             expect(reconnecting.failure.raw).toBe(
               "WebSocket connection disconnected",

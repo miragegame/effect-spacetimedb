@@ -15,7 +15,7 @@ import { fixtureConnectTimeoutMillis } from "../helpers/transport-bounds"
 
 const { expect } = EffectVitest
 
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { connectionStateFor } from "../../src/client/connection-state.ts"
 import { FullModule } from "../fixtures/full-module"
 import { TestLayer } from "../helpers/test-layer"
@@ -25,12 +25,12 @@ import {
 } from "../helpers/ws-fixtures"
 
 const describe = EffectVitest.layer(TestLayer)
-const Full = StdbTesting.project(FullModule)
+const Full = StdbInternal.project(FullModule)
 
 const runTableStream = (session: {
   readonly streamTable: (
     key: "user",
-  ) => Stream.Stream<unknown, StdbTesting.SubscriptionFailure, Scope.Scope>
+  ) => Stream.Stream<unknown, StdbInternal.SubscriptionFailure, Scope.Scope>
 }) => session.streamTable("user").pipe(Stream.runForEach(() => Effect.void))
 
 type SdkErrorContext = {
@@ -187,7 +187,7 @@ const makeScopedBuilder = () => {
     withCompression: () => builder,
     onConnect: (
       callback: (
-        connection: StdbTesting.ClientWs.WsConnectionLike<
+        connection: StdbInternal.ClientWs.WsConnectionLike<
           typeof FullModule,
           unknown
         > & {
@@ -215,7 +215,7 @@ const makeScopedBuilder = () => {
       databaseName: "example",
       token: "builder-token",
       compression: "none" as const,
-      connectTimeoutMillis: fixtureConnectTimeoutMillis,
+      connectDurationMax: fixtureConnectTimeoutMillis,
     },
     disconnectCount: () => disconnectCount,
     emitDisconnect: (error?: Error) => {
@@ -245,7 +245,7 @@ describe("ws subscription failures", (it) => {
           }),
         }
 
-        const session = StdbTesting.ClientWs.make({
+        const session = StdbInternal.ClientWs.make({
           module: FullModule,
           connection: {
             db: makeFullModuleWsDb(),
@@ -291,7 +291,7 @@ describe("ws subscription failures", (it) => {
         }),
       }
 
-      const session = StdbTesting.ClientWs.make({
+      const session = StdbInternal.ClientWs.make({
         module: FullModule,
         connection: {
           db: makeFullModuleWsDb(),
@@ -337,7 +337,7 @@ describe("ws subscription failures", (it) => {
         },
       }
 
-      const session = StdbTesting.ClientWs.make({
+      const session = StdbInternal.ClientWs.make({
         module: FullModule,
         connection: {
           db: makeFullModuleWsDb(),
@@ -362,7 +362,7 @@ describe("ws subscription failures", (it) => {
   it.effect("allows future subscriptions after a post-applied rejection", () =>
     Effect.gen(function* () {
       const shared = makeConnection()
-      const session = StdbTesting.ClientWs.make({
+      const session = StdbInternal.ClientWs.make({
         module: FullModule,
         connection: shared.connection,
       })
@@ -378,7 +378,7 @@ describe("ws subscription failures", (it) => {
       if (Exit.isFailure(activeExit)) {
         expect(
           Option.getOrUndefined(Cause.findErrorOption(activeExit.cause)),
-        ).toBeInstanceOf(StdbTesting.SubscriptionRejectedError)
+        ).toBeInstanceOf(StdbInternal.SubscriptionRejectedError)
       }
       expect(session.isInvalidated()).toBe(false)
 
@@ -394,7 +394,7 @@ describe("ws subscription failures", (it) => {
 
   it.effect("fails stream setup when native subscribe throws", () =>
     Effect.gen(function* () {
-      const session = StdbTesting.ClientWs.make({
+      const session = StdbInternal.ClientWs.make({
         module: FullModule,
         connection: {
           db: makeFullModuleWsDb(),
@@ -420,7 +420,7 @@ describe("ws subscription failures", (it) => {
       if (Exit.isFailure(exit)) {
         expect(
           Option.getOrUndefined(Cause.findErrorOption(exit.cause)),
-        ).toBeInstanceOf(StdbTesting.SubscriptionTransportError)
+        ).toBeInstanceOf(StdbInternal.SubscriptionTransportError)
       }
     }),
   )
@@ -453,7 +453,7 @@ describe("ws subscription failures", (it) => {
             unsubscribe: () => undefined,
           }),
         }
-        const session = StdbTesting.ClientWs.make({
+        const session = StdbInternal.ClientWs.make({
           module: FullModule,
           connection: {
             db: makeFullModuleWsDb({
@@ -480,8 +480,8 @@ describe("ws subscription failures", (it) => {
             Cause.findErrorOption,
             Option.getOrUndefined,
           )
-          expect(failure).toBeInstanceOf(StdbTesting.StdbDecodeError)
-          if (failure instanceof StdbTesting.StdbDecodeError) {
+          expect(failure).toBeInstanceOf(StdbInternal.StdbDecodeError)
+          if (failure instanceof StdbInternal.StdbDecodeError) {
             expect(failure.table).toBe("user")
             expect(failure.phase).toBe("row")
           }
@@ -494,7 +494,7 @@ describe("ws subscription failures", (it) => {
     () =>
       Effect.gen(function* () {
         const shared = makeConnection()
-        const session = StdbTesting.ClientWs.make({
+        const session = StdbInternal.ClientWs.make({
           module: FullModule,
           connection: shared.connection,
         })
@@ -570,7 +570,8 @@ describe("ws subscription failures", (it) => {
         )
 
         expect(Exit.isSuccess(exit)).toBe(true)
-        expect(scoped.disconnectCount()).toBe(0)
+        // An ended connection is still closed once, which the SDK treats as a no-op.
+        expect(scoped.disconnectCount()).toBe(1)
       }),
   )
 
@@ -595,11 +596,11 @@ describe("ws subscription failures", (it) => {
     () =>
       Effect.gen(function* () {
         const shared = makeConnection()
-        const left = StdbTesting.ClientWs.make({
+        const left = StdbInternal.ClientWs.make({
           module: FullModule,
           connection: shared.connection,
         })
-        const right = StdbTesting.ClientWs.make({
+        const right = StdbInternal.ClientWs.make({
           module: FullModule,
           connection: shared.connection,
         })
@@ -635,7 +636,7 @@ describe("ws subscription failures", (it) => {
         if (Exit.isFailure(leftExit)) {
           expect(
             Option.getOrUndefined(Cause.findErrorOption(leftExit.cause)),
-          ).toBeInstanceOf(StdbTesting.SubscriptionRejectedError)
+          ).toBeInstanceOf(StdbInternal.SubscriptionRejectedError)
         }
         shared.emitUserInsert("user-1", "Ada")
         const rightChange = yield* Fiber.join(rightFiber)

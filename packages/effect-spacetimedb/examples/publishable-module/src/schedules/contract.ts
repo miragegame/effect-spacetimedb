@@ -1,57 +1,57 @@
 import * as Stdb from "effect-spacetimedb"
-import { procedureSchedule, reducerSchedule, String255 } from "../schema"
+import { procedureSchedule, reducerSchedule } from "../schema"
 
-export const ScheduleFunctions = Stdb.StdbGroup.make("Schedules")
+export const ScheduleFunctions = Stdb.Group.make("Schedules")
   .add(
-    Stdb.StdbFn.reducer("scheduleReducerNote", {
+    Stdb.Fn.reducer("scheduleReducerNote", {
       params: Stdb.struct({
-        note: String255,
+        note: Stdb.string(),
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("scheduleProcedureNote", {
+    Stdb.Fn.reducer("scheduleProcedureNote", {
       params: Stdb.struct({
-        note: String255,
+        note: Stdb.string(),
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("scheduleIntervalReducerNote", {
+    Stdb.Fn.reducer("scheduleIntervalReducerNote", {
       params: Stdb.struct({
-        note: String255,
+        note: Stdb.string(),
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("scheduleTooFar", {
+    Stdb.Fn.reducer("scheduleTooFar", {
       params: Stdb.struct({
-        note: String255,
+        note: Stdb.string(),
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("scheduleDeleteCandidate", {
+    Stdb.Fn.reducer("scheduleDeleteCandidate", {
       params: Stdb.struct({
-        note: String255,
+        note: Stdb.string(),
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("replaceScheduledReducerNote", {
+    Stdb.Fn.reducer("replaceScheduledReducerNote", {
       params: Stdb.struct({
-        existingNote: String255,
-        replacementNote: String255,
+        existingNote: Stdb.string(),
+        replacementNote: Stdb.string(),
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.scheduledReducer("reminderFireReducer", {
+    Stdb.Fn.scheduledReducer("reminderFireReducer", {
       table: reducerSchedule,
     }),
   )
   .add(
-    Stdb.StdbFn.scheduledProcedure("reminderFireProcedure", {
+    Stdb.Fn.scheduledProcedure("reminderFireProcedure", {
       table: procedureSchedule,
     }),
   )

@@ -1,10 +1,10 @@
 import * as Effect from "effect/Effect"
+import type * as Scope from "effect/Scope"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import type { AnyTableSpec } from "../contract/table.ts"
-import type { StdbDecodeError } from "../decode-error.ts"
 import type { ModuleAccessors } from "../builder/declarations.ts"
 import * as ServerContext from "./context.ts"
-import type { DbHandleFor, StdbHostFailure } from "./services.ts"
+import type { DbHandleFor, HostFailure } from "./services.ts"
 
 export type FragmentTxCtx = Pick<
   ServerContext.MutationCtxService<AnyModuleSpec>,
@@ -38,6 +38,10 @@ export type ScopedDbTxEffectWithoutServerRequirements<
   ? EffectType
   : never
 
+/**
+ * Runs a transaction fragment. The fragment owns its `Scope`, which closes before
+ * the transaction does, however the fragment reached the transaction.
+ */
 export type ScopedDbTx<
   Tables extends Record<string, AnyTableSpec>,
   E0 = never,
@@ -48,14 +52,14 @@ export type ScopedDbTx<
     readonly ctx: FragmentTxCtx
   }) => ScopedDbTxEffectWithoutScopedSuccess<Tables, Effect.Effect<A, E, R>> &
     ScopedDbTxEffectWithoutServerRequirements<Effect.Effect<A, E, R>>,
-) => Effect.Effect<A, E | E0, R | R0>
+) => Effect.Effect<A, E | E0, Exclude<R, Scope.Scope> | R0>
 
-type ScopedDbTxModule<Module extends AnyModuleSpec> = Pick<
+export type ScopedDbTxModule<Module extends AnyModuleSpec> = Pick<
   ModuleAccessors<Module>,
   "Db" | "MutationCtx" | "withTx"
 >
 
-type ScopedDbTxTablesMatchModule<
+export type ScopedDbTxTablesMatchModule<
   Module extends AnyModuleSpec,
   Tables extends Record<string, AnyTableSpec>,
 > = Module["tables"] extends Tables
@@ -81,7 +85,7 @@ export const scopedDbTx =
       ScopedDbTxTablesMatchModule<Module, Tables>,
   ): ScopedDbTx<
     Tables,
-    StdbHostFailure | StdbDecodeError,
+    HostFailure,
     ServerContext.ModuleScopedRequirement<Module, ServerContext.TxRunner>
   > =>
   <A, E, R>(
@@ -111,10 +115,13 @@ export const scopedDbTx =
       >
     const run = module.withTx(constrained)
 
+    // The same boundary: `withTx` takes the body's `Scope` away, which a generic
+    // `R` cannot show.
     return run as Effect.Effect<
       A,
-      E | StdbHostFailure | StdbDecodeError,
-      R | ServerContext.ModuleScopedRequirement<Module, ServerContext.TxRunner>
+      E | HostFailure,
+      | Exclude<R, Scope.Scope>
+      | ServerContext.ModuleScopedRequirement<Module, ServerContext.TxRunner>
     >
   }
 
@@ -130,4 +137,4 @@ export const scopedDbTxFromCtx =
     }) => ScopedDbTxEffectWithoutScopedSuccess<Tables, Effect.Effect<A, E, R>> &
       ScopedDbTxEffectWithoutServerRequirements<Effect.Effect<A, E, R>>,
   ) =>
-    body(scope)
+    body(scope).pipe(Effect.scoped)

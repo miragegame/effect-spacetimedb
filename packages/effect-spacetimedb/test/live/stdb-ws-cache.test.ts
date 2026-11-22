@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
@@ -24,6 +25,40 @@ import {
 } from "./helpers/live-harness"
 
 describe("effect-spacetimedb live ws cache", () => {
+  live(
+    "streams an initial subscription larger than 1,024 rows without losing inserts",
+    () =>
+      provideLiveTest(
+        Effect.gen(function* () {
+          const { session, connection } = yield* makeExampleSession
+          const ids = Array.from({ length: 1026 }, (_, index) =>
+            decodeUserId(`initial-${index}`),
+          )
+          yield* Effect.forEach(
+            ids,
+            (userId) =>
+              callLiveReducer(connection, wireFunction("userUpsert"), {
+                userId,
+                name: decodeUserName("Ada"),
+              }),
+            { concurrency: 16, discard: true },
+          )
+          const changes = yield* session
+            .streamTable("user")
+            .pipe(Stream.take(ids.length), Stream.runCollect)
+          expect(
+            changes
+              .map((change) =>
+                Predicate.isTagged(change, "Insert")
+                  ? change.row.id
+                  : undefined,
+              )
+              .sort(),
+          ).toEqual(ids.sort())
+        }),
+      ),
+    { timeout: LIVE_TEST_TIMEOUT_MS },
+  )
   live(
     "keeps row ownership on the connection cache and populates it only after subscription",
     () =>

@@ -5,10 +5,10 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as EffectVitest from "@effect/vitest"
 const { expect } = EffectVitest
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import {
-  ReducerAsyncNotAllowedError,
-  ReducerWallClockNotAllowedError,
+  HandlerAsyncNotAllowedDefect,
+  HandlerWallClockNotAllowedDefect,
 } from "effect-spacetimedb/server"
 import { TestLayer } from "../helpers/test-layer"
 
@@ -46,7 +46,7 @@ const withMathRandomDescriptor = <A, E, R>(
 
 const assertServerPolyfilledMathRandom = Effect.try({
   try: () => {
-    StdbTesting.ensureServerPolyfills()
+    StdbInternal.ensureServerPolyfills()
     const value = Math.random()
 
     expect(value).toBeGreaterThanOrEqual(0)
@@ -127,7 +127,7 @@ describe("compat", (it) => {
             expect(() => new TextDecoder("utf-8", { ignoreBOM: true })).toThrow(
               "ignoreBOM",
             )
-            StdbTesting.ensureServerPolyfills()
+            StdbInternal.ensureServerPolyfills()
 
             const keeping = new TextDecoder("utf-8", { ignoreBOM: true })
             expect(keeping.ignoreBOM).toBe(true)
@@ -315,7 +315,7 @@ describe("compat", (it) => {
         const originalSetImmediate = globalThis.setImmediate
 
         const exit = yield* Effect.exit(
-          StdbTesting.provideConstrainedServerSupport(
+          StdbInternal.provideConstrainedServerSupport(
             Effect.try({
               try: () => {
                 const guardedSetTimeout = globalThis as typeof globalThis & {
@@ -324,10 +324,10 @@ describe("compat", (it) => {
                 }
                 expect(() =>
                   guardedSetTimeout.setTimeout(() => undefined, 0),
-                ).toThrow(ReducerAsyncNotAllowedError)
+                ).toThrow(HandlerAsyncNotAllowedDefect)
                 expect(() =>
                   guardedSetTimeout.setImmediate(() => undefined),
-                ).toThrow(ReducerAsyncNotAllowedError)
+                ).toThrow(HandlerAsyncNotAllowedDefect)
               },
               catch: testEffectCallbackError("effect-spacetimedb/unit/compat"),
             }),
@@ -348,12 +348,12 @@ describe("compat", (it) => {
         const originalDate = globalThis.Date
         const originalDateNow = globalThis.Date.now
 
-        yield* StdbTesting.provideConstrainedServerSupport(
+        yield* StdbInternal.provideConstrainedServerSupport(
           Effect.try({
             try: () => {
               expect(Date.now).not.toBe(originalDateNow)
-              expect(() => Date.now()).toThrow(ReducerWallClockNotAllowedError)
-              expect(() => new Date()).toThrow(ReducerWallClockNotAllowedError)
+              expect(() => Date.now()).toThrow(HandlerWallClockNotAllowedDefect)
+              expect(() => new Date()).toThrow(HandlerWallClockNotAllowedDefect)
 
               const dateFromNumber = new Date(123)
               expect(dateFromNumber.getTime()).toBe(123)
@@ -377,7 +377,7 @@ describe("compat", (it) => {
         expect(globalThis.Date).toBe(originalDate)
         expect(globalThis.Date.now).toBe(originalDateNow)
 
-        yield* StdbTesting.provideConstrainedServerSupport(
+        yield* StdbInternal.provideConstrainedServerSupport(
           Effect.try({
             try: () => {
               expect(globalThis.Date).toBe(originalDate)
@@ -422,14 +422,14 @@ describe("compat", (it) => {
           setGlobalDate(realDate),
         ).pipe(
           Effect.andThen(
-            StdbTesting.provideConstrainedServerSupport(
+            StdbInternal.provideConstrainedServerSupport(
               Effect.try({
                 try: () => {
                   expect(() => Date.now()).toThrow(
-                    ReducerWallClockNotAllowedError,
+                    HandlerWallClockNotAllowedDefect,
                   )
                   expect(() => new Date()).toThrow(
-                    ReducerWallClockNotAllowedError,
+                    HandlerWallClockNotAllowedDefect,
                   )
                 },
                 catch: testEffectCallbackError(
@@ -467,7 +467,7 @@ describe("compat", (it) => {
           ready: Deferred.Deferred<void>,
           release: Deferred.Deferred<void>,
         ) =>
-          StdbTesting.provideConstrainedServerSupport(
+          StdbInternal.provideConstrainedServerSupport(
             Effect.gen(function* () {
               yield* Deferred.succeed(ready, undefined)
               yield* Deferred.await(release)

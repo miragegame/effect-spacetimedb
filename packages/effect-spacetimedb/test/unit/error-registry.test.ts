@@ -10,7 +10,7 @@ const { expect } = EffectVitest
 
 import * as Stdb from "effect-spacetimedb"
 import { StdbDecodeError } from "effect-spacetimedb/server"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { ExampleErrors, UserId, UserMissing } from "../fixtures/full-module"
 import { encodeJson } from "../helpers/json"
 import { transform } from "../helpers/schema-transform"
@@ -119,11 +119,11 @@ describe("error codec", (it) => {
       })
       expect(NamespacedErrors.tags.has("NamespacedUserMissing")).toBe(true)
 
-      const encoded = yield* StdbTesting.ContractError.encodeString(
+      const encoded = yield* StdbInternal.ContractError.encodeString(
         NamespacedErrors,
         error,
       )
-      const decoded = yield* StdbTesting.ContractError.decodeString(
+      const decoded = yield* StdbInternal.ContractError.decodeString(
         NamespacedErrors,
         encoded,
       )
@@ -141,23 +141,26 @@ describe("error codec", (it) => {
     "normalizes array declared-error inputs like merged definitions",
     () =>
       Effect.gen(function* () {
-        const ErrorsFirst = StdbTesting.ContractError.errors(
+        const ErrorsFirst = StdbInternal.ContractError.errors(
           MergeFirstError,
           MergeSharedError,
         )
-        const ErrorsSecond = StdbTesting.ContractError.errors(
+        const ErrorsSecond = StdbInternal.ContractError.errors(
           MergeSharedError,
           MergeSecondError,
         )
 
         expect(
-          StdbTesting.ContractError.normalizeErrorsInput(ErrorsFirst),
+          StdbInternal.ContractError.normalizeErrorsInput(ErrorsFirst),
         ).toBe(ErrorsFirst)
 
-        const NormalizedErrors = StdbTesting.ContractError.normalizeErrorsInput(
-          [ErrorsFirst, ErrorsSecond, MergeSecondError],
-        )
-        const MergedErrors = StdbTesting.ContractError.merge(
+        const NormalizedErrors =
+          StdbInternal.ContractError.normalizeErrorsInput([
+            ErrorsFirst,
+            ErrorsSecond,
+            MergeSecondError,
+          ])
+        const MergedErrors = StdbInternal.ContractError.merge(
           ErrorsFirst,
           ErrorsSecond,
         )
@@ -181,13 +184,13 @@ describe("error codec", (it) => {
       ) {}
 
       expect(() =>
-        StdbTesting.ContractError.normalizeErrorsInput([
+        StdbInternal.ContractError.normalizeErrorsInput([
           MergeFirstError,
           MergeFirstDuplicate,
         ]),
       ).toThrow(/duplicate error tag/i)
       expect(() =>
-        StdbTesting.ContractError.normalizeErrorsInput([RemoteRejectedError]),
+        StdbInternal.ContractError.normalizeErrorsInput([RemoteRejectedError]),
       ).toThrow(/reserved wrapper error tag/i)
     }),
   )
@@ -217,14 +220,14 @@ describe("error codec", (it) => {
         })
 
         expect(StatusErrors.Missing.httpStatus).toBe(404)
-        expect(StdbTesting.ContractError.statusOf(StatusErrors.Missing)).toBe(
+        expect(StdbInternal.ContractError.statusOf(StatusErrors.Missing)).toBe(
           404,
         )
         expect(
-          StdbTesting.ContractError.statusOf(StatusErrors.Conflict),
+          StdbInternal.ContractError.statusOf(StatusErrors.Conflict),
         ).toBeUndefined()
-        expect(StdbTesting.ContractError.statusOf(AnnotatedStatus)).toBe(418)
-        expect(StdbTesting.ContractError.statusOf(StaticStatus)).toBe(451)
+        expect(StdbInternal.ContractError.statusOf(AnnotatedStatus)).toBe(418)
+        expect(StdbInternal.ContractError.statusOf(StaticStatus)).toBe(451)
       }),
   )
 
@@ -240,10 +243,10 @@ describe("error codec", (it) => {
       expect(
         Object.getOwnPropertyDescriptor(IdentifierOnlyError, "_tag"),
       ).toBeUndefined()
-      expect(StdbTesting.ContractError.tagOf(IdentifierOnlyError)).toBe(
+      expect(StdbInternal.ContractError.tagOf(IdentifierOnlyError)).toBe(
         "IdentifierOnlyError",
       )
-      expect(StdbTesting.ContractError.tagOf(IdentifierOnlyError)).toBe(
+      expect(StdbInternal.ContractError.tagOf(IdentifierOnlyError)).toBe(
         "IdentifierOnlyError",
       )
       expect(
@@ -251,8 +254,8 @@ describe("error codec", (it) => {
       ).toBeUndefined()
 
       const IdentifierErrors =
-        StdbTesting.ContractError.errors(IdentifierOnlyError)
-      const matched = yield* StdbTesting.ContractError.matchEffect(
+        StdbInternal.ContractError.errors(IdentifierOnlyError)
+      const matched = yield* StdbInternal.ContractError.matchEffect(
         IdentifierErrors,
         IdentifierOnlyError.make({ code: "E_IDENTIFIER" }),
       )
@@ -278,7 +281,7 @@ describe("error codec", (it) => {
     () =>
       Effect.gen(function* () {
         const error = UserMissing.make({ userId: "user_1" as never })
-        const matched = yield* StdbTesting.ContractError.matchEffect(
+        const matched = yield* StdbInternal.ContractError.matchEffect(
           ExampleErrors,
           error,
         )
@@ -315,7 +318,7 @@ describe("error codec", (it) => {
 
   it.effect("round-trips declared reducer error strings", () =>
     Effect.gen(function* () {
-      const encoded = yield* StdbTesting.ContractError.encodeString(
+      const encoded = yield* StdbInternal.ContractError.encodeString(
         ExampleErrors,
         UserMissing.make({ userId: "user_1" as never }),
       )
@@ -334,7 +337,7 @@ describe("error codec", (it) => {
         },
       })
 
-      const decoded = yield* StdbTesting.ContractError.decodeString(
+      const decoded = yield* StdbInternal.ContractError.decodeString(
         ExampleErrors,
         encoded,
       )
@@ -358,11 +361,11 @@ describe("error codec", (it) => {
           }),
         })
 
-        const encoded = yield* StdbTesting.ContractError.encodeString(
+        const encoded = yield* StdbInternal.ContractError.encodeString(
           TokenErrors,
           TokenErrors.TokenRejected.make({ token: "abc" }),
         )
-        const decoded = yield* StdbTesting.ContractError.decodeString(
+        const decoded = yield* StdbInternal.ContractError.decodeString(
           TokenErrors,
           encoded,
         )
@@ -381,7 +384,7 @@ describe("error codec", (it) => {
           },
         })
         const exit = yield* Effect.exit(
-          StdbTesting.ContractError.decodeString(TokenErrors, invalidEnvelope),
+          StdbInternal.ContractError.decodeString(TokenErrors, invalidEnvelope),
         )
 
         expect(Exit.isFailure(exit)).toBe(true)
@@ -401,7 +404,7 @@ describe("error codec", (it) => {
         })
 
         const exit = yield* Effect.exit(
-          StdbTesting.ContractError.decodeString(ExampleErrors, legacyEncoded),
+          StdbInternal.ContractError.decodeString(ExampleErrors, legacyEncoded),
         )
 
         expect(Exit.isFailure(exit)).toBe(true)
@@ -422,7 +425,7 @@ describe("error codec", (it) => {
       })
 
       const exit = yield* Effect.exit(
-        StdbTesting.ContractError.decodeString(ExampleErrors, encoded),
+        StdbInternal.ContractError.decodeString(ExampleErrors, encoded),
       )
 
       expect(Exit.isFailure(exit)).toBe(true)
@@ -449,10 +452,10 @@ describe("error codec", (it) => {
         tags: new Set(["EncodedTagDropped"]),
         schema: DroppedTagSchema,
         type: ErrorString,
-      } as StdbTesting.ContractError.AnyErrorDefinition
+      } as StdbInternal.ContractError.AnyErrorDefinition
 
       const exit = yield* Effect.exit(
-        StdbTesting.ContractError.encodeString(
+        StdbInternal.ContractError.encodeString(
           DroppedTagErrors,
           EncodedTagDropped.make({ code: "missing-tag" }),
         ),
@@ -483,10 +486,10 @@ describe("error codec", (it) => {
         tags: new Set(["EncodedTagMismatch"]),
         schema: MismatchedTagSchema,
         type: ErrorString,
-      } as StdbTesting.ContractError.AnyErrorDefinition
+      } as StdbInternal.ContractError.AnyErrorDefinition
 
       const exit = yield* Effect.exit(
-        StdbTesting.ContractError.encodeString(
+        StdbInternal.ContractError.encodeString(
           MismatchedTagErrors,
           EncodedTagMismatch.make({ code: "wrong-tag" }),
         ),
@@ -522,8 +525,8 @@ describe("error codec", (it) => {
         {},
       ) {}
 
-      class StdbDeclaredErrorEncodingFailure extends Schema.TaggedError<StdbDeclaredErrorEncodingFailure>()(
-        "StdbDeclaredErrorEncodingFailure",
+      class StdbDeclaredErrorEncodingError extends Schema.TaggedError<StdbDeclaredErrorEncodingError>()(
+        "StdbDeclaredErrorEncodingError",
         {},
       ) {}
 
@@ -552,8 +555,8 @@ describe("error codec", (it) => {
         {},
       ) {}
 
-      class ReducerGlobalRandomNotAllowedError extends Schema.TaggedError<ReducerGlobalRandomNotAllowedError>()(
-        "ReducerGlobalRandomNotAllowedError",
+      class HandlerGlobalRandomNotAllowedDefect extends Schema.TaggedError<HandlerGlobalRandomNotAllowedDefect>()(
+        "HandlerGlobalRandomNotAllowedDefect",
         {},
       ) {}
 
@@ -563,34 +566,34 @@ describe("error codec", (it) => {
       ) {}
 
       expect(() =>
-        StdbTesting.ContractError.errors(DuplicateTagA, DuplicateTagB),
+        StdbInternal.ContractError.errors(DuplicateTagA, DuplicateTagB),
       ).toThrow(/duplicate error tag/i)
       expect(() =>
-        StdbTesting.ContractError.errors(RemoteRejectedError),
+        StdbInternal.ContractError.errors(RemoteRejectedError),
       ).toThrow(/reserved/i)
       expect(() =>
-        StdbTesting.ContractError.errors(StdbDeclaredErrorEncodingFailure),
+        StdbInternal.ContractError.errors(StdbDeclaredErrorEncodingError),
       ).toThrow(/reserved/i)
       expect(() =>
-        StdbTesting.ContractError.errors(StdbUniqueAlreadyExistsError),
+        StdbInternal.ContractError.errors(StdbUniqueAlreadyExistsError),
       ).toThrow(/reserved/i)
       expect(() =>
-        StdbTesting.ContractError.errors(StdbAutoIncOverflowError),
+        StdbInternal.ContractError.errors(StdbAutoIncOverflowError),
       ).toThrow(/reserved/i)
       expect(() =>
-        StdbTesting.ContractError.errors(StdbNoSuchRowError),
+        StdbInternal.ContractError.errors(StdbNoSuchRowError),
       ).toThrow(/reserved/i)
       expect(() =>
-        StdbTesting.ContractError.errors(StdbScheduleDelayTooLongError),
+        StdbInternal.ContractError.errors(StdbScheduleDelayTooLongError),
       ).toThrow(/reserved/i)
       expect(() =>
-        StdbTesting.ContractError.errors(StdbValueCodecError),
+        StdbInternal.ContractError.errors(StdbValueCodecError),
       ).toThrow(/reserved/i)
       expect(() =>
-        StdbTesting.ContractError.errors(ReducerGlobalRandomNotAllowedError),
+        StdbInternal.ContractError.errors(HandlerGlobalRandomNotAllowedDefect),
       ).toThrow(/reserved/i)
       expect(() =>
-        StdbTesting.ContractError.errors(GeneratedArtifactShapeError),
+        StdbInternal.ContractError.errors(GeneratedArtifactShapeError),
       ).toThrow(/reserved/i)
     }),
   )
@@ -617,24 +620,25 @@ describe("error codec", (it) => {
           return SharedDeclared
         })()
 
-        const ErrorsFirst = StdbTesting.ContractError.errors(SharedDeclaredOne)
-        const ErrorsSecond = StdbTesting.ContractError.errors(SharedDeclaredTwo)
+        const ErrorsFirst = StdbInternal.ContractError.errors(SharedDeclaredOne)
+        const ErrorsSecond =
+          StdbInternal.ContractError.errors(SharedDeclaredTwo)
 
         expect(() =>
-          StdbTesting.ContractError.merge(ErrorsFirst, ErrorsSecond),
+          StdbInternal.ContractError.merge(ErrorsFirst, ErrorsSecond),
         ).toThrow(/duplicate error tag/i)
         expect(
           () =>
-            Stdb.StdbModule.make("duplicate_declaredError_mapping", {}).add(
-              Stdb.StdbGroup.make("DuplicateDeclaredErrors")
+            Stdb.Module.make("duplicate_declaredError_mapping", {}).add(
+              Stdb.Group.make("DuplicateDeclaredErrors")
                 .add(
-                  Stdb.StdbFn.reducer("first", {
+                  Stdb.Fn.reducer("first", {
                     params: Stdb.struct({}),
                     errors: ErrorsFirst,
                   }),
                 )
                 .add(
-                  Stdb.StdbFn.procedure("second", {
+                  Stdb.Fn.procedure("second", {
                     params: Stdb.struct({}),
                     returns: Stdb.unit(),
                     errors: ErrorsSecond,
@@ -649,26 +653,26 @@ describe("error codec", (it) => {
     "merges declared-error definitions with shared classes by identity",
     () =>
       Effect.gen(function* () {
-        const ErrorsFirst = StdbTesting.ContractError.errors(
+        const ErrorsFirst = StdbInternal.ContractError.errors(
           MergeFirstError,
           MergeSharedError,
         )
-        const ErrorsSecond = StdbTesting.ContractError.errors(
+        const ErrorsSecond = StdbInternal.ContractError.errors(
           MergeSharedError,
           MergeSecondError,
         )
-        const MergedErrors = StdbTesting.ContractError.merge(
+        const MergedErrors = StdbInternal.ContractError.merge(
           ErrorsFirst,
           ErrorsSecond,
         )
-        const HandSpreadErrors = StdbTesting.ContractError.errors(
+        const HandSpreadErrors = StdbInternal.ContractError.errors(
           MergeFirstError,
           MergeSharedError,
           MergeSecondError,
         )
 
         expect(() =>
-          StdbTesting.ContractError.errors(
+          StdbInternal.ContractError.errors(
             MergeFirstError,
             MergeSharedError,
             MergeSharedError,
@@ -678,11 +682,11 @@ describe("error codec", (it) => {
         expect(MergedErrors.errors).toEqual(HandSpreadErrors.errors)
         expect([...MergedErrors.tags]).toEqual([...HandSpreadErrors.tags])
 
-        const encoded = yield* StdbTesting.ContractError.encodeString(
+        const encoded = yield* StdbInternal.ContractError.encodeString(
           MergedErrors,
           MergeSecondError.make({}),
         )
-        const decoded = yield* StdbTesting.ContractError.decodeString(
+        const decoded = yield* StdbInternal.ContractError.decodeString(
           MergedErrors,
           encoded,
         )
@@ -696,7 +700,7 @@ describe("error codec", (it) => {
 
   it.effect("supports typed declared-error picks from a shared registry", () =>
     Effect.gen(function* () {
-      const RuntimePayloadErrors = StdbTesting.ContractError.errors(
+      const RuntimePayloadErrors = StdbInternal.ContractError.errors(
         NumericError,
         JsonBigIntError,
       )
@@ -705,11 +709,11 @@ describe("error codec", (it) => {
 
       expect([...NumericOnly.tags]).toEqual(["NumericError"])
 
-      const encoded = yield* StdbTesting.ContractError.encodeString(
+      const encoded = yield* StdbInternal.ContractError.encodeString(
         NumericOnly,
         error,
       )
-      const decoded = yield* StdbTesting.ContractError.decodeString(
+      const decoded = yield* StdbInternal.ContractError.decodeString(
         NumericOnly,
         encoded,
       )
@@ -726,11 +730,11 @@ describe("error codec", (it) => {
     "does not invoke inherited prototype members as domain handlers",
     () =>
       Effect.gen(function* () {
-        const PrototypeTagErrors = StdbTesting.ContractError.errors(toString)
+        const PrototypeTagErrors = StdbInternal.ContractError.errors(toString)
         const error = toString.make({})
-        const exit = yield* new StdbTesting.DomainCallError({ error }).pipe(
+        const exit = yield* new StdbInternal.DomainCallError({ error }).pipe(
           Effect.fail,
-          StdbTesting.catchRawTags(PrototypeTagErrors, {}),
+          StdbInternal.catchRawTags(PrototypeTagErrors, {}),
           Effect.exit,
         )
 
@@ -740,8 +744,8 @@ describe("error codec", (it) => {
             Cause.findErrorOption,
             Option.getOrUndefined,
           )
-          expect(failure).toBeInstanceOf(StdbTesting.DomainCallError)
-          if (failure instanceof StdbTesting.DomainCallError) {
+          expect(failure).toBeInstanceOf(StdbInternal.DomainCallError)
+          if (failure instanceof StdbInternal.DomainCallError) {
             expect(failure.error).toBe(error)
           }
         }
@@ -752,8 +756,8 @@ describe("error codec", (it) => {
     "supports numeric and JSON-safe bigint declared error payloads",
     () =>
       Effect.gen(function* () {
-        const NumericErrors = StdbTesting.ContractError.errors(NumericError)
-        const BigIntErrors = StdbTesting.ContractError.errors(JsonBigIntError)
+        const NumericErrors = StdbInternal.ContractError.errors(NumericError)
+        const BigIntErrors = StdbInternal.ContractError.errors(JsonBigIntError)
 
         expect(
           Schema.encodeSync(NumericErrors.schema)(
@@ -784,12 +788,12 @@ describe("error codec", (it) => {
           value: 42n,
         })
 
-        const encodedString = yield* StdbTesting.ContractError.encodeString(
+        const encodedString = yield* StdbInternal.ContractError.encodeString(
           BigIntErrors,
           JsonBigIntError.make({ value: 42n as never }),
         )
 
-        const decodedString = yield* StdbTesting.ContractError.decodeString(
+        const decodedString = yield* StdbInternal.ContractError.decodeString(
           BigIntErrors,
           encodedString,
         )
@@ -807,8 +811,8 @@ describe("error codec", (it) => {
     () =>
       Effect.gen(function* () {
         const MetadataErrors =
-          StdbTesting.ContractError.errors(MetadataRecordError)
-        const encoded = yield* StdbTesting.ContractError.encodeString(
+          StdbInternal.ContractError.errors(MetadataRecordError)
+        const encoded = yield* StdbInternal.ContractError.encodeString(
           MetadataErrors,
           MetadataRecordError.make({
             metadata: {
@@ -818,7 +822,7 @@ describe("error codec", (it) => {
           }),
         )
 
-        const decoded = yield* StdbTesting.ContractError.decodeString(
+        const decoded = yield* StdbInternal.ContractError.decodeString(
           MetadataErrors,
           encoded,
         )
@@ -840,8 +844,8 @@ describe("error codec", (it) => {
 
       return Effect.gen(function* () {
         const RuntimePayloadErrors =
-          StdbTesting.ContractError.errors(JsonPayloadError)
-        const encoded = yield* StdbTesting.ContractError.encodeString(
+          StdbInternal.ContractError.errors(JsonPayloadError)
+        const encoded = yield* StdbInternal.ContractError.encodeString(
           RuntimePayloadErrors,
           JsonPayloadError.make({
             occurredAt: occurredAt as never,
@@ -854,7 +858,7 @@ describe("error codec", (it) => {
           }),
         )
 
-        const decoded = yield* StdbTesting.ContractError.decodeString(
+        const decoded = yield* StdbInternal.ContractError.decodeString(
           RuntimePayloadErrors,
           encoded,
         )

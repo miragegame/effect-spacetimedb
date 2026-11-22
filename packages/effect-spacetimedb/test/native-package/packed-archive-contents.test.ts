@@ -64,6 +64,7 @@ describe("packed archive contents", () => {
       expect(packedManifest.exports).toEqual(
         packedManifest.publishConfig.exports,
       )
+      expect(packedManifest.exports).not.toHaveProperty(["./testing/internal"])
       expect(packedManifest.sideEffects).toEqual(
         packedManifest.publishConfig.sideEffects,
       )

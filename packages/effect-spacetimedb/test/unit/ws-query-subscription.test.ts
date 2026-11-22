@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { FullModule, UserId } from "../fixtures/full-module"
 import { TestLayer } from "../helpers/test-layer"
 import {
@@ -24,7 +24,7 @@ describe("ws query subscriptions", (it) => {
     Effect.gen(function* () {
       let applied: (() => void) | undefined
       let capturedQuery: unknown
-      const handle: StdbTesting.NativeSubscriptionHandleLike = {
+      const handle: StdbInternal.NativeSubscriptionHandleLike = {
         isEnded: () => false,
         unsubscribe: () => undefined,
       }
@@ -39,7 +39,7 @@ describe("ws query subscriptions", (it) => {
           return handle
         },
       }
-      const session = StdbTesting.ClientWs.make({
+      const session = StdbInternal.ClientWs.make({
         module: FullModule,
         connection: makeFullModuleWsConnection({
           subscriptionBuilder: () => builder,

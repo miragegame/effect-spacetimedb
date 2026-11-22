@@ -1,4 +1,4 @@
-import { snakeCaseName } from "../../contract/canonical-name.ts"
+import { camelCaseName, snakeCaseName } from "../../contract/canonical-name.ts"
 
 import * as TypeDescriptor from "../../contract/type/descriptor.ts"
 
@@ -53,11 +53,14 @@ export const prepareSumInputValue = (
   const variant = variants[entry.tag]
   if (variant === undefined) return value
 
-  return {
-    [entry.tag]: isUnitValueType(variant)
-      ? entry.value
-      : recurse(variant, entry.value),
-  }
+  const payload = isUnitValueType(variant)
+    ? entry.value
+    : recurse(variant, entry.value)
+  // A sum keeps its declaration order under both host case policies. A
+  // positional tag also works when their spellings differ (by_id vs byId).
+  return entry.tag === camelCaseName(entry.tag)
+    ? { [entry.tag]: payload }
+    : [Object.keys(variants).indexOf(entry.tag), payload]
 }
 
 export const prepareResultInputValue = (

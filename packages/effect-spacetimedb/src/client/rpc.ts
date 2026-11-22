@@ -1,3 +1,4 @@
+import { nestMembers, type MembersByPath } from "../member-path.ts"
 import * as Effect from "effect/Effect"
 import * as Match from "effect/Match"
 import type * as Schema from "effect/Schema"
@@ -25,15 +26,11 @@ import type {
 import { typedEntries } from "../utils.ts"
 import type { CallFailure, RawCallFailure } from "./call-errors.ts"
 
-export type PublicReducerKeys<Module extends AnyModuleSpec> = {
-  readonly [Key in keyof Module["reducers"] &
-    string]: Module["reducers"][Key]["public"] extends false ? never : Key
-}[keyof Module["reducers"] & string]
+export type PublicReducerKeys<Module extends AnyModuleSpec> =
+  keyof PublicReducers<Module> & string
 
-export type PublicProcedureKeys<Module extends AnyModuleSpec> = {
-  readonly [Key in keyof Module["procedures"] &
-    string]: Module["procedures"][Key]["public"] extends false ? never : Key
-}[keyof Module["procedures"] & string]
+export type PublicProcedureKeys<Module extends AnyModuleSpec> =
+  keyof PublicProcedures<Module> & string
 
 export type HttpHandlerKeys<Module extends AnyModuleSpec> =
   keyof Module["httpHandlers"] & string
@@ -74,25 +71,47 @@ export type ProcedureEnvelopeOf<Spec extends ProcedureSpec> =
     ErrorCodec.ProcedureDeclaredErrorCarrier
   >
 
-type ReducerTransport<R> = <Spec extends ReducerSpec>(
+export type ReducerTransport<R, ConnectionFailure> = <Spec extends ReducerSpec>(
   callable: ReducerCallableDescriptor<Spec>,
   payload: ParamsOf<Spec>,
-) => Effect.Effect<void, CallFailure<DeclaredErrorsOf<Spec>>, R>
+) => Effect.Effect<
+  void,
+  CallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailure,
+  R
+>
 
-type RawReducerTransport<R> = <Spec extends ReducerSpec>(
+export type RawReducerTransport<R, ConnectionFailure> = <
+  Spec extends ReducerSpec,
+>(
   callable: ReducerCallableDescriptor<Spec>,
   payload: ParamsOf<Spec>,
-) => Effect.Effect<void, RawCallFailure<DeclaredErrorsOf<Spec>>, R>
+) => Effect.Effect<
+  void,
+  RawCallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailure,
+  R
+>
 
-type ProcedureTransport<R> = <Spec extends ProcedureSpec>(
+export type ProcedureTransport<R, ConnectionFailure> = <
+  Spec extends ProcedureSpec,
+>(
   callable: ProcedureCallableDescriptor<Spec>,
   payload: ParamsOf<Spec>,
-) => Effect.Effect<ReturnsOf<Spec>, CallFailure<DeclaredErrorsOf<Spec>>, R>
+) => Effect.Effect<
+  ReturnsOf<Spec>,
+  CallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailure,
+  R
+>
 
-type RawProcedureTransport<R> = <Spec extends ProcedureSpec>(
+export type RawProcedureTransport<R, ConnectionFailure> = <
+  Spec extends ProcedureSpec,
+>(
   callable: ProcedureCallableDescriptor<Spec>,
   payload: ParamsOf<Spec>,
-) => Effect.Effect<ReturnsOf<Spec>, RawCallFailure<DeclaredErrorsOf<Spec>>, R>
+) => Effect.Effect<
+  ReturnsOf<Spec>,
+  RawCallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailure,
+  R
+>
 
 export type HttpHandlerConcreteMethod =
   | "get"
@@ -108,12 +127,12 @@ export type HttpHandlerCallOptions = {
   readonly contentType?: string
 }
 
-type HttpHandlerArgs<Spec extends HttpHandlerSpec> =
+export type HttpHandlerArgs<Spec extends HttpHandlerSpec> =
   undefined extends HttpHandlerRequestOf<Spec>
     ? [payload?: HttpHandlerRequestOf<Spec>, options?: HttpHandlerCallOptions]
     : [payload: HttpHandlerRequestOf<Spec>, options?: HttpHandlerCallOptions]
 
-type HttpHandlerTransport<R> = <Spec extends HttpHandlerSpec>(
+export type HttpHandlerTransport<R> = <Spec extends HttpHandlerSpec>(
   callable: HttpHandlerCallableDescriptor<Spec>,
   method: HttpHandlerConcreteMethod,
   payload: HttpHandlerRequestOf<Spec> | undefined,
@@ -124,20 +143,44 @@ type HttpHandlerTransport<R> = <Spec extends HttpHandlerSpec>(
   R
 >
 
-export type ReducerRpcFunction<Spec extends ReducerSpec, R> = ((
+export type ReducerRpcFunction<
+  Spec extends ReducerSpec,
+  R,
+  ConnectionFailure,
+> = ((
   payload: ParamsOf<Spec>,
-) => Effect.Effect<void, CallFailure<DeclaredErrorsOf<Spec>>, R>) & {
+) => Effect.Effect<
+  void,
+  CallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailure,
+  R
+>) & {
   readonly raw: (
     payload: ParamsOf<Spec>,
-  ) => Effect.Effect<void, RawCallFailure<DeclaredErrorsOf<Spec>>, R>
+  ) => Effect.Effect<
+    void,
+    RawCallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailure,
+    R
+  >
 }
 
-export type ProcedureRpcFunction<Spec extends ProcedureSpec, R> = ((
+export type ProcedureRpcFunction<
+  Spec extends ProcedureSpec,
+  R,
+  ConnectionFailure,
+> = ((
   payload: ParamsOf<Spec>,
-) => Effect.Effect<ReturnsOf<Spec>, CallFailure<DeclaredErrorsOf<Spec>>, R>) & {
+) => Effect.Effect<
+  ReturnsOf<Spec>,
+  CallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailure,
+  R
+>) & {
   readonly raw: (
     payload: ParamsOf<Spec>,
-  ) => Effect.Effect<ReturnsOf<Spec>, RawCallFailure<DeclaredErrorsOf<Spec>>, R>
+  ) => Effect.Effect<
+    ReturnsOf<Spec>,
+    RawCallFailure<DeclaredErrorsOf<Spec>> | ConnectionFailure,
+    R
+  >
 }
 
 export type HttpHandlerRpcFunction<
@@ -168,26 +211,38 @@ const withRaw = <Args extends ReadonlyArray<unknown>, A, Raw>(
     readonly raw: Raw
   }
 
-export const make = <Module extends AnyModuleSpec, R>(options: {
+/**
+ * `ConnectionFailure` is what the transport adds to every reducer and procedure
+ * call beyond `CallFailure`: nothing over HTTP, `WsConnectionFailure` over a
+ * WebSocket. HTTP handlers have no connection failure, because they only ever
+ * run over HTTP.
+ */
+export const make = <
+  Module extends AnyModuleSpec,
+  R,
+  ConnectionFailure,
+>(options: {
   readonly reducers: PublicReducers<Module>
   readonly procedures: PublicProcedures<Module>
   readonly httpHandlers: HttpHandlers<Module>
   readonly reducerCallables: {
-    readonly [Key in keyof Module["reducers"] &
-      string]: ReducerCallableDescriptor<Module["reducers"][Key]>
+    readonly [Key in keyof MembersByPath<Module, "reducers"> &
+      string]: ReducerCallableDescriptor<MembersByPath<Module, "reducers">[Key]>
   }
   readonly procedureCallables: {
-    readonly [Key in keyof Module["procedures"] &
-      string]: ProcedureCallableDescriptor<Module["procedures"][Key]>
+    readonly [Key in keyof MembersByPath<Module, "procedures"> &
+      string]: ProcedureCallableDescriptor<
+      MembersByPath<Module, "procedures">[Key]
+    >
   }
   readonly httpHandlerCallables: {
     readonly [Key in keyof Module["httpHandlers"] &
       string]: HttpHandlerCallableDescriptor<Module["httpHandlers"][Key]>
   }
-  readonly callReducer: ReducerTransport<R>
-  readonly callReducerRaw: RawReducerTransport<R>
-  readonly callProcedure: ProcedureTransport<R>
-  readonly callProcedureRaw: RawProcedureTransport<R>
+  readonly callReducer: ReducerTransport<R, ConnectionFailure>
+  readonly callReducerRaw: RawReducerTransport<R, ConnectionFailure>
+  readonly callProcedure: ProcedureTransport<R, ConnectionFailure>
+  readonly callProcedureRaw: RawProcedureTransport<R, ConnectionFailure>
   readonly callHttpHandler: HttpHandlerTransport<R>
 }) => {
   const reducers = Object.fromEntries(
@@ -208,8 +263,9 @@ export const make = <Module extends AnyModuleSpec, R>(options: {
     }),
   ) as unknown as {
     readonly [Key in PublicReducerKeys<Module>]: ReducerRpcFunction<
-      Module["reducers"][Key],
-      R
+      MembersByPath<Module, "reducers">[Key],
+      R,
+      ConnectionFailure
     >
   }
 
@@ -231,8 +287,9 @@ export const make = <Module extends AnyModuleSpec, R>(options: {
     }),
   ) as unknown as {
     readonly [Key in PublicProcedureKeys<Module>]: ProcedureRpcFunction<
-      Module["procedures"][Key],
-      R
+      MembersByPath<Module, "procedures">[Key],
+      R,
+      ConnectionFailure
     >
   }
 
@@ -277,8 +334,8 @@ export const make = <Module extends AnyModuleSpec, R>(options: {
   }
 
   return {
-    reducers,
-    procedures,
+    reducers: nestMembers(reducers),
+    procedures: nestMembers(procedures),
     httpHandlers,
   }
 }

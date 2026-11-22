@@ -9,8 +9,7 @@ import * as Tracer from "effect/Tracer"
 import * as Stdb from "effect-spacetimedb"
 import { type SyncRunner, toSyncRunner } from "effect-spacetimedb/server"
 import * as StdbTesting from "effect-spacetimedb/testing"
-import { make as makeServer } from "../../src/server/bind.ts"
-import type { InternalServerInstance } from "../../src/server/handler-types.ts"
+import { makeServer, type TestServer } from "../helpers/module-server"
 import { makeDeterministicNativeSpanFactory } from "../../src/server/tracing.ts"
 import { compileModule } from "../helpers/compile-module"
 import { testViewRowsLength } from "../helpers/array-bounds"
@@ -19,31 +18,31 @@ const { describe, expect, it } = EffectVitest
 
 const SpanRow = Stdb.struct({ value: Stdb.string() })
 
-const SpanCallables = Stdb.StdbGroup.make("Spans")
+const SpanCallables = Stdb.Group.make("Spans")
   .add(
-    Stdb.StdbFn.reducer("spanReducer", {
+    Stdb.Fn.reducer("spanReducer", {
       params: Stdb.struct({}),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("spanProcedure", {
+    Stdb.Fn.procedure("spanProcedure", {
       params: Stdb.struct({}),
       returns: Stdb.string(),
     }),
   )
   .add(
-    Stdb.StdbFn.anonymousView("spanView", {
+    Stdb.Fn.anonymousView("spanView", {
       returns: Stdb.array(SpanRow, testViewRowsLength),
     }),
   )
 
-const SpanHttp = Stdb.StdbHttpGroup.make("SpanHttp").add(
-  Stdb.StdbHttp.post("spanHttp", "/span"),
+const SpanHttp = Stdb.HttpGroup.make("SpanHttp").add(
+  Stdb.Http.post("spanHttp", "/span"),
 )
 
-const SpanModule = Stdb.StdbModule.make("handler_span_fixture", {
+const SpanModule = Stdb.Module.make("handler_span_fixture", {
   lifecycle: {
-    init: Stdb.StdbFn.init(),
+    init: Stdb.Fn.init(),
   },
 })
   .add(SpanCallables)
@@ -72,7 +71,7 @@ const makeCapturingRuntime = () => {
 }
 
 const makeHandlers = (
-  server: InternalServerInstance<typeof SpanModule>,
+  server: TestServer<typeof SpanModule>,
   reducer: () => Effect.Effect<void>,
 ) => {
   const handlers = server.handlers({
@@ -113,15 +112,15 @@ class HandlerSpanDefect extends Data.TaggedError("HandlerSpanDefect") {}
 
 describe("server handler spans", () => {
   it("runs group middleware inside the endpoint span", () => {
-    const MiddlewareGroup = Stdb.StdbGroup.make("Middleware").add(
-      Stdb.StdbFn.reducer("middlewareReducer", {}),
+    const MiddlewareGroup = Stdb.Group.make("Middleware").add(
+      Stdb.Fn.reducer("middlewareReducer", {}),
     )
-    const MiddlewareModule = Stdb.StdbModule.make(
+    const MiddlewareModule = Stdb.Module.make(
       "middleware_span_fixture",
       {},
     ).add(MiddlewareGroup)
     let middlewareSpanName: string | undefined
-    const impl = Stdb.StdbBuilder.group(
+    const impl = Stdb.Builder.group(
       MiddlewareModule,
       "Middleware",
       { middlewareReducer: () => Effect.void },
@@ -135,7 +134,7 @@ describe("server handler spans", () => {
         ),
       },
     )
-    const wrapped = Stdb.StdbBuilder.handlersOf(MiddlewareModule, impl)
+    const wrapped = Stdb.Builder.handlersOf(MiddlewareModule, impl)
       .middlewareReducer as (args: Record<string, never>) => Effect.Effect<void>
     const { runner } = makeCapturingRuntime()
     const server = makeServer({

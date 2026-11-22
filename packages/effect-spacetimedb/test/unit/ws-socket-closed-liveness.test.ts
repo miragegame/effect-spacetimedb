@@ -2,7 +2,7 @@ import * as EffectVitest from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import {
   connectionStateFor,
   socketClosedWithoutCloseEventMessage,
@@ -17,7 +17,7 @@ import {
 const { expect } = EffectVitest
 const describe = EffectVitest.layer(TestLayer)
 
-const plan = StdbTesting.makeModulePlan(FullModule)
+const plan = StdbInternal.makeModulePlan(FullModule)
 
 /**
  * A connection whose socket can be closed the way a browser tears one down
@@ -63,7 +63,7 @@ describe("ws socket closed without a close event", (it) => {
     () =>
       Effect.gen(function* () {
         const fixture = makeSilentlyClosableConnection()
-        const session = StdbTesting.ClientWs.make({
+        const session = StdbInternal.ClientWs.make({
           module: FullModule,
           connection: fixture.connection,
         })
@@ -75,7 +75,7 @@ describe("ws socket closed without a close event", (it) => {
         const error = yield* session.reducers
           .userUpsert(upsertAda)
           .pipe(Effect.flip)
-        expect(StdbTesting.ConnectionLostError.is(error)).toBe(true)
+        expect(StdbInternal.ConnectionLostError.is(error)).toBe(true)
         expect(fixture.reducerCallCount()).toBe(1)
         expect(session.isInvalidated()).toBe(true)
         const invalidation = yield* session.awaitInvalidation()
@@ -86,7 +86,7 @@ describe("ws socket closed without a close event", (it) => {
   it.effect("fails a subscribe without sending it", () =>
     Effect.gen(function* () {
       const fixture = makeSilentlyClosableConnection()
-      const session = StdbTesting.ClientWs.make({
+      const session = StdbInternal.ClientWs.make({
         module: FullModule,
         connection: fixture.connection,
       })
@@ -95,7 +95,7 @@ describe("ws socket closed without a close event", (it) => {
       const error = yield* session
         .subscribe(plan.targets.tables.user)
         .pipe(Effect.flip, Effect.scoped)
-      expect(StdbTesting.SubscriptionInvalidatedError.is(error)).toBe(true)
+      expect(StdbInternal.SubscriptionInvalidatedError.is(error)).toBe(true)
     }),
   )
 
@@ -104,7 +104,7 @@ describe("ws socket closed without a close event", (it) => {
     () =>
       Effect.gen(function* () {
         const fixture = makeSilentlyClosableConnection()
-        const session = StdbTesting.ClientWs.make({
+        const session = StdbInternal.ClientWs.make({
           module: FullModule,
           connection: fixture.connection,
         })
@@ -127,7 +127,7 @@ describe("ws unsubscribe completion on connection loss", (it) => {
   const makeNeverEndingSubscription = () => {
     const applied = Deferred.makeUnsafe<() => void>()
     let nativeUnsubscribeCount = 0
-    const nativeHandle: StdbTesting.NativeSubscriptionHandleLike = {
+    const nativeHandle: StdbInternal.NativeSubscriptionHandleLike = {
       isEnded: () => false,
       isActive: () => true,
       unsubscribe: () => undefined,
@@ -155,7 +155,7 @@ describe("ws unsubscribe completion on connection loss", (it) => {
     Effect.gen(function* () {
       const subscription = makeNeverEndingSubscription()
       const fixture = makeSilentlyClosableConnection(() => subscription.builder)
-      const session = StdbTesting.ClientWs.make({
+      const session = StdbInternal.ClientWs.make({
         module: FullModule,
         connection: fixture.connection,
       })
@@ -167,7 +167,7 @@ describe("ws unsubscribe completion on connection loss", (it) => {
       onApplied()
       const handle = yield* Fiber.join(acquired)
 
-      const completion = yield* StdbTesting.unsubscribeThen(handle).pipe(
+      const completion = yield* StdbInternal.unsubscribeThen(handle).pipe(
         Effect.forkScoped,
       )
       yield* Effect.yieldNow
@@ -185,7 +185,7 @@ describe("ws unsubscribe completion on connection loss", (it) => {
     Effect.gen(function* () {
       const subscription = makeNeverEndingSubscription()
       const fixture = makeSilentlyClosableConnection(() => subscription.builder)
-      const session = StdbTesting.ClientWs.make({
+      const session = StdbInternal.ClientWs.make({
         module: FullModule,
         connection: fixture.connection,
       })
@@ -198,7 +198,7 @@ describe("ws unsubscribe completion on connection loss", (it) => {
       const handle = yield* Fiber.join(acquired)
 
       fixture.closeSocketSilently()
-      yield* StdbTesting.unsubscribeThen(handle)
+      yield* StdbInternal.unsubscribeThen(handle)
       expect(subscription.nativeUnsubscribeCount()).toBe(0)
     }).pipe(Effect.scoped),
   )

@@ -1,13 +1,12 @@
 import * as EffectVitest from "@effect/vitest"
 import {
   assertCompilerHostAbiCapabilities,
-  StdbHostAbiCapabilityError,
+  StdbHostAbiCapabilityDefect,
   type CompilerHostAbiShape,
 } from "../../src/server/host-abi-compiler"
 
 const { describe, expect, it } = EffectVitest
 
-// @effect-diagnostics-next-line extendsNativeError:off -- Stands in for the `spacetimedb` host ABI's native `SenderError` constructor in the capability probe under test.
 class TestSenderError extends Error {}
 
 const validCompilerHostAbi = {
@@ -33,7 +32,7 @@ describe("compiler host ABI", () => {
     } satisfies CompilerHostAbiShape
 
     expect(() => assertCompilerHostAbiCapabilities(shape)).toThrow(
-      StdbHostAbiCapabilityError,
+      StdbHostAbiCapabilityDefect,
     )
     expect(() => assertCompilerHostAbiCapabilities(shape)).toThrow(
       "missing or malformed schema",
@@ -42,7 +41,7 @@ describe("compiler host ABI", () => {
     try {
       assertCompilerHostAbiCapabilities(shape)
     } catch (cause) {
-      expect(cause).toBeInstanceOf(StdbHostAbiCapabilityError)
+      expect(cause).toBeInstanceOf(StdbHostAbiCapabilityDefect)
       expect(cause).toMatchObject({
         capability: "schema",
       })

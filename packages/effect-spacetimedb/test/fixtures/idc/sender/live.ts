@@ -16,15 +16,15 @@ export const resolveFixturePeer = Effect.gen(function* () {
 
 // An over-size row is caller input the sender refuses, with its own error.
 const refuseTooLarge = <A>(
-  send: Effect.Effect<A, Stdb.OutboxRowTooLarge | StdbServer.DbFailure>,
+  send: Effect.Effect<A, Stdb.OutboxRowTooLargeError | StdbServer.DbFailure>,
 ) =>
   send.pipe(
-    Effect.catchTag("OutboxRowTooLarge", (tooLarge) =>
+    Effect.catchTag("OutboxRowTooLargeError", (tooLarge) =>
       Effect.fail(FixturePingTooLarge.make({ rowBytes: tooLarge.rowBytes })),
     ),
   )
 
-export const IdcSenderSendsLive = Stdb.StdbBuilder.group(
+export const IdcSenderSendsLive = Stdb.Builder.group(
   IdcSenderModule,
   "IdcSenderSends",
   {
@@ -64,7 +64,7 @@ const recordSettlement = (row: {
     yield* db.settlement.insert({ id: 0n, ...row })
   }).pipe(Effect.orDie)
 
-export const IdcSenderSettlesLive = Stdb.StdbBuilder.group(
+export const IdcSenderSettlesLive = Stdb.Builder.group(
   IdcSenderModule,
   "IdcSenderSettles",
   {

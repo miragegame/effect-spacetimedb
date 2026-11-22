@@ -1,3 +1,4 @@
+import { generatedMemberPath, readMember } from "../member-path.ts"
 import * as Data from "effect/Data"
 import * as Match from "effect/Match"
 import type { AnyModuleSpec } from "../contract/module.ts"
@@ -59,10 +60,21 @@ export const generatedArtifactShapeError = <
     })
   }
 
-  const missingKeys = expectedKeys.filter((key) => !Object.hasOwn(db, key))
+  // An unsupported index can make the SDK's lazy relation getter throw.
+  // Inspect its namespace and property descriptor before evaluating the leaf.
+  const hasRelation = (key: string): boolean => {
+    const path = generatedMemberPath(key)
+    const parent = readMember(db, path.slice(0, -1))
+    return (
+      typeof parent === "object" &&
+      parent !== null &&
+      Object.hasOwn(parent, path[path.length - 1]!)
+    )
+  }
+  const missingKeys = expectedKeys.filter((key) => !hasRelation(key))
   const unsupportedIndexes: Array<string> = []
   for (const [key, table] of typedEntries(plan.publicTables)) {
-    if (!Object.hasOwn(db, key)) continue
+    if (!hasRelation(key)) continue
     const indexPlans = clientIndexPlansOf(table)
     const unsupported: Array<UnsupportedClientIndexPlan> = []
     const supported: Array<SupportedClientIndexPlan> = []
@@ -86,7 +98,7 @@ export const generatedArtifactShapeError = <
     }
     if (unsupported.length > 0) continue
 
-    const relation = (db as Record<string, unknown>)[key]
+    const relation = readMember(db, generatedMemberPath(key))
     if (typeof relation !== "object" || relation === null) {
       missingKeys.push(key)
       continue

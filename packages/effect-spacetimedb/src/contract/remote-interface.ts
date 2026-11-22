@@ -1,7 +1,7 @@
 import type { Identity } from "spacetimedb"
 import type { GroupReducersTypeId } from "../builder/type-utils.ts"
 import { snakeCaseName } from "./canonical-name.ts"
-import { makeStdbDiagnostic, StdbValidationError } from "./diagnostic.ts"
+import { makeStdbDiagnostic, StdbValidationDefect } from "./diagnostic.ts"
 import type { AnyErrorDefinition } from "./error.ts"
 import { isSpaceTimeDbAsciiIdentifier } from "./literal-tags.ts"
 import type { ReducerSpec } from "./reducer.ts"
@@ -18,7 +18,7 @@ export type ReceiverSpec<
   Errors extends AnyErrorDefinition | undefined =
     | AnyErrorDefinition
     | undefined,
-> = ReducerSpec<Params, Errors, true> & {
+> = ReducerSpec<Params, Errors> & {
   readonly receiver: true
 }
 
@@ -55,7 +55,7 @@ export type RemoteModuleBinding = {
   readonly identity: () => unknown
 }
 
-type InterfaceGroupLike = {
+export type InterfaceGroupLike = {
   readonly kind: "stdbGroup"
   readonly id: string
   readonly endpoints: ReadonlyArray<{
@@ -65,7 +65,7 @@ type InterfaceGroupLike = {
   }>
 }
 
-type ReceiversOfGroup<Group> = Group extends {
+export type ReceiversOfGroup<Group> = Group extends {
   readonly [GroupReducersTypeId]: infer Reducers extends Record<
     string,
     ReducerSpec
@@ -147,7 +147,7 @@ export type PeerIdentity<Interface extends { readonly name: string }> =
     readonly [PeerIdentityTypeId]: Interface["name"]
   }
 
-type BindingCoversReceivers<Receivers, Binding> = [
+export type BindingCoversReceivers<Receivers, Binding> = [
   Exclude<keyof Receivers, BindingReceiverKeysOf<Binding>>,
 ] extends [never]
   ? unknown
@@ -159,7 +159,7 @@ type BindingCoversReceivers<Receivers, Binding> = [
         string as `Receiver binding is missing receiver ${Key}; regenerate it`]: never
     }
 
-type BindingReducersOf<Binding> = Binding extends {
+export type BindingReducersOf<Binding> = Binding extends {
   readonly reducers: infer Reducers
 }
   ? Reducers
@@ -171,7 +171,7 @@ type BindingReducersOf<Binding> = Binding extends {
  * plain `keyof` is `string` and would cover every receiver; only the declared
  * keys count.
  */
-type BindingReceiverKeysOf<Binding> = keyof {
+export type BindingReceiverKeysOf<Binding> = keyof {
   readonly [Key in keyof BindingReducersOf<Binding> as string extends Key
     ? never
     : Key]: unknown
@@ -222,7 +222,7 @@ export const make = <
         invalid(
           "InvalidRemoteInterface",
           ["remoteInterfaces", options.name, endpoint.name],
-          `Remote interface ${options.name} group ${options.group.id} endpoint ${endpoint.name} must be declared with StdbFn.receiver(...).`,
+          `Remote interface ${options.name} group ${options.group.id} endpoint ${endpoint.name} must be declared with Fn.receiver(...).`,
         ),
       )
       continue
@@ -231,7 +231,7 @@ export const make = <
   }
 
   if (diagnostics.length > 0) {
-    throw new StdbValidationError({ diagnostics })
+    throw new StdbValidationDefect({ diagnostics })
   }
 
   return {
@@ -301,7 +301,7 @@ export const bind = <
   }
 
   if (diagnostics.length > 0) {
-    throw new StdbValidationError({ diagnostics })
+    throw new StdbValidationDefect({ diagnostics })
   }
 
   return { kind: "remoteInterfaceBinding", interface: remoteInterface, binding }

@@ -10,7 +10,7 @@ sidebar:
 
 Event tables use the same `Stdb.table(...)` builder with `event: true`.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import * as Stdb from "effect-spacetimedb"
@@ -24,7 +24,7 @@ const presenceEvent = Stdb.table("presenceEvent", {
   },
 })
 
-const Module = Stdb.StdbModule.make("presence", {}).addTables(presenceEvent)
+const Module = Stdb.Module.make("presence", {}).addTables(presenceEvent)
 const Example = Stdb.project(Module)
 
 const program = Effect.gen(function* () {

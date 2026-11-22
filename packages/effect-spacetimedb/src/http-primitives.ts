@@ -159,7 +159,7 @@ export class SyncResponse {
   }
 }
 
-type RouteSpec = {
+export type RouteSpec = {
   readonly method: string
   readonly path: string
   readonly handler: unknown

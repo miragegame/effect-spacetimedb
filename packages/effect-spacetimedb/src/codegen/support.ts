@@ -21,7 +21,7 @@ import {
 } from "./errors.ts"
 
 // Shared by client and receiver-binding generation: running the pinned CLI,
-// bundling its TypeScript output verbatim under the codegen banner, and the
+// bundling its TypeScript output under the codegen banner, and the
 // byte-for-byte drift comparison.
 
 type CapturedCommand = {
@@ -227,8 +227,58 @@ export const loadEsbuild = Effect.tryPromise({
       : new CodegenBundleError({ cause }),
 })
 
+// Only the order of adjacent, independently named entries is immaterial. A
+// table definition travels as one block, preserving column and index order.
+const sortAdjacentEntries = (source: string, pattern: RegExp): string => {
+  const parts: string[] = []
+  const run: string[] = []
+  let end = 0
+  for (const match of source.matchAll(pattern)) {
+    if (match.index !== end) {
+      parts.push(run.sort().join(""), source.slice(end, match.index))
+      run.length = 0
+    }
+    run.push(match[0])
+    end = match.index + match[0].length
+  }
+  return parts.join("") + run.sort().join("") + source.slice(end)
+}
+
+// The 2.16.1 CLI emits sibling mounted members in varying order for identical
+// input. At every SpacetimeDB bump re-verify the root entry format and compare
+// repeated generations before retaining or removing this normalization.
+export const orderedNamespaceBindings = (source: string) => {
+  if (
+    !/^\/\/ Import namespace [^\n]*\n\s*import\b/mu.test(source) &&
+    !/from\s+["']\.\/[^"'\n]+\//u.test(source)
+  )
+    return Effect.void
+  const blocks = [
+    /^import [^\n]+ from "\.\/[^"\n]+\/[^"\n]+";\n/gm,
+    /^  "[^"\n]+": __table\(\{\n(?:    [^\n]*\n)*  \}, [\w$]+Row\),\n/gm,
+    /^  __(?:reducer|procedure)Schema\("[^"\n]+\.[^"\n]+", [^\n]+\),\n/gm,
+    /^ +[\w$]+: __(?:qb|reducerAccessors|procedureAccessors)\["[^"\n]+"\],\n/gm,
+  ]
+  if (!blocks.some((pattern) => source.search(pattern) !== -1))
+    return Effect.fail(
+      new CodegenBundleError({
+        cause:
+          "Unrecognized generated namespace entries. Re-check the SpacetimeDB CLI format before ordering mounted bindings.",
+      }),
+    )
+  return Effect.succeed(
+    blocks
+      .reduce(sortAdjacentEntries, source)
+      .replace(
+        /^  viewsWithArgs: \[("[\w.]+"(?:, "[\w.]+")*)\],$/m,
+        (_, names: string) =>
+          "  viewsWithArgs: [" + names.split(", ").sort().join(", ") + "],",
+      ),
+  )
+}
+
 /**
- * Bundles the CLI's generated `index.ts` in `directory` verbatim: one ESM file,
+ * Bundles the CLI's generated `index.ts` in `directory` into one ESM file,
  * `spacetimedb` left external, under the codegen banner that records both
  * toolchain versions.
  */
@@ -238,12 +288,28 @@ export const bundleGeneratedIndex = Effect.fn(function* (
   banner: string,
 ) {
   const path = yield* Path.Path
+  const fs = yield* FileSystem.FileSystem
+  const entry = path.join(directory, "index.ts")
+  const contents = yield* orderedNamespaceBindings(
+    yield* fs
+      .readFileString(entry)
+      .pipe(Effect.mapError(fileSystemError("read generated binding", entry))),
+  )
   const result = yield* Effect.tryPromise({
     try: () =>
       esbuild.build({
         absWorkingDir: directory,
         bundle: true,
-        entryPoints: ["index.ts"],
+        ...(contents === undefined
+          ? { entryPoints: ["index.ts"] }
+          : ({
+              stdin: {
+                contents,
+                loader: "ts",
+                resolveDir: directory,
+                sourcefile: "index.ts",
+              },
+            } as const)),
         external: ["spacetimedb", "spacetimedb/*"],
         format: "esm",
         legalComments: "none",

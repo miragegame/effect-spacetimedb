@@ -1,6 +1,6 @@
 import type { AnyModuleSpec } from "./contract/module.ts"
 
-type Entry<
+export type Entry<
   Kind extends string,
   Name extends string,
   Spec,
@@ -12,7 +12,7 @@ type Entry<
   readonly groupId: GroupId
 }
 
-type Entries<
+export type Entries<
   Section extends Record<string, unknown>,
   Kind extends string,
   Groups extends Record<string, string> | undefined = undefined,
@@ -29,6 +29,11 @@ type Entries<
   >
 }[keyof Section & string]
 
+/** A reflected immediate mount with its accessor name and module or native declaration. */
+export type MountReflection<Module extends AnyModuleSpec> = Entries<
+  NonNullable<Module["mounts"]>,
+  "mount"
+>
 export type TableReflection<Module extends AnyModuleSpec> = Entries<
   Module["tables"],
   "table"
@@ -58,6 +63,7 @@ export type LifecycleReflection<Module extends AnyModuleSpec> = Entries<
 >
 
 export type ModuleReflection<Module extends AnyModuleSpec> =
+  | MountReflection<Module>
   | TableReflection<Module>
   | ViewReflection<Module>
   | ReducerReflection<Module>
@@ -67,6 +73,8 @@ export type ModuleReflection<Module extends AnyModuleSpec> =
 
 export type ReflectCallbacks<Module extends AnyModuleSpec> = {
   readonly predicate?: (entry: ModuleReflection<Module>) => boolean
+  /** Visit each direct mount. Reflect a module mount's child spec separately to inspect its members. */
+  readonly onMount?: (entry: MountReflection<Module>) => void
   readonly onTable?: (entry: TableReflection<Module>) => void
   readonly onView?: (entry: ViewReflection<Module>) => void
   readonly onReducer?: (entry: ReducerReflection<Module>) => void
@@ -93,6 +101,19 @@ export const reflect = <Module extends AnyModuleSpec>(
     }
   }
 
+  if (callbacks.onMount !== undefined) {
+    for (const [name, spec] of Object.entries(module.mounts ?? {})) {
+      visit(
+        {
+          kind: "mount",
+          name,
+          spec,
+          groupId: undefined,
+        } as MountReflection<Module>,
+        callbacks.onMount,
+      )
+    }
+  }
   for (const [name, spec] of Object.entries(module.tables)) {
     visit(
       {

@@ -1,56 +1,26 @@
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 
-// Generic, non-branded SATS scalars stay reusable value-types: they are only ever
-// SpacetimeDB column/field types, never domain types passed around in app code.
-export const String255 = Stdb.string(
-  Schema.String.pipe(Schema.check(Schema.isMaxLength(255))),
-)
+export const UserId = Schema.String
+export type UserId = string
+export const UserName = Schema.String
+export type UserName = string
+export const ThingId = Schema.String
+export type ThingId = string
 
-// Branded domain types are plain Effect schemas — the single source of truth, used
-// directly in app code (decode/encode, request bodies). They are wrapped with
-// `Stdb.string(...)` inline only at STDB declaration sites (struct fields, reducer/
-// procedure params, view/procedure returns, error fields). No separate value-type variable.
-export const UserId = Schema.String.pipe(
-  Schema.brand("EffectSpacetimeDbExample/UserId"),
-  Schema.check(Schema.isMaxLength(255)),
-)
-export type UserId = typeof UserId.Type
-
-export const UserName = Schema.String.pipe(
-  Schema.brand("EffectSpacetimeDbExample/UserName"),
-  Schema.check(Schema.isMaxLength(255)),
-)
-export type UserName = typeof UserName.Type
-
-export const ThingId = Schema.String.pipe(
-  Schema.brand("EffectSpacetimeDbExample/ThingId"),
-  Schema.check(Schema.isMaxLength(255)),
-)
-export type ThingId = typeof ThingId.Type
-
-// Every view and procedure result set in this example states its size. The live
-// suite seeds at most a few dozen rows; a real module sizes this to its page.
-export const ResultRowsLength: Stdb.ArrayLengthBounds = {
-  minimum: 0,
-  maximum: 1_000,
-}
-
-export const U64 = Stdb.u64(
-  Schema.BigInt.check(Schema.isGreaterThanOrEqualToBigInt(0n)),
-)
+export const U64 = Stdb.u64()
 
 export const user = Stdb.table("user", {
   public: true,
   columns: {
-    id: Stdb.string(UserId).primaryKey(),
-    name: Stdb.string(UserName),
+    id: Stdb.string().primaryKey(),
+    name: Stdb.string(),
   },
 })
 
 export const presenceEvent = Stdb.table("presenceEvent", {
   columns: {
-    userId: Stdb.string(UserId),
+    userId: Stdb.string(),
     kind: Stdb.literal("joined", "left"),
   },
   public: true,
@@ -62,15 +32,15 @@ export const auditLog = Stdb.table("auditLog", {
   columns: {
     id: U64.primaryKey().autoInc(),
     kind: Stdb.literal("init", "connected", "disconnected"),
-    subject: String255,
+    subject: Stdb.string(),
   },
 })
 
 export const uniqueMembership = Stdb.table("uniqueMembership", {
   columns: {
-    tenantId: String255,
-    email: String255,
-    note: String255,
+    tenantId: Stdb.string(),
+    email: Stdb.string(),
+    note: Stdb.string(),
   },
   public: false,
   indexes: (columns) => [
@@ -95,11 +65,11 @@ export const uniqueMembership = Stdb.table("uniqueMembership", {
 export const constraintEntry = Stdb.table("constraintEntry", {
   public: false,
   columns: {
-    id: String255.primaryKey(),
-    slug: String255,
-    tenantId: String255,
-    email: String255,
-    note: String255,
+    id: Stdb.string().primaryKey(),
+    slug: Stdb.string(),
+    tenantId: Stdb.string(),
+    email: Stdb.string(),
+    note: Stdb.string(),
   },
   indexes: (columns) => [
     Stdb.index("constraintEntrySlugIdx", [columns.slug]),
@@ -120,8 +90,8 @@ export const constraintEntry = Stdb.table("constraintEntry", {
 export const thing = Stdb.table("thing", {
   public: true,
   columns: {
-    id: Stdb.string(ThingId).primaryKey(),
-    label: String255,
+    id: Stdb.string().primaryKey(),
+    label: Stdb.string(),
     count: U64,
   },
   indexes: (columns) => [
@@ -135,7 +105,7 @@ export const nativeRangeEntry = Stdb.table("nativeRangeEntry", {
     id: U64.primaryKey().autoInc(),
     owner: Stdb.identity(),
     happenedAt: Stdb.timestamp(),
-    label: String255,
+    label: Stdb.string(),
   },
   indexes: (columns) => [
     Stdb.index("nativeRangeEntryOwnerIdx", [columns.owner], {
@@ -147,12 +117,24 @@ export const nativeRangeEntry = Stdb.table("nativeRangeEntry", {
   ],
 })
 
+// A sequence needs an integer column, not a key: `label` is the key here, and
+// each serial sits on a different kind of column.
+export const serialEntry = Stdb.table("serialEntry", {
+  public: true,
+  columns: {
+    label: Stdb.string().primaryKey(),
+    plainSerial: Stdb.u64().autoInc(),
+    uniqueSerial: Stdb.u32().unique().autoInc(),
+    indexedSerial: Stdb.i64().index().autoInc(),
+  },
+})
+
 export const optionalRangeEntry = Stdb.table("optionalRangeEntry", {
   public: false,
   columns: {
     id: U64.primaryKey().autoInc(),
     rank: Stdb.option(U64),
-    label: String255,
+    label: Stdb.string(),
   },
   indexes: (columns) => [
     Stdb.index("optionalRangeEntryRankIdx", [columns.rank], {
@@ -166,10 +148,10 @@ export const scheduledResult = Stdb.table("scheduledResult", {
   columns: {
     id: U64.primaryKey().autoInc(),
     target: Stdb.literal("reducer", "procedure"),
-    note: String255,
-    sender: String255,
-    identity: String255,
-    databaseIdentity: String255,
+    note: Stdb.string(),
+    sender: Stdb.string(),
+    identity: Stdb.string(),
+    databaseIdentity: Stdb.string(),
   },
 })
 
@@ -177,7 +159,7 @@ export const reducerSchedule = Stdb.scheduledTable("reducerSchedule", {
   public: true,
   scheduledId: U64,
   columns: {
-    note: String255,
+    note: Stdb.string(),
   },
 })
 
@@ -185,7 +167,7 @@ export const procedureSchedule = Stdb.scheduledTable("procedureSchedule", {
   public: true,
   scheduledId: U64,
   columns: {
-    note: String255,
+    note: Stdb.string(),
   },
 })
 
@@ -198,6 +180,7 @@ export const exampleTables = [
   thing,
   nativeRangeEntry,
   optionalRangeEntry,
+  serialEntry,
   scheduledResult,
   reducerSchedule,
   procedureSchedule,

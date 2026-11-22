@@ -2,6 +2,7 @@ import * as Data from "effect/Data"
 
 import {
   CaseConversionPolicy,
+  makeQueryBuilder,
   isRowTypedQuery,
   Range,
   Router,
@@ -14,6 +15,7 @@ import {
 
 export {
   CaseConversionPolicy,
+  makeQueryBuilder,
   isRowTypedQuery,
   Range,
   Router,
@@ -26,14 +28,13 @@ export {
 
 export type { ReceiverIdentity, RemoteReducer } from "spacetimedb/server"
 
-export class StdbHostAbiCapabilityError extends Data.TaggedError(
-  "StdbHostAbiCapabilityError",
+export class StdbHostAbiCapabilityDefect extends Data.TaggedError(
+  "StdbHostAbiCapabilityDefect",
 )<{
   readonly capability: string
 }> {
-  override get message(): string {
-    return `Unsupported spacetimedb host ABI: missing or malformed ${this.capability}. effect-spacetimedb currently supports spacetimedb ~2.14.0.`
-  }
+  override readonly message =
+    `Unsupported spacetimedb host ABI: missing or malformed ${this.capability}. effect-spacetimedb currently supports spacetimedb ~2.16.1.`
 }
 
 export type CompilerHostAbiShape = {
@@ -53,7 +54,7 @@ const assertFunctionCapability = (
   capability: keyof CompilerHostAbiShape,
 ): void => {
   if (typeof shape[capability] !== "function") {
-    throw new StdbHostAbiCapabilityError({ capability })
+    throw new StdbHostAbiCapabilityDefect({ capability })
   }
 }
 
@@ -62,7 +63,7 @@ const assertObjectCapability = (
   capability: keyof CompilerHostAbiShape,
 ): void => {
   if (typeof shape[capability] !== "object" || shape[capability] === null) {
-    throw new StdbHostAbiCapabilityError({ capability })
+    throw new StdbHostAbiCapabilityDefect({ capability })
   }
 }
 
@@ -75,7 +76,7 @@ export const assertCompilerHostAbiCapabilities = (
     readonly SnakeCase?: unknown
   }
   if (policy.SnakeCase == null || policy.None == null) {
-    throw new StdbHostAbiCapabilityError({
+    throw new StdbHostAbiCapabilityDefect({
       capability: "CaseConversionPolicy",
     })
   }
@@ -92,7 +93,35 @@ export const assertCompilerHostAbiCapabilities = (
   assertFunctionCapability(shape, "table")
 }
 
+/** Both the Schema constructor and its dispatch method are SDK-instance-local. */
+export const assertMountSchema = (
+  namespace: string,
+  candidate: unknown,
+  reference: object,
+) => {
+  if (
+    typeof candidate !== "object" ||
+    candidate === null ||
+    !(candidate instanceof reference.constructor)
+  ) {
+    throw new TypeError(
+      `Mount ${namespace} must export a default Schema from the same spacetimedb/server SDK copy as the consumer; resolve the package peer to one instance`,
+    )
+  }
+  if (
+    !("buildSubmoduleDispatch" in candidate) ||
+    typeof candidate.buildSubmoduleDispatch !== "function"
+  ) {
+    throw new StdbHostAbiCapabilityDefect({
+      capability: "Schema.buildSubmoduleDispatch",
+    })
+  }
+}
+
 // Bump hazards for the next spacetimedb peer-range change:
+// - Generate the same mounted client repeatedly. Compare the CLI's namespace
+//   imports, registrations and facade entries with orderedNamespaceBindings
+//   in codegen/support.ts and verify byte-for-byte stability.
 // - Re-check `UntypedReducerDef.params` (`src/sdk/reducers.ts`); it is
 //   unchanged between 2.6.1 and 2.10.1, so the client reducer typing still
 //   holds, but it has moved before.

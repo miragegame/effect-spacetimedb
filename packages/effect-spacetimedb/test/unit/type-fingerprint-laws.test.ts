@@ -1,14 +1,14 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Schema from "effect/Schema"
 import * as FastCheck from "fast-check"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { codecCorpus } from "../helpers/codec-corpus"
 import { testArrayLength } from "../helpers/array-bounds"
 
 const { describe, expect, it } = EffectVitest
 
-const T = StdbTesting.ContractType
-const TypeName = StdbTesting.ContractTypeName
+const T = StdbInternal.ContractType
+const TypeName = StdbInternal.ContractTypeName
 
 const fingerprintPropertyParameters = { numRuns: 300, seed: 0xf16e123 }
 
@@ -18,12 +18,12 @@ type Tree = {
 }
 
 type TypeFactoryEntry = {
-  readonly kind: StdbTesting.ContractType.TypeKind
-  readonly original: StdbTesting.ContractType.AnyValueType
-  readonly rebuild: () => StdbTesting.ContractType.AnyValueType
+  readonly kind: StdbInternal.ContractType.TypeKind
+  readonly original: StdbInternal.ContractType.AnyValueType
+  readonly rebuild: () => StdbInternal.ContractType.AnyValueType
 }
 
-const makeTreeType = (): StdbTesting.ContractType.AnyValueType => {
+const makeTreeType = (): StdbInternal.ContractType.AnyValueType => {
   const TreeAgain: ReturnType<typeof T.lazy<Tree, unknown>> = T.lazy(() =>
     T.struct({
       name: T.string(),
@@ -134,12 +134,12 @@ const typeFactories: ReadonlyArray<TypeFactoryEntry> = [
   { kind: "uuid", original: codecCorpus.uuid.type, rebuild: () => T.uuid() },
 ]
 
-const fingerprintOf = (type: StdbTesting.ContractType.AnyValueType): string =>
+const fingerprintOf = (type: StdbInternal.ContractType.AnyValueType): string =>
   T.satsTypeFingerprint(type)
 
 const pairKey = (
-  left: StdbTesting.ContractType.TypeKind,
-  right: StdbTesting.ContractType.TypeKind,
+  left: StdbInternal.ContractType.TypeKind,
+  right: StdbInternal.ContractType.TypeKind,
 ): string => [left, right].sort().join("/")
 
 const allowedCorpusAliases = new Set([
@@ -151,7 +151,7 @@ const allowedCorpusAliases = new Set([
 const nameKinds = ["Struct", "Enum", "Sum"] as const
 
 const primitiveFingerprintCases: ReadonlyArray<
-  readonly [string, StdbTesting.ContractType.AnyValueType, string]
+  readonly [string, StdbInternal.ContractType.AnyValueType, string]
 > = [
   ["bigint", T.bigint(), "t9:primitives6:String"],
   ["bool", T.bool(), "t9:primitives4:Bool"],
@@ -275,7 +275,7 @@ describe("type fingerprint laws", () => {
       )
       factory("Struct", stringFingerprint)
       factory("Struct", u8Fingerprint)
-    }).toThrow(TypeName.SatsTypeNameCollisionError)
+    }).toThrow(TypeName.SatsTypeNameCollisionDefect)
 
     expect(() => {
       const factory = TypeName.makeContentAddressedNameFactory()

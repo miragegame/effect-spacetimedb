@@ -70,46 +70,47 @@ const CreateWidgetResponse = Schema.Struct({
   widgetId: Schema.String,
 })
 
-const WebhooksGroup = Stdb.StdbHttpGroup.make("Webhooks").add(
-  Stdb.StdbHttp.post("rotateToken", "/server-tokens/rotate", {
+const WebhooksGroup = Stdb.HttpGroup.make("Webhooks").add(
+  Stdb.Http.post("rotateToken", "/server-tokens/rotate", {
     request: RotateTokenRequest,
     response: RotateTokenResponse,
     errors: ProjectionErrors,
   }),
-  Stdb.StdbHttp.post("issueToken", "/server-tokens/issue", {
+  Stdb.Http.post("issueToken", "/server-tokens/issue", {
     request: IssueTokenRequest,
     response: IssueTokenResponse,
   }),
-  Stdb.StdbHttp.post("rawWebhook", "/webhook"),
-  Stdb.StdbHttp.any("typedAny", "/typed-any", {
+  Stdb.Http.post("rawWebhook", "/webhook"),
+  Stdb.Http.any("typedAny", "/typed-any", {
     request: RotateTokenRequest,
     response: RotateTokenResponse,
   }),
-  Stdb.StdbHttp.get("typedGet", "/typed-get", {
+  Stdb.Http.get("typedGet", "/typed-get", {
     request: RotateTokenRequest,
     response: RotateTokenResponse,
   }),
 )
 
-const AdminGroup = Stdb.StdbHttpGroup.make("Admin").add(
-  Stdb.StdbHttp.post("createWidget", "/admin/widgets", {
+const AdminGroup = Stdb.HttpGroup.make("Admin").add(
+  Stdb.Http.post("createWidget", "/admin/widgets", {
     request: CreateWidgetRequest,
     response: CreateWidgetResponse,
   }),
 )
 
-const NonProjectableGroup = Stdb.StdbHttpGroup.make("Diagnostics").add(
-  Stdb.StdbHttp.get("health", "/health", {
+const NonProjectableGroup = Stdb.HttpGroup.make("Diagnostics").add(
+  Stdb.Http.get("health", "/health", {
     request: Schema.Struct({ verbose: Schema.Boolean }),
     response: Schema.Struct({ ok: Schema.Boolean }),
   }),
-  Stdb.StdbHttp.post("rawProbe", "/probe"),
+  Stdb.Http.post("rawProbe", "/probe"),
 )
 
-const ProjectionBuilderModule = Stdb.StdbModule.make(
-  "http_api_projection",
-  {},
-).add(WebhooksGroup, AdminGroup, NonProjectableGroup)
+const ProjectionBuilderModule = Stdb.Module.make("http_api_projection", {}).add(
+  WebhooksGroup,
+  AdminGroup,
+  NonProjectableGroup,
+)
 const ProjectionModule = ProjectionBuilderModule.spec
 
 const projectedShape = <
@@ -203,7 +204,7 @@ const MalformedModule = withWireNames({
   reducers: {},
   procedures: {},
   httpHandlers: {
-    orphan: Stdb.StdbHttp.post("orphan", "/orphan", {
+    orphan: Stdb.Http.post("orphan", "/orphan", {
       request: RotateTokenRequest,
       response: RotateTokenResponse,
     }).spec,
@@ -223,7 +224,7 @@ const MissingHttpGroupsFieldModule = {
   reducers: {},
   procedures: {},
   httpHandlers: {
-    orphan: Stdb.StdbHttp.post("orphan", "/orphan", {
+    orphan: Stdb.Http.post("orphan", "/orphan", {
       request: RotateTokenRequest,
       response: RotateTokenResponse,
     }).spec,
@@ -351,7 +352,7 @@ describe("HTTP API projection", (it) => {
     Effect.try({
       try: () => {
         expect(() => Stdb.toHttpApi(MalformedModule)).toThrow(
-          Stdb.StdbHttpProjectionError,
+          Stdb.StdbHttpProjectionDefect,
         )
       },
       catch: testEffectCallbackError(
@@ -364,7 +365,7 @@ describe("HTTP API projection", (it) => {
     Effect.try({
       try: () => {
         expect(() => Stdb.toHttpApi(MissingHttpGroupsFieldModule)).toThrow(
-          Stdb.StdbHttpProjectionError,
+          Stdb.StdbHttpProjectionDefect,
         )
       },
       catch: testEffectCallbackError(

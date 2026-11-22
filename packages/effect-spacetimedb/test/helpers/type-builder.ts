@@ -1,5 +1,5 @@
 import * as SpacetimeDB from "spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 
 const runtimeFactories = Reflect.get(SpacetimeDB, "t") as unknown
 
@@ -8,10 +8,10 @@ if (typeof runtimeFactories !== "object" || runtimeFactories === null) {
 }
 
 export const typeBuilder = (
-  value: StdbTesting.ContractType.AnyValueType,
+  value: StdbInternal.ContractType.AnyValueType,
   path?: string,
 ) =>
-  StdbTesting.ContractType.typeBuilderWithFactories(
+  StdbInternal.ContractType.typeBuilderWithFactories(
     value,
     runtimeFactories as never,
     path,

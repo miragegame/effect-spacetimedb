@@ -1,7 +1,8 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import type * as Stream from "effect/Stream"
-import type { TimeDuration } from "spacetimedb"
+import * as Duration from "effect/Duration"
+import { TimeDuration } from "spacetimedb"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import type { AnyTableSpec } from "../contract/table.ts"
 import type { OutboxMetadata } from "../contract/outbox-table.ts"
@@ -9,14 +10,14 @@ import type {
   AnyRemoteInterface,
   PeerIdentity,
 } from "../contract/remote-interface.ts"
-import type { OutboxRowTooLarge } from "../contract/outbox-table.ts"
+import type { OutboxRowTooLargeError } from "../contract/outbox-table.ts"
 import type { BodyInit, Headers } from "../http-primitives.ts"
 import type {
   ColumnKey,
   PrimaryKeyNames,
   SinglePrimaryKeyName,
 } from "../contract/table-keys.ts"
-import { StdbDecodeError } from "../decode-error.ts"
+import type { FieldOptionsOf } from "../contract/field.ts"
 import { errorTypeId, hasErrorTypeId } from "../error-identity.ts"
 import { errorName, hostErrorName, HostErrorNames } from "./host-abi-runtime.ts"
 import type {
@@ -26,100 +27,26 @@ import type {
   IsUniqueIndexColumns,
   TableRow,
 } from "../table-index-typing.ts"
+import {
+  type HostFailure,
+  StdbHostCallError,
+  StdbUniqueAlreadyExistsError,
+  StdbAutoIncOverflowError,
+  StdbNoSuchRowError,
+  StdbScheduleDelayTooLongError,
+} from "../host-failure.ts"
+export {
+  type HostFailure,
+  isStdbHostFailure,
+  StdbSenderError,
+  StdbHostCallError,
+  StdbUniqueAlreadyExistsError,
+  StdbAutoIncOverflowError,
+  StdbNoSuchRowError,
+  StdbScheduleDelayTooLongError,
+} from "../host-failure.ts"
 
-const StdbHostCallErrorTypeId = errorTypeId("StdbHostCallError")
-export class StdbHostCallError extends Data.TaggedError("StdbHostCallError")<{
-  readonly op: string
-  readonly cause: unknown
-  readonly hostErrorName?: string
-}> {
-  readonly [StdbHostCallErrorTypeId] = StdbHostCallErrorTypeId
-  static is = hasErrorTypeId<StdbHostCallError>(StdbHostCallErrorTypeId)
-}
-
-const StdbUniqueAlreadyExistsErrorTypeId = errorTypeId(
-  "StdbUniqueAlreadyExistsError",
-)
-export class StdbUniqueAlreadyExistsError extends Data.TaggedError(
-  "StdbUniqueAlreadyExistsError",
-)<{
-  readonly op: string
-  readonly cause: unknown
-}> {
-  readonly [StdbUniqueAlreadyExistsErrorTypeId] =
-    StdbUniqueAlreadyExistsErrorTypeId
-  static is = hasErrorTypeId<StdbUniqueAlreadyExistsError>(
-    StdbUniqueAlreadyExistsErrorTypeId,
-  )
-}
-
-const StdbAutoIncOverflowErrorTypeId = errorTypeId("StdbAutoIncOverflowError")
-export class StdbAutoIncOverflowError extends Data.TaggedError(
-  "StdbAutoIncOverflowError",
-)<{
-  readonly op: string
-  readonly cause: unknown
-}> {
-  readonly [StdbAutoIncOverflowErrorTypeId] = StdbAutoIncOverflowErrorTypeId
-  static is = hasErrorTypeId<StdbAutoIncOverflowError>(
-    StdbAutoIncOverflowErrorTypeId,
-  )
-}
-
-const StdbNoSuchRowErrorTypeId = errorTypeId("StdbNoSuchRowError")
-export class StdbNoSuchRowError extends Data.TaggedError("StdbNoSuchRowError")<{
-  readonly op: string
-  readonly cause: unknown
-}> {
-  readonly [StdbNoSuchRowErrorTypeId] = StdbNoSuchRowErrorTypeId
-  static is = hasErrorTypeId<StdbNoSuchRowError>(StdbNoSuchRowErrorTypeId)
-}
-
-const StdbScheduleDelayTooLongErrorTypeId = errorTypeId(
-  "StdbScheduleDelayTooLongError",
-)
-export class StdbScheduleDelayTooLongError extends Data.TaggedError(
-  "StdbScheduleDelayTooLongError",
-)<{
-  readonly op: string
-  readonly cause: unknown
-}> {
-  readonly [StdbScheduleDelayTooLongErrorTypeId] =
-    StdbScheduleDelayTooLongErrorTypeId
-  static is = hasErrorTypeId<StdbScheduleDelayTooLongError>(
-    StdbScheduleDelayTooLongErrorTypeId,
-  )
-}
-
-const StdbServerDisposedErrorTypeId = errorTypeId("StdbServerDisposedError")
-export class StdbServerDisposedError extends Data.TaggedError(
-  "StdbServerDisposedError",
-)<{
-  readonly module: string
-  readonly handler: string
-  readonly kind: "reducer" | "procedure" | "view" | "lifecycle"
-}> {
-  readonly [StdbServerDisposedErrorTypeId] = StdbServerDisposedErrorTypeId
-  static is = hasErrorTypeId<StdbServerDisposedError>(
-    StdbServerDisposedErrorTypeId,
-  )
-}
-
-export type StdbHostFailure =
-  | StdbHostCallError
-  | StdbUniqueAlreadyExistsError
-  | StdbAutoIncOverflowError
-  | StdbNoSuchRowError
-  | StdbScheduleDelayTooLongError
-
-export const isStdbHostFailure = (error: unknown): error is StdbHostFailure =>
-  StdbHostCallError.is(error) ||
-  StdbUniqueAlreadyExistsError.is(error) ||
-  StdbAutoIncOverflowError.is(error) ||
-  StdbNoSuchRowError.is(error) ||
-  StdbScheduleDelayTooLongError.is(error)
-
-export const toHostFailure = (op: string, cause: unknown): StdbHostFailure => {
+export const toHostFailure = (op: string, cause: unknown): HostFailure => {
   const knownHostError = hostErrorName(cause)
   if (knownHostError !== undefined) {
     if (knownHostError === HostErrorNames.UniqueAlreadyExists) {
@@ -148,91 +75,88 @@ export const toHostFailure = (op: string, cause: unknown): StdbHostFailure => {
   return new StdbHostCallError({ op, cause })
 }
 
-export const hostCall = <A>(
-  op: string,
-  run: () => A,
-): Effect.Effect<A, StdbHostFailure> =>
-  Effect.try({
-    try: run,
-    catch: (cause) => toHostFailure(op, cause),
-  })
-
-const ReducerAsyncNotAllowedErrorTypeId = errorTypeId(
-  "ReducerAsyncNotAllowedError",
-)
-export class ReducerAsyncNotAllowedError extends Data.TaggedError(
-  "ReducerAsyncNotAllowedError",
-) {
-  readonly [ReducerAsyncNotAllowedErrorTypeId] =
-    ReducerAsyncNotAllowedErrorTypeId
-  static is = hasErrorTypeId<ReducerAsyncNotAllowedError>(
-    ReducerAsyncNotAllowedErrorTypeId,
-  )
+export class StdbTableOperationDefect extends Data.TaggedError(
+  "StdbTableOperationDefect",
+)<{
+  readonly table: string
+  readonly op: string
+  readonly cause: unknown
+}> {
+  override readonly message =
+    `SpaceTimeDB table ${this.table} failed at ${this.op}`
 }
 
-export class RuntimeLayerAsyncError extends Data.TaggedError(
-  "RuntimeLayerAsyncError",
+const HandlerAsyncNotAllowedDefectTypeId = errorTypeId(
+  "HandlerAsyncNotAllowedDefect",
+)
+export class HandlerAsyncNotAllowedDefect extends Data.TaggedError(
+  "HandlerAsyncNotAllowedDefect",
+) {
+  readonly [HandlerAsyncNotAllowedDefectTypeId] =
+    HandlerAsyncNotAllowedDefectTypeId
+  static is = hasErrorTypeId<HandlerAsyncNotAllowedDefect>(
+    HandlerAsyncNotAllowedDefectTypeId,
+  )
+
+  override readonly message =
+    "Asynchronous work (Effect.sleep, Effect.promise, timers) is not available in SpaceTimeDB reducers, procedures and views: a handler runs to completion inside one synchronous host call." as const
+}
+
+export class RuntimeLayerAsyncDefect extends Data.TaggedError(
+  "RuntimeLayerAsyncDefect",
 ) {
   override readonly message =
     "The server runtime layer requires asynchronous initialization, which is unsupported by the synchronous SpaceTimeDB host." as const
 }
 
-export class CallableInterruptedError extends Data.TaggedError(
-  "CallableInterruptedError",
+export class CallableInterruptedDefect extends Data.TaggedError(
+  "CallableInterruptedDefect",
 )<{
   readonly kind: "reducer" | "procedure" | "view" | "lifecycle"
   readonly cause: unknown
 }> {
-  override get message(): string {
-    return `SpaceTimeDB ${this.kind} invocation was interrupted`
-  }
+  override readonly message =
+    `SpaceTimeDB ${this.kind} invocation was interrupted`
 }
 
-export class StdbDbSchemaMismatchError extends Data.TaggedError(
-  "StdbDbSchemaMismatchError",
+export class StdbDbSchemaMismatchDefect extends Data.TaggedError(
+  "StdbDbSchemaMismatchDefect",
 )<{
   readonly module: string
   readonly missingTables: ReadonlyArray<string>
   readonly availableTables: ReadonlyArray<string>
 }> {
-  override get message(): string {
-    const missing = this.missingTables.join(", ")
-    const available =
+  override readonly message =
+    `SpaceTimeDB database schema mismatch for module ${this.module}: missing table(s): ${this.missingTables.join(", ")}; available table(s): ${
       this.availableTables.length === 0
         ? "(none)"
         : this.availableTables.join(", ")
-    return `SpaceTimeDB database schema mismatch for module ${this.module}: missing table(s): ${missing}; available table(s): ${available}`
-  }
+    }`
 }
 
-export class ReducerGlobalRandomNotAllowedError extends Data.TaggedError(
-  "ReducerGlobalRandomNotAllowedError",
+export class HandlerGlobalRandomNotAllowedDefect extends Data.TaggedError(
+  "HandlerGlobalRandomNotAllowedDefect",
 ) {
   override readonly message =
-    "Global Math.random is not available in SpaceTimeDB reducers. Use Effect.Random or ctx.random instead." as const
+    "Global Math.random is not available in deterministic SpaceTimeDB handlers. Use Effect.Random or ctx.random instead." as const
 }
 
-export class ReducerWallClockNotAllowedError extends Data.TaggedError(
-  "ReducerWallClockNotAllowedError",
+export class HandlerWallClockNotAllowedDefect extends Data.TaggedError(
+  "HandlerWallClockNotAllowedDefect",
 ) {
   override readonly message =
-    "Wall-clock time (Date.now / new Date()) is not available in SpaceTimeDB reducers. Use ctx.timestamp, or Effect Clock/DateTime (wired to the transaction timestamp), instead." as const
+    "Wall-clock time (Date.now / new Date()) is not available in deterministic SpaceTimeDB handlers. Use ctx.timestamp, or Effect Clock/DateTime (wired to the transaction timestamp), instead." as const
 }
 
-const StdbSenderFailureTypeId = errorTypeId("StdbSenderFailure")
-export class StdbSenderFailure extends Data.TaggedError("StdbSenderFailure")<{
-  readonly value: string
-}> {
-  readonly [StdbSenderFailureTypeId] = StdbSenderFailureTypeId
-  static is = hasErrorTypeId<StdbSenderFailure>(StdbSenderFailureTypeId)
-}
-
-export class StdbDeclaredErrorEncodingFailure extends Data.TaggedError(
-  "StdbDeclaredErrorEncodingFailure",
+export class StdbDeclaredErrorEncodingError extends Data.TaggedError(
+  "StdbDeclaredErrorEncodingError",
 )<{
   readonly callable: "reducer" | "procedure"
   readonly cause: unknown
-}> {}
+}> {
+  override readonly message =
+    `A ${this.callable}'s declared error could not be encoded`
+}
 
 export type HttpResponseLike = {
   readonly status: number
@@ -241,7 +165,7 @@ export type HttpResponseLike = {
   readonly bytes: () => Uint8Array
 }
 
-type ProcedureHttpHeadersInit =
+export type ProcedureHttpHeadersInit =
   | Array<[string, string]>
   | Record<string, string>
   | Headers
@@ -250,19 +174,27 @@ export type ProcedureHttpRequestOptions = {
   readonly body?: BodyInit | null
   readonly headers?: ProcedureHttpHeadersInit
   readonly method?: string
+  readonly timeout?: Duration.Input
+}
+
+export type NativeProcedureHttpRequestOptions = Omit<
+  ProcedureHttpRequestOptions,
+  "timeout"
+> & {
   readonly timeout?: TimeDuration
 }
 
 export type RawProcedureHttp = {
   readonly fetch: (
     url: string,
-    init?: ProcedureHttpRequestOptions,
+    init?: NativeProcedureHttpRequestOptions,
   ) => HttpResponseLike
 }
 
 export type EffectHttpClient = {
   readonly fetch: (
-    ...args: Parameters<RawProcedureHttp["fetch"]>
+    url: string,
+    init?: ProcedureHttpRequestOptions,
   ) => Effect.Effect<HttpResponseLike, StdbHostCallError>
   readonly text: (
     response: HttpResponseLike,
@@ -275,10 +207,30 @@ export type EffectHttpClient = {
   ) => Effect.Effect<Uint8Array, StdbHostCallError>
 }
 
-export type DbFailure = StdbHostFailure | StdbDecodeError
-type DbEffect<A> = Effect.Effect<A, DbFailure>
-type DbStream<A> = Stream.Stream<A, DbFailure>
-type ScheduledInsertRow<Table extends AnyTableSpec> = Omit<
+/** Recoverable host rejections across table writes. */
+export type DbFailure = Exclude<HostFailure, StdbHostCallError>
+export type InsertFailure<Table extends AnyTableSpec> =
+  | (true extends Table["scheduled"] ? StdbScheduleDelayTooLongError : never)
+  | (string extends ColumnKey<Table>
+      ? StdbAutoIncOverflowError | StdbUniqueAlreadyExistsError
+      : {
+          [K in ColumnKey<Table>]:
+            | (FieldOptionsOf<Table["columns"][K]>["autoInc"] extends true
+                ? StdbAutoIncOverflowError
+                : never)
+            | (FieldOptionsOf<Table["columns"][K]> extends
+                | { primaryKey: true }
+                | { unique: true }
+                ? StdbUniqueAlreadyExistsError
+                : never)
+        }[ColumnKey<Table>])
+  | (Table["constraints"][number] extends never
+      ? never
+      : StdbUniqueAlreadyExistsError)
+
+export type DbEffect<A> = Effect.Effect<A>
+export type DbStream<A> = Stream.Stream<A>
+export type ScheduledInsertRow<Table extends AnyTableSpec> = Omit<
   TableRow<Table>,
   "scheduledId"
 >
@@ -297,7 +249,7 @@ type UniqueAccessorFromColumns<
   readonly findOrFail: <E>(
     value: IndexPoint<Table, Columns, true>,
     makeError: (value: IndexPoint<Table, Columns, true>) => E,
-  ) => Effect.Effect<TableRow<Table>, E | DbFailure>
+  ) => Effect.Effect<TableRow<Table>, E>
 } & (Readonly extends true
   ? {}
   : {
@@ -314,8 +266,12 @@ type PrimaryKeyAccessorFromColumns<
   (Readonly extends true
     ? {}
     : {
-        readonly replace: (row: TableRow<Table>) => DbEffect<TableRow<Table>>
-        readonly update: (row: TableRow<Table>) => DbEffect<TableRow<Table>>
+        readonly update: (
+          row: TableRow<Table>,
+        ) => Effect.Effect<
+          TableRow<Table>,
+          InsertFailure<Table> | StdbNoSuchRowError
+        >
       })
 
 type ImplicitPrimaryKeyAccessor<
@@ -346,9 +302,6 @@ type RangeAccessorFromColumns<
   ? {}
   : {
       readonly delete: (
-        range: IndexRange<Table, Columns, "structural", true>,
-      ) => DbEffect<number>
-      readonly deleteAll: (
         range: IndexRange<Table, Columns, "structural", true>,
       ) => DbEffect<number>
     })
@@ -394,7 +347,10 @@ type ExplicitIndexAccessor<
       : RangeAccessorFromColumns<Table, Columns, Readonly>
   : never
 
-type TableAccessors<Table extends AnyTableSpec, Readonly extends boolean> = {
+export type TableAccessors<
+  Table extends AnyTableSpec,
+  Readonly extends boolean,
+> = {
   readonly [Name in PrimaryKeyNames<Table>]: ImplicitPrimaryKeyAccessor<
     Table,
     Name,
@@ -437,7 +393,10 @@ export type OutboxTableHandle<
   : {
       readonly insert: (
         row: OutboxInsertRow<Table, Interface>,
-      ) => Effect.Effect<TableRow<Table>, OutboxRowTooLarge | DbFailure>
+      ) => Effect.Effect<
+        TableRow<Table>,
+        OutboxRowTooLargeError | InsertFailure<Table>
+      >
     }) &
   TableAccessors<Table, true>
 
@@ -455,24 +414,26 @@ export type EffectTableHandle<
 } & (Readonly extends true
   ? {}
   : {
-      readonly insert: (row: TableRow<Table>) => DbEffect<TableRow<Table>>
+      readonly insert: (
+        row: TableRow<Table>,
+      ) => Effect.Effect<TableRow<Table>, InsertFailure<Table>>
     } & (Table["scheduled"] extends true
       ? {
           readonly schedule: (
             row: ScheduledInsertRow<Table>,
-          ) => DbEffect<TableRow<Table>>
+          ) => Effect.Effect<TableRow<Table>, InsertFailure<Table>>
         }
       : {}) & {
         readonly insertAll: (
           rows: Iterable<TableRow<Table>>,
-        ) => DbEffect<ReadonlyArray<TableRow<Table>>>
+        ) => Effect.Effect<ReadonlyArray<TableRow<Table>>, InsertFailure<Table>>
         readonly delete: (row: TableRow<Table>) => DbEffect<boolean>
         readonly clear: () => DbEffect<bigint>
       }) &
   TableAccessors<Table, Readonly>
 
 /** An outbox's handle, or the ordinary handle of any other table. */
-type TableHandleFor<
+export type TableHandleFor<
   Table extends AnyTableSpec,
   Readonly extends boolean,
 > = Table extends {
@@ -489,20 +450,56 @@ export type ReadonlyDbHandleFor<Tables extends Record<string, AnyTableSpec>> = {
   readonly [Key in keyof Tables]-?: TableHandleFor<Tables[Key], true>
 }
 
-export type EffectDbView<Module extends AnyModuleSpec> = DbHandleFor<
-  Module["tables"]
->
+/** Each db.<key> for an Effect mount exposes its child's table handles with the enclosing database's access mode. */
+export type MountedDb<
+  Module extends AnyModuleSpec,
+  ReadOnly extends boolean,
+> = {
+  readonly [Key in keyof NonNullable<Module["mounts"]> as NonNullable<
+    Module["mounts"]
+  >[Key] extends { readonly kind: "moduleMount" }
+    ? Key
+    : never]: NonNullable<Module["mounts"]>[Key] extends {
+    readonly module: infer Child extends AnyModuleSpec
+  }
+    ? ReadOnly extends true
+      ? ReadonlyEffectDbView<Child>
+      : EffectDbView<Child>
+    : never
+}
+/** Writable handles for local tables and nested Effect module mounts in this transaction. */
+export type EffectDbView<Module extends AnyModuleSpec> = keyof NonNullable<
+  Module["mounts"]
+> extends never
+  ? DbHandleFor<Module["tables"]>
+  : DbHandleFor<Module["tables"]> & MountedDb<Module, false>
 
+/** Read-only handles for local tables and Effect module mounts visible to this view. */
 export type ReadonlyEffectDbView<Module extends AnyModuleSpec> =
-  ReadonlyDbHandleFor<Module["tables"]>
+  keyof NonNullable<Module["mounts"]> extends never
+    ? ReadonlyDbHandleFor<Module["tables"]>
+    : ReadonlyDbHandleFor<Module["tables"]> & MountedDb<Module, true>
 
 export const wrapHttp = (ctx: unknown): EffectHttpClient => {
   const http = ctx as RawProcedureHttp
 
   return {
-    fetch: (...args) =>
+    fetch: (url, init) =>
       Effect.try({
-        try: () => http.fetch(...args),
+        try: () => {
+          if (init === undefined) return http.fetch(url)
+          const { timeout, ...request } = init
+          if (timeout === undefined) return http.fetch(url, request)
+          const duration = Duration.fromInputUnsafe(timeout)
+          if (Duration.equals(duration, Duration.infinity))
+            return http.fetch(url, request)
+          return http.fetch(url, {
+            ...request,
+            timeout: new TimeDuration(
+              Duration.toNanosUnsafe(duration) / 1_000n,
+            ),
+          })
+        },
         catch: (cause) => new StdbHostCallError({ op: "http.fetch", cause }),
       }),
     text: (response) =>

@@ -11,7 +11,7 @@ import { isHostRecord } from "./host-abi-runtime.ts"
 import type { ServerSenderAuth } from "./runtime-types.ts"
 
 export { OutboxResult } from "../contract/outbox-result.ts"
-export { OutboxRowTooLarge } from "../contract/outbox-table.ts"
+export { OutboxRowTooLargeError } from "../contract/outbox-table.ts"
 
 /**
  * An outbox row addressed to the sending database itself. Peers come only from
@@ -23,7 +23,10 @@ export class OutboxSelfTargetDefect extends Data.TaggedError(
 )<{
   readonly table: string
   readonly target: string
-}> {}
+}> {
+  override readonly message =
+    `Outbox table ${this.table} addressed a row to this database itself (${this.target})`
+}
 
 /**
  * An outbox insert from a context that is not a reducer, a scheduled reducer, a
@@ -34,7 +37,10 @@ export class OutboxSendOutsideMutationDefect extends Data.TaggedError(
   "OutboxSendOutsideMutationDefect",
 )<{
   readonly table: string
-}> {}
+}> {
+  override readonly message =
+    `Outbox table ${this.table} was written outside a reducer or a procedure transaction`
+}
 
 /** What an outbox insert needs from the transaction it runs in. */
 export type OutboxSendContext = {
@@ -87,7 +93,10 @@ class OutboxRowSizeDefect extends Data.TaggedError("OutboxRowSizeDefect")<{
     | "bytes"
     | "primitive"
   readonly value: unknown
-}> {}
+}> {
+  override readonly message =
+    `An outbox row's host value does not fit its type: expected ${this.expected}`
+}
 
 const fixedPrimitiveBytes: Readonly<Record<string, number>> = {
   bool: 1,
@@ -216,7 +225,9 @@ class OutboxBacklogTargetDefect extends Data.TaggedError(
   "OutboxBacklogTargetDefect",
 )<{
   readonly target: unknown
-}> {}
+}> {
+  override readonly message = "An outbox row's target is not an identity"
+}
 
 /** One target's pending calls in one outbox. */
 export type OutboxBacklogEntry = {

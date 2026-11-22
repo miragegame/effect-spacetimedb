@@ -1,3 +1,5 @@
 {
-  "err": "thing missing"
+  "ok": {
+    "err": "thing missing"
+  }
 }

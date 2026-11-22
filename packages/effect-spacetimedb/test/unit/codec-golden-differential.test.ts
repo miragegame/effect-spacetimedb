@@ -6,7 +6,7 @@ import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as FastCheck from "fast-check"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import {
   decodeHostValue,
   encodeGeneratedClientValue,
@@ -17,7 +17,7 @@ import { corpusArbitraries } from "../helpers/value-type-arbitrary.ts"
 
 const { expect } = EffectVitest
 const describe = EffectVitest.layer(TestLayer)
-const T = StdbTesting.ContractType
+const T = StdbInternal.ContractType
 
 const generatedValueSeed = 0x51d0_2026
 
@@ -99,7 +99,7 @@ const failureSnapshot = (cause: unknown): FailureSnapshot => {
   if (cause instanceof CodecGoldenSyncThrown) {
     return failureSnapshot(cause.cause)
   }
-  if (cause instanceof StdbTesting.StdbDecodeError) {
+  if (cause instanceof StdbInternal.StdbDecodeError) {
     return {
       tag: "StdbDecodeError",
       message: cause.message,
@@ -176,12 +176,20 @@ const generatedCorpus = corpusArbitraries.map(
 )
 
 describe("codec golden differential", (it) => {
+  it("round-trips declared snake_case variants and nested fields through generated bindings", () => {
+    const valueType = T.sum({ ready_now: T.struct({ item_id: T.string() }) })
+    const authored = valueType.make.ready_now({ item_id: "one" })
+    const generated = encodeGeneratedClientValue(valueType, authored)
+    expect(generated).toEqual({ tag: "ReadyNow", value: { itemId: "one" } })
+    expect(decodeHostValue(valueType, generated)).toEqual(authored)
+  })
+
   it.effect("pins fixed-seed generated values across envelope paths", () =>
     Effect.gen(function* () {
       const snapshots = yield* Effect.forEach(
         generatedCorpus,
         Effect.fn(function* ({ kind, type, value }) {
-          const hostEncoded = StdbTesting.encodeHostValue(type, value)
+          const hostEncoded = StdbInternal.encodeHostValue(type, value)
           const hostDecoded = decodeHostValue(type, hostEncoded)
           const wireEncoded = yield* Schema.encodeEffect(type.schema)(
             value as never,
@@ -189,19 +197,17 @@ describe("codec golden differential", (it) => {
           const wireDecoded = yield* Schema.decodeUnknownEffect(type.schema)(
             wireEncoded,
           )
-          const httpPrepared = StdbTesting.ClientHttpJson.prepareHttpInputValue(
-            type,
-            wireEncoded,
-          )
+          const httpPrepared =
+            StdbInternal.ClientHttpJson.prepareHttpInputValue(type, wireEncoded)
           const httpBody = T.isUnitValueType(type)
             ? "[]"
-            : StdbTesting.ClientHttpJson.encodeHttpInput(httpPrepared)
+            : StdbInternal.ClientHttpJson.encodeHttpInput(httpPrepared)
           const httpDecoded =
-            yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+            yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
               type,
               httpBody,
             )
-          const envelope = StdbTesting.procedureEnvelope(type, ExampleErrors)
+          const envelope = StdbInternal.procedureEnvelope(type, ExampleErrors)
           const procedureEncoded = yield* Schema.encodeEffect(envelope.schema)({
             tag: "ok",
             value,
@@ -984,11 +990,11 @@ describe("codec golden differential", (it) => {
         FooBar: T.string(),
       })
       const OptionString = T.option(T.string())
-      const ProcedureUnit = StdbTesting.procedureEnvelope(
+      const ProcedureUnit = StdbInternal.procedureEnvelope(
         T.unit(),
         ExampleErrors,
       )
-      const ProcedureString = StdbTesting.procedureEnvelope(
+      const ProcedureString = StdbInternal.procedureEnvelope(
         T.string(),
         ExampleErrors,
       )
@@ -1027,17 +1033,17 @@ describe("codec golden differential", (it) => {
         none: [],
       })
       const httpRouteTupleSum =
-        yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           Sum,
           '[0,"accepted"]',
         )
       const httpRouteTupleResult =
-        yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           UnitResult,
           "[0,[]]",
         )
       const httpNonePayload =
-        yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           OptionString,
           '{"none":{}}',
         )
@@ -1053,7 +1059,7 @@ describe("codec golden differential", (it) => {
         value: undefined,
       })
       const callableRouteTupleStringOk =
-        yield* StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        yield* StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           ProcedureString,
           '[0,"accepted"]',
         )
@@ -1080,7 +1086,7 @@ describe("codec golden differential", (it) => {
         },
         httpJson: {
           preparedRouteTupleInput: stableValue(
-            StdbTesting.ClientHttpJson.prepareHttpInputValue(Sum, {
+            StdbInternal.ClientHttpJson.prepareHttpInputValue(Sum, {
               fooBar: "accepted",
             }),
           ),
@@ -1166,17 +1172,17 @@ describe("codec golden differential", (it) => {
         deleted: T.unit(),
       })
       const OptionString = T.option(T.string())
-      const ProcedureString = StdbTesting.procedureEnvelope(
+      const ProcedureString = StdbInternal.procedureEnvelope(
         T.string(),
         ExampleErrors,
       )
-      const ProcedureUnit = StdbTesting.procedureEnvelope(
+      const ProcedureUnit = StdbInternal.procedureEnvelope(
         T.unit(),
         ExampleErrors,
       )
 
       const hostEncodeMissingSumValue = yield* syncExit(() =>
-        StdbTesting.encodeHostValue(Sum, { tag: "active" }),
+        StdbInternal.encodeHostValue(Sum, { tag: "active" }),
       )
       const hostDecodeBadNonePayload = yield* syncExit(() =>
         decodeHostValue(OptionString, { none: { extra: true } }),
@@ -1199,19 +1205,19 @@ describe("codec golden differential", (it) => {
         }),
       )
       const httpOutputResultMissingValue = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           UnitResult,
           '{"tag":"err"}',
         ),
       )
       const httpOutputSumExtraField = yield* Effect.exit(
-        StdbTesting.ClientValueCodec.httpJson.decodeOutput(
+        StdbInternal.ClientValueCodec.httpJson.decodeOutput(
           Sum,
           '{"tag":"active","value":"accepted","extra":true}',
         ),
       )
       const httpInputNonFiniteNumber = yield* syncExit(() =>
-        StdbTesting.ClientHttpJson.encodeHttpInput([Number.NaN]),
+        StdbInternal.ClientHttpJson.encodeHttpInput([Number.NaN]),
       )
       const callableMissingOkValue = yield* Effect.exit(
         Schema.decodeUnknownEffect(ProcedureString.schema)({

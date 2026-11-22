@@ -4,14 +4,14 @@ import * as Schema from "effect/Schema"
 const { describe, expect, it } = EffectVitest
 
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 
 const diagnosticCodes = (body: () => unknown): ReadonlyArray<string> => {
   try {
     body()
     return []
   } catch (error) {
-    return error instanceof Stdb.StdbValidationError
+    return error instanceof Stdb.StdbValidationDefect
       ? error.diagnostics.map((diagnostic) => diagnostic.code)
       : []
   }
@@ -24,7 +24,7 @@ describe("contract robustness", () => {
     expect(() => Stdb.option(inner)).toThrow(/wrap the inner option/u)
     expect(() => Stdb.optional(inner)).toThrow(/wrap the inner option/u)
     expect(() =>
-      StdbTesting.ContractType.field(inner, { optional: true }),
+      StdbInternal.ContractType.field(inner, { optional: true }),
     ).toThrow(/wrap the inner option/u)
   })
 
@@ -37,11 +37,11 @@ describe("contract robustness", () => {
     expect(
       diagnosticCodes(
         () =>
-          Stdb.StdbModule.make("none_policy_collision", {
+          Stdb.Module.make("none_policy_collision", {
             settings: { caseConversionPolicy: "none" },
           }).add(
-            Stdb.StdbGroup.make("Actions").add(
-              Stdb.StdbFn.reducer("run", {
+            Stdb.Group.make("Actions").add(
+              Stdb.Fn.reducer("run", {
                 params: Stdb.struct({
                   value: Stdb.sum({
                     fooBar: Stdb.unit(),
@@ -56,7 +56,7 @@ describe("contract robustness", () => {
 
     expect(
       () =>
-        Stdb.StdbModule.make("none_policy_style", {
+        Stdb.Module.make("none_policy_style", {
           settings: { caseConversionPolicy: "none" },
         }).addTables(
           Stdb.table("authored_table", {
@@ -73,32 +73,32 @@ describe("contract robustness", () => {
     ) =>
       diagnosticCodes(
         () =>
-          Stdb.StdbModule.make("native_column_names", {
+          Stdb.Module.make("native_column_names", {
             settings,
           }).addTables(Stdb.table("records", { columns })).spec,
       )
 
     expect(
       codesFor({
-        left: Stdb.string().name("same_name"),
-        right: Stdb.string().name("same_name"),
+        left: Stdb.string().columnName("same_name"),
+        right: Stdb.string().columnName("same_name"),
       }),
     ).toContain("DuplicateNativeColumnName")
     expect(
       codesFor({
         displayName: Stdb.string(),
-        alias: Stdb.string().name("display_name"),
+        alias: Stdb.string().columnName("display_name"),
       }),
     ).toContain("DuplicateNativeColumnName")
     expect(
       codesFor({
-        value: Stdb.string().name("not-a-native-name"),
+        value: Stdb.string().columnName("not-a-native-name"),
       }),
     ).toContain("InvalidNativeColumnName")
     expect(
       codesFor({
-        scheduledId: Stdb.string().name("scheduled_id"),
-        scheduledAt: Stdb.string().name("scheduled_at"),
+        scheduledId: Stdb.string().columnName("scheduled_id"),
+        scheduledAt: Stdb.string().columnName("scheduled_at"),
       }),
     ).toEqual([])
     expect(
@@ -121,29 +121,29 @@ describe("contract robustness", () => {
   })
 
   it("throws descriptive errors for malformed descriptor metadata", () => {
-    const malformed = StdbTesting.ContractType.attachStdbType(
+    const malformed = StdbInternal.ContractType.attachStdbType(
       Schema.String,
       (factories) => factories.string(),
       { kind: "array" },
     )
 
     expect(() =>
-      StdbTesting.ContractTypeDescriptor.describe(malformed),
+      StdbInternal.ContractTypeDescriptor.describe(malformed),
     ).toThrow("Malformed SpaceTimeDB array type metadata: missing item")
 
-    const undefinedItem = StdbTesting.ContractType.attachStdbType(
+    const undefinedItem = StdbInternal.ContractType.attachStdbType(
       Schema.String,
       (factories) => factories.string(),
       { kind: "array" },
     )
-    const info = StdbTesting.ContractType.typeInfo(undefinedItem)
+    const info = StdbInternal.ContractType.typeInfo(undefinedItem)
     if (info == null) {
       throw new Error("Expected attached SpaceTimeDB type metadata")
     }
     Object.defineProperty(info, "item", { value: undefined })
 
     expect(() =>
-      StdbTesting.ContractTypeDescriptor.describe(undefinedItem),
+      StdbInternal.ContractTypeDescriptor.describe(undefinedItem),
     ).toThrow("Malformed SpaceTimeDB array type metadata: missing item")
   })
 
@@ -153,11 +153,11 @@ describe("contract robustness", () => {
     expect(() =>
       Schema.decodeUnknownSync(mismatched.schema)("wire text"),
     ).toThrow()
-    expect(StdbTesting.ContractType.typeInfo(mismatched)?.item).toBeDefined()
+    expect(StdbInternal.ContractType.typeInfo(mismatched)?.item).toBeDefined()
   })
 
   it("renders diagnostic identity and identifier failure reasons", () => {
-    const diagnostic = new Stdb.StdbDiagnostic({
+    const diagnostic = new Stdb.Diagnostic({
       code: "InvalidNativeColumnName",
       path: ["tables", "records", "columns", "value"],
       message: "bad name",
@@ -167,10 +167,10 @@ describe("contract robustness", () => {
       "[InvalidNativeColumnName] tables.records.columns.value: bad name",
     )
     expect(() =>
-      StdbTesting.ContractType.validateSatsTypeIdentifier("not-valid"),
+      StdbInternal.ContractType.validateSatsTypeIdentifier("not-valid"),
     ).toThrow(/valid SATS type identifier/u)
     expect(() =>
-      StdbTesting.ContractType.validateSatsTypeIdentifier("class"),
+      StdbInternal.ContractType.validateSatsTypeIdentifier("class"),
     ).toThrow(/reserved/u)
   })
 })

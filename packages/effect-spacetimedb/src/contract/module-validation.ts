@@ -1,13 +1,13 @@
 export {
   formatModuleDiagnostics,
-  StdbDiagnostic,
-  type StdbDiagnosticCode,
-  type StdbDiagnosticSeverity,
-  StdbValidationError,
+  Diagnostic,
+  type DiagnosticCode,
+  type DiagnosticSeverity,
+  StdbValidationDefect,
 } from "./diagnostic.ts"
 export type { ServerHandlerDefinitions } from "./module-validation-common.ts"
 export { httpHandlerRoutesOverlap } from "./module-validation-http-handlers.ts"
-export { RESERVED_GROUP_CLIENT_KEYS } from "./module-validation-http-handlers.ts"
+export { groupClientKeysReserved } from "./module-validation-http-handlers.ts"
 import {
   assertValid as assertValidModule,
   validate as validateModule,

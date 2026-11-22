@@ -7,14 +7,14 @@ import {
   compileModule as compileInternalModule,
   type CompiledModule,
 } from "../../src/server/compile-module.ts"
-import type * as Server from "../../src/server/bind.ts"
+import type { BoundModule, Handlers } from "../../src/server/handler-types.ts"
 
 export const compileModule = <
   Module extends AnyModuleSpec,
   RuntimeR = never,
 >(options: {
-  readonly server: Server.InternalServerInstance<Module, RuntimeR>
-  readonly handlers: Server.Handlers<Module, RuntimeR>
+  readonly server: BoundModule<Module, RuntimeR>
+  readonly handlers: Handlers<Module, RuntimeR>
 }): CompiledModule<Module> =>
   compileInternalModule(
     attachInternalStdbBuildPlan(

@@ -1,20 +1,16 @@
-import { StdbDecodeError } from "../decode-error.ts"
-
+import { fieldOptions } from "../contract/field.ts"
 import { rowType, type AnyTableSpec } from "../contract/table.ts"
-
 import * as Type from "../contract/type.ts"
 import { encodeHostValue } from "../contract/type/host-codec.ts"
 import {
   indexValueCodecOf,
   type IndexValueCodecOptions,
 } from "../index-value-codec.ts"
-
 import {
   hasUniqueConstraintFor,
   primaryKeyColumnsOf,
   uniqueConstraintColumnsOf,
 } from "./db-handle-runtime.ts"
-
 import type { LookupPlan, TableCodec } from "./db-handle-runtime.ts"
 
 export type ServerRangeFactory = NonNullable<
@@ -98,18 +94,17 @@ export const tableCodecOf = (
 
   return {
     context,
+    scheduled: table.scheduled,
+    hasAutoIncrement: Object.values(table.columns).some(
+      (col) => fieldOptions(col).autoInc,
+    ),
+    hasUniqueConstraint:
+      table.constraints.length > 0 ||
+      Object.values(table.columns).some(
+        (col) => fieldOptions(col).primaryKey || fieldOptions(col).unique,
+      ),
     encodeRow: (row) => encodeHostValue(rowType(table), row),
-    decodeRow: (row) => {
-      try {
-        return rowCodec.decodeUnknownSync(row)
-      } catch (cause) {
-        throw new StdbDecodeError({
-          phase: "row",
-          cause,
-          ...context,
-        })
-      }
-    },
+    decodeRow: rowCodec.decodeUnknownSync,
     encodeLookupPoint: indexCodec.encodePoint,
     encodeLookupRange: indexCodec.encodeRange,
   }

@@ -1,3 +1,4 @@
+import type { MembersByPath } from "./member-path.ts"
 import type { AnyModuleSpec } from "./contract/module.ts"
 import { outboxResultMetadataOf } from "./contract/outbox-table.ts"
 import type { AnyViewSpec } from "./contract/view.ts"
@@ -7,7 +8,6 @@ import type {
   OptionValueType,
   TypeOf,
 } from "./contract/type.ts"
-import { typedEntries, typedFromEntries } from "./utils.ts"
 
 export type ScheduleBinding = {
   readonly tableKey: string
@@ -25,28 +25,26 @@ export type OutboxResultBinding = {
 }
 
 export type PublicPersistentTables<Module extends AnyModuleSpec> = {
-  readonly [Key in keyof Module["tables"] &
-    string as Module["tables"][Key]["public"] extends true
-    ? Module["tables"][Key]["event"] extends true
+  readonly [Key in keyof MembersByPath<Module, "tables"> &
+    string as MembersByPath<Module, "tables">[Key]["public"] extends true
+    ? MembersByPath<Module, "tables">[Key]["event"] extends true
       ? never
       : Key
-    : never]: Module["tables"][Key]
+    : never]: MembersByPath<Module, "tables">[Key]
 }
 
 export type PublicEventTables<Module extends AnyModuleSpec> = {
-  readonly [Key in keyof Module["tables"] &
-    string as Module["tables"][Key]["public"] extends true
-    ? Module["tables"][Key]["event"] extends true
+  readonly [Key in keyof MembersByPath<Module, "tables"> &
+    string as MembersByPath<Module, "tables">[Key]["public"] extends true
+    ? MembersByPath<Module, "tables">[Key]["event"] extends true
       ? Key
       : never
-    : never]: Module["tables"][Key]
+    : never]: MembersByPath<Module, "tables">[Key]
 }
 
 export type PublicViews<Module extends AnyModuleSpec> = {
-  readonly [Key in keyof Module["views"] &
-    string as Module["views"][Key]["public"] extends true
-    ? Key
-    : never]: Module["views"][Key]
+  readonly [Key in keyof MembersByPath<Module, "views"> &
+    string]: MembersByPath<Module, "views">[Key]
 }
 
 export type PublicViewKeys<Module extends AnyModuleSpec> =
@@ -62,7 +60,7 @@ export type ViewTakesArgs<View extends AnyViewSpec> = [
   ? false
   : true
 
-type ViewItemOf<View extends AnyViewSpec> =
+export type ViewItemOf<View extends AnyViewSpec> =
   View["returns"] extends ArrayValueType<infer Item>
     ? Item
     : View["returns"] extends OptionValueType<infer Item>
@@ -73,18 +71,30 @@ export type ViewRowOf<View extends AnyViewSpec> = TypeOf<ViewItemOf<View>>
 
 export type WsViewRowOf<View extends AnyViewSpec> = EncodedOf<ViewItemOf<View>>
 
+/**
+ * Functions the host itself runs: the target of a schedule and the settle
+ * reducer of an outbox. A typed client never offers them. Lifecycle reducers
+ * need no entry here because they live outside `reducers`.
+ */
+export type HostInvokedFunction =
+  | { readonly scheduled: unknown }
+  | { readonly outboxResult: unknown }
+
 export type PublicReducers<Module extends AnyModuleSpec> = {
-  readonly [Key in keyof Module["reducers"] &
-    string as Module["reducers"][Key]["public"] extends false
+  readonly [Key in keyof MembersByPath<Module, "reducers"> &
+    string as MembersByPath<Module, "reducers">[Key] extends HostInvokedFunction
     ? never
-    : Key]: Module["reducers"][Key]
+    : Key]: MembersByPath<Module, "reducers">[Key]
 }
 
 export type PublicProcedures<Module extends AnyModuleSpec> = {
-  readonly [Key in keyof Module["procedures"] &
-    string as Module["procedures"][Key]["public"] extends false
+  readonly [Key in keyof MembersByPath<Module, "procedures"> &
+    string as MembersByPath<
+    Module,
+    "procedures"
+  >[Key] extends HostInvokedFunction
     ? never
-    : Key]: Module["procedures"][Key]
+    : Key]: MembersByPath<Module, "procedures">[Key]
 }
 
 export type HttpHandlers<Module extends AnyModuleSpec> = {
@@ -120,6 +130,12 @@ const scheduledMetadataOf = (
         .allowExternalCallers === true,
   }
 }
+
+export const isScheduledFunction = (spec: unknown): boolean =>
+  scheduledMetadataOf(spec) !== undefined
+
+export const isHostInvoked = (spec: unknown): boolean =>
+  isScheduledFunction(spec) || outboxResultMetadataOf(spec) !== undefined
 
 const resolveScheduledTable = (
   module: AnyModuleSpec,
@@ -209,47 +225,38 @@ export const resolveOutboxResultBindings = <Module extends AnyModuleSpec>(
 }
 
 export const projectPublicPersistentTables = <Module extends AnyModuleSpec>(
-  module: Module,
+  tables: MembersByPath<Module, "tables">,
 ): PublicPersistentTables<Module> =>
-  typedFromEntries(
-    typedEntries(module.tables).flatMap(([key, tableSpec]) =>
-      tableSpec.public && !tableSpec.event ? ([[key, tableSpec]] as const) : [],
+  Object.fromEntries(
+    Object.entries(tables).filter(
+      ([, tableSpec]) => tableSpec.public && !tableSpec.event,
     ),
   ) as PublicPersistentTables<Module>
 
 export const projectPublicEventTables = <Module extends AnyModuleSpec>(
-  module: Module,
+  tables: MembersByPath<Module, "tables">,
 ): PublicEventTables<Module> =>
-  typedFromEntries(
-    typedEntries(module.tables).flatMap(([key, tableSpec]) =>
-      tableSpec.public && tableSpec.event ? ([[key, tableSpec]] as const) : [],
+  Object.fromEntries(
+    Object.entries(tables).filter(
+      ([, tableSpec]) => tableSpec.public && tableSpec.event,
     ),
   ) as PublicEventTables<Module>
 
-export const projectPublicViews = <Module extends AnyModuleSpec>(
-  module: Module,
-): PublicViews<Module> =>
-  typedFromEntries(
-    typedEntries(module.views).flatMap(([key, viewSpec]) =>
-      viewSpec.public ? ([[key, viewSpec]] as const) : [],
-    ),
-  ) as PublicViews<Module>
-
 export const projectPublicReducers = <Module extends AnyModuleSpec>(
-  module: Module,
+  reducers: MembersByPath<Module, "reducers">,
 ): PublicReducers<Module> =>
-  typedFromEntries(
-    typedEntries(module.reducers).flatMap(([key, reducerSpec]) =>
-      reducerSpec.public ? ([[key, reducerSpec]] as const) : [],
+  Object.fromEntries(
+    Object.entries(reducers).filter(
+      ([, reducerSpec]) => !isHostInvoked(reducerSpec),
     ),
   ) as PublicReducers<Module>
 
 export const projectPublicProcedures = <Module extends AnyModuleSpec>(
-  module: Module,
+  procedures: MembersByPath<Module, "procedures">,
 ): PublicProcedures<Module> =>
-  typedFromEntries(
-    typedEntries(module.procedures).flatMap(([key, procedureSpec]) =>
-      procedureSpec.public ? ([[key, procedureSpec]] as const) : [],
+  Object.fromEntries(
+    Object.entries(procedures).filter(
+      ([, procedureSpec]) => !isHostInvoked(procedureSpec),
     ),
   ) as PublicProcedures<Module>
 

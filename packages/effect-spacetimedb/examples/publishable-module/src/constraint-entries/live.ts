@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 import { Db, ExampleModule, Tx } from "../module"
 
-export const ConstraintEntryFunctionsLive = Stdb.StdbBuilder.group(
+export const ConstraintEntryFunctionsLive = Stdb.Builder.group(
   ExampleModule,
   "ConstraintEntries",
   {

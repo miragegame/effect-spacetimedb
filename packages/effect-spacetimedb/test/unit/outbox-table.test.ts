@@ -3,12 +3,13 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Stdb from "effect-spacetimedb"
 import {
-  OutboxRowTooLarge,
+  OutboxRowTooLargeError,
   OutboxSelfTargetDefect,
   OutboxSendOutsideMutationDefect,
 } from "effect-spacetimedb/server"
 import { build } from "effect-spacetimedb/server-compiler"
 import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { Identity } from "spacetimedb"
 import { IdcFixtureInboxBinding } from "../fixtures/idc/binding"
 import { IdcFixtureInbox } from "../fixtures/idc/inbox"
@@ -60,7 +61,7 @@ const diagnosticsOf = (
   try {
     run()
   } catch (cause) {
-    if (cause instanceof Stdb.StdbValidationError) {
+    if (cause instanceof Stdb.StdbValidationDefect) {
       return cause.diagnostics.map(({ code, path }) => ({ code, path }))
     }
     throw cause
@@ -69,8 +70,8 @@ const diagnosticsOf = (
 }
 
 const settleGroupFor = (table: Stdb.AnyOutboxTableSpec, name: string) =>
-  Stdb.StdbGroup.make(`${name}Settles`).add(
-    Stdb.StdbFn.outboxResult(`${name}Settled`, { table }),
+  Stdb.Group.make(`${name}Settles`).add(
+    Stdb.Fn.outboxResult(`${name}Settled`, { table }),
   )
 
 describe("outbox tables", () => {
@@ -84,7 +85,7 @@ describe("outbox tables", () => {
     ])
     expect(pingOutbox.public).toBe(false)
     expect(pingOutbox.indexes).toContainEqual({
-      name: Stdb.outboxTargetIndexName,
+      name: StdbInternal.outboxTargetIndexName,
       algorithm: "btree",
       columns: ["target", "msgId"],
     })
@@ -119,7 +120,9 @@ describe("outbox tables", () => {
       },
     ])
     expect(
-      diagnosticsOf(declare({ sentAt: Stdb.timestamp().name("enqueued_at") })),
+      diagnosticsOf(
+        declare({ sentAt: Stdb.timestamp().columnName("enqueued_at") }),
+      ),
     ).toEqual([
       {
         code: "InvalidOutboxTable",
@@ -150,7 +153,7 @@ describe("outbox tables", () => {
     expect(
       diagnosticsOf(
         () =>
-          Stdb.StdbModule.make("oversized_outbox", {})
+          Stdb.Module.make("oversized_outbox", {})
             .addTables(oversized)
             .add(settleGroupFor(oversized, "oversized")).spec,
       ),
@@ -168,8 +171,7 @@ describe("outbox tables", () => {
     expect(
       diagnosticsOf(
         () =>
-          Stdb.StdbModule.make("unsettled_outbox", {}).addTables(unsettled)
-            .spec,
+          Stdb.Module.make("unsettled_outbox", {}).addTables(unsettled).spec,
       ),
     ).toEqual([
       {
@@ -185,7 +187,7 @@ describe("outbox tables", () => {
     expect(
       diagnosticsOf(
         () =>
-          Stdb.StdbModule.make("twice_settled", {})
+          Stdb.Module.make("twice_settled", {})
             .addTables(twice)
             .add(settleGroupFor(twice, "first"))
             .add(settleGroupFor(twice, "second")).spec,
@@ -204,7 +206,7 @@ describe("outbox tables", () => {
     expect(
       diagnosticsOf(
         () =>
-          Stdb.StdbModule.make("unregistered_outbox", {}).add(
+          Stdb.Module.make("unregistered_outbox", {}).add(
             settleGroupFor(unregistered, "unregistered"),
           ).spec,
       ),
@@ -258,13 +260,13 @@ describe("outbox tables", () => {
         .insert({ target: peer, note, requestId: "r1" })
         .pipe(Effect.flip)
 
-      expect(failure).toBeInstanceOf(OutboxRowTooLarge)
+      expect(failure).toBeInstanceOf(OutboxRowTooLargeError)
       expect(failure).toMatchObject({
         table: "pingOutbox",
         rowBytesMax: pingOutboxRowBytesMax,
       })
       expect(
-        failure instanceof OutboxRowTooLarge ? failure.rowBytes : 0,
+        failure instanceof OutboxRowTooLargeError ? failure.rowBytes : 0,
       ).toBeGreaterThan(pingOutboxRowBytesMax)
       // The fixture's sender refuses its own caller with a declared error.
       expect(() =>
@@ -295,9 +297,9 @@ describe("outbox tables", () => {
         const failure = yield* harness.effectDb.pingOutbox
           .insert({ target: peer, note: lone, requestId: "r2" })
           .pipe(Effect.flip)
-        expect(failure).toBeInstanceOf(OutboxRowTooLarge)
+        expect(failure).toBeInstanceOf(OutboxRowTooLargeError)
         expect(
-          failure instanceof OutboxRowTooLarge ? failure.rowBytes : 0,
+          failure instanceof OutboxRowTooLargeError ? failure.rowBytes : 0,
         ).toBeGreaterThan(pingOutboxRowBytesMax)
         expect(
           harness.outboxRows("pingOutbox").map((row) => row.requestId),
@@ -331,7 +333,7 @@ describe("outbox tables", () => {
       Effect.gen(function* () {
         const { harness } = makeSender()
         // An HTTP handler's transaction gets a handle without a send context.
-        const db = StdbTesting.makeDbHandleFactory(
+        const db = StdbInternal.makeDbHandleFactory(
           IdcSenderModule.spec,
         ).readwrite(harness.db as never)
 
@@ -504,7 +506,7 @@ describe("outbox tables", () => {
     ).toEqual([])
     // Only compilation reads bindings; planning a sender needs none.
     expect(
-      diagnosticsOf(() => Stdb.StdbBuilder.plan(IdcSenderModule, impls)),
+      diagnosticsOf(() => StdbInternal.planModule(IdcSenderModule, impls)),
     ).toEqual([])
   })
 })

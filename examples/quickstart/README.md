@@ -15,18 +15,30 @@ It shows the smallest authoring flow:
 
 ## Build
 
-From this directory:
+For a standalone project, copy this entire directory, including `patches/`.
+The manifest pins `effect-spacetimedb` to 0.9.0 and the SDK to 2.16.1.
+Bun applies the included SDK patch through `patchedDependencies`. Install the
+2.16.1 SpacetimeDB CLI and use a matching local host.
+
+From the copied directory:
 
 ```sh
+bun install
 bun run typecheck
 bun run smoke:client-import
 bun run build
 ```
 
-To generate a TypeScript client from the same module contract:
+To generate a TypeScript client in `src/module_bindings` from the same module contract:
 
 ```sh
 bun run generate-client
+```
+
+To publish it to a local server started with `spacetime start`:
+
+```sh
+spacetime publish --server local --yes effect-spacetimedb-quickstart
 ```
 
 Use this package as a starting point for a new module, then add tables,

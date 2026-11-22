@@ -1,8 +1,5 @@
 import { pascalCaseName } from "../contract/canonical-name.ts"
-import {
-  makeStdbDiagnostic,
-  type StdbDiagnostic,
-} from "../contract/diagnostic.ts"
+import { makeStdbDiagnostic, type Diagnostic } from "../contract/diagnostic.ts"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import {
   outboxMetadataOf,
@@ -255,8 +252,8 @@ const materializeStructFields = (
 
 const validateDuplicateEntries = (
   entries: ReadonlyArray<MaterializedTypeName>,
-): ReadonlyArray<StdbDiagnostic> => {
-  const diagnostics: Array<StdbDiagnostic> = []
+): ReadonlyArray<Diagnostic> => {
+  const diagnostics: Array<Diagnostic> = []
   const seen = new Map<string, MaterializedTypeName>()
 
   for (const entry of entries) {
@@ -310,7 +307,7 @@ const columnsWithOwnTypeNames = (
 
 export const validateMaterializedTypeNames = (
   module: AnyModuleSpec,
-): ReadonlyArray<StdbDiagnostic> => {
+): ReadonlyArray<Diagnostic> => {
   const recorder = makeRecorder()
 
   for (const [tableKey, table] of Object.entries(module.tables)) {

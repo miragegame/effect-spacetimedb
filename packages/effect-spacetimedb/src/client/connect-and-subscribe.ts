@@ -5,7 +5,7 @@ import type { SubscriptionTarget } from "../subscription-target.ts"
 import type { WsSession } from "./ws-session-tag.ts"
 import type { SubscriptionFailure } from "./ws-subscription.ts"
 
-export const connectAndSubscribe = <
+export const wsConnectAndSubscribe = <
   Module extends AnyModuleSpec,
   ErrorContext,
   RelationContext,

@@ -71,12 +71,12 @@ export const layer = <
     name: options.name,
   })
 
-export const layerGenerated = <
+export const layerGeneratedFromModulePlan = <
   Module extends AnyModuleSpec,
   ConnectionClass extends GeneratedConnectionClassLike,
   RelationContext,
 >(options: {
-  readonly module: Module
+  readonly plan: ModulePlan<Module>
   readonly config: WsGeneratedConfig<Module, ConnectionClass, RelationContext> &
     MismatchedGeneratedModuleDiagnostic<Module, ConnectionClass>
   readonly name?: string | undefined
@@ -91,14 +91,30 @@ export const layerGenerated = <
     [GeneratedArtifactValidation]: true,
   }
 
-  return layer<
+  return layerFromModulePlan<
     Module,
     GeneratedErrorContextOf<ConnectionClass>,
     RelationContext,
     GeneratedArtifactShapeError
   >({
-    module: options.module,
+    plan: options.plan,
     config,
     name: options.name,
   })
 }
+
+export const layerGenerated = <
+  Module extends AnyModuleSpec,
+  ConnectionClass extends GeneratedConnectionClassLike,
+  RelationContext,
+>(options: {
+  readonly module: Module
+  readonly config: WsGeneratedConfig<Module, ConnectionClass, RelationContext> &
+    MismatchedGeneratedModuleDiagnostic<Module, ConnectionClass>
+  readonly name?: string | undefined
+}) =>
+  layerGeneratedFromModulePlan<Module, ConnectionClass, RelationContext>({
+    plan: makeModulePlan(options.module),
+    config: options.config,
+    name: options.name,
+  })

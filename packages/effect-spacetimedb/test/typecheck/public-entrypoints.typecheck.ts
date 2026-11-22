@@ -8,7 +8,7 @@ import * as StdbAtom from "effect-spacetimedb/client/atom"
 import * as Server from "effect-spacetimedb/server"
 import * as StdbCompiler from "effect-spacetimedb/server-compiler"
 import { build, type CompiledModule } from "effect-spacetimedb/server-compiler"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import type { ErrorOf } from "./helpers"
 import { testViewRowsLength } from "../helpers/array-bounds"
 
@@ -24,8 +24,8 @@ const PublicEntrypointU64 = Schema.BigInt.check(
   Schema.isGreaterThanOrEqualToBigInt(0n),
 )
 
-const PublicViews = Stdb.StdbGroup.make("Views").add(
-  Stdb.StdbFn.anonymousView("allUsers", {
+const PublicViews = Stdb.Group.make("Views").add(
+  Stdb.Fn.anonymousView("allUsers", {
     returns: Stdb.array(
       Stdb.struct({
         id: PublicEntrypointString,
@@ -71,15 +71,15 @@ void publicEntrypointPrimaryKey
 void publicEntrypointSinglePrimaryKey
 void publicEntrypointSinglePrimaryKeyValue
 
-const PublicEntrypointModule = Stdb.StdbModule.make("public_entrypoints", {})
+const PublicEntrypointModule = Stdb.Module.make("public_entrypoints", {})
   .addTables(publicEntrypointsUser)
   .add(PublicViews)
 const Module = PublicEntrypointModule.spec
-const PublicEntrypointNoPkModule = Stdb.StdbModule.make(
+const PublicEntrypointNoPkModule = Stdb.Module.make(
   "public_entrypoints_no_pk",
   {},
 ).addTables(publicEntrypointsNoPk).spec
-const PublicEntrypointMultiPkModule = Stdb.StdbModule.make(
+const PublicEntrypointMultiPkModule = Stdb.Module.make(
   "public_entrypoints_multi_pk",
   {},
 ).addTables(publicEntrypointsMultiPk).spec
@@ -120,7 +120,7 @@ void Stdb.i256(PublicEntrypointU64)
 void Stdb.u256(PublicEntrypointU64)
 
 void Stdb.u32(PublicEntrypointU32).default(0)
-void PublicEntrypointString.name("display_name")
+void PublicEntrypointString.columnName("display_name")
 // @ts-expect-error column defaults must match the authored Stdb type
 void Stdb.u32(PublicEntrypointU32).default("0")
 
@@ -161,7 +161,6 @@ void publicRawCall.pipe(
   Effect.catchTag("DomainCallError", ({ error }) => Effect.fail(error)),
 )
 
-declare const server: Server.ServerInstance<typeof Module>
 const projected = Stdb.project(Module)
 const httpApi = Stdb.toHttpApi(Module)
 const publicEntrypointIndexAlgorithm: Stdb.IndexAlgorithm = "direct"
@@ -177,28 +176,26 @@ declare const publicMultiPkSession: StdbClient.WsSession<
   typeof PublicEntrypointMultiPkModule
 >
 
-void server
-void server.dispose
 void httpApi
 void publicEntrypointIndexAlgorithm
-void Stdb.StdbHttpProjectionError
+void Stdb.StdbHttpProjectionDefect
 void Stdb.httpApiBaseUrl({ uri: "http://localhost:3000/", databaseName: "db" })
-void StdbClient.makeWsClient
+void StdbClient.wsMake
 void StdbClient.wsSupervisor
-void StdbClient.wsSupervisorFromModulePlan
 void StdbClient.wsSupervisorGenerated
 void StdbClient.DomainCallError
 void Stdb.describe(PublicEntrypointString)
 void Stdb.validate(Module)
 void Stdb.assertValid(Module)
-void Stdb.StdbBuilder.plan
+// @ts-expect-error internal planning is owned by the compiler and test harness
+void Stdb.Builder.plan
 void build
 void projected.targets.tables.user
 void projected.targets.allPublicTables()
 void publicWsSession.subscribeRowRef("user", "user_1")
 void publicWsSession.rowMatchesPrimaryKey("user", { id: "user_1" }, "user_1")
-void StdbAtom.rowAtomFamily(publicAtomSession)("user", "user_1")
-const publicSnapshotAtom = StdbAtom.tableGroupSnapshotAtom(
+void StdbAtom.wsRowAtomFamily(publicAtomSession)("user", "user_1")
+const publicSnapshotAtom = StdbAtom.wsTableGroupSnapshotAtom(
   publicConnectionAtom,
   ["user"] as const,
 )
@@ -207,12 +204,13 @@ const publicSnapshotConnectFailure: Atom.Failure<typeof publicSnapshotAtom> =
 const publicSnapshotTableFailure: Atom.Failure<typeof publicSnapshotAtom> =
   new StdbClient.SubscriptionInvalidatedError({
     raw: "closed",
+    kind: "lost",
   })
 void publicSnapshotConnectFailure
 void publicSnapshotTableFailure
 
 // @ts-expect-error snapshot atom keys must be public persistent tables
-void StdbAtom.tableGroupSnapshotAtom(publicConnectionAtom, ["private_user"])
+void StdbAtom.wsTableGroupSnapshotAtom(publicConnectionAtom, ["private_user"])
 
 // @ts-expect-error row refs require the table primary-key value type
 void publicWsSession.subscribeRowRef("user", 1)
@@ -221,7 +219,7 @@ void publicWsSession.subscribeRowRef("user", 1)
 void publicWsSession.rowMatchesPrimaryKey("user", { id: "user_1" }, 1)
 
 // @ts-expect-error row atom families require the table primary-key value type
-void StdbAtom.rowAtomFamily(publicAtomSession)("user", 1)
+void StdbAtom.wsRowAtomFamily(publicAtomSession)("user", 1)
 
 // @ts-expect-error row refs require exactly one primary key column
 void publicNoPkSession.subscribeRowRef("public_no_pk", "label")
@@ -237,23 +235,14 @@ void StdbClient.makeHttp
 // @ts-expect-error compileModule consumes an internal build-plan shape and is no longer public
 void StdbCompiler.compileModule
 
-// @ts-expect-error server authoring moved behind StdbBuilder.plan/build
-void Server.make
-
-// @ts-expect-error legacy single-handler server authoring is no longer public
-void server.reducer
-
-// @ts-expect-error legacy section-handler server authoring is no longer public
-void server.handlers
-
 // @ts-expect-error /testing no longer exposes public server authoring
-void StdbTesting.makeServer
+void StdbInternal.makeServer
 
 // @ts-expect-error /testing no longer exposes handler ownership internals
-void StdbTesting.assertOwnedHandlerBundle
+void StdbInternal.assertOwnedHandlerBundle
 
 // @ts-expect-error /testing no longer exposes handler ownership internals
-void StdbTesting.ServerOwnerSymbol
+void StdbInternal.ServerOwnerSymbol
 
 // @ts-expect-error the public client entrypoint no longer exposes the generated WS adapter namespace
 void StdbClient.GeneratedWs
@@ -282,7 +271,7 @@ void import("effect-spacetimedb/compat/polyfills")
 void import("effect-spacetimedb/server-polyfills")
 
 // @ts-expect-error the root builder plans modules; compiling build lives under server-compiler
-void Stdb.StdbBuilder.build
+void Stdb.Builder.build
 
 // @ts-expect-error the canonical example module is no longer a public package export
 void import("effect-spacetimedb/example-module")
@@ -308,7 +297,7 @@ void projected.callables
 // @ts-expect-error generated WS adapter construction lives under the client entrypoint
 void projected.client.ws.generated
 
-void Stdb.StdbModule.make("public_entrypoints_module_errors_removed", {
+void Stdb.Module.make("public_entrypoints_module_errors_removed", {
   // @ts-expect-error module-level errors were removed
   errors: undefined,
 })
@@ -319,8 +308,7 @@ void Stdb.field
 // @ts-expect-error reducer returns alias was removed in favor of unit()
 void Stdb.returns
 
-// @ts-expect-error flat root DSL removed Module namespace exports
-void Stdb.Module
+void Stdb.Module.make
 
 // @ts-expect-error flat root DSL removed Table namespace exports
 void Stdb.Table

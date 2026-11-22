@@ -29,14 +29,12 @@ describe("group middleware", (it) => {
     () =>
       Effect.gen(function* () {
         const events: Array<string> = []
-        const Calls = Stdb.StdbGroup.make("Calls").add(
-          Stdb.StdbFn.reducer("reduce", {}),
-          Stdb.StdbFn.procedure("proceed", { returns: Stdb.unit() }),
+        const Calls = Stdb.Group.make("Calls").add(
+          Stdb.Fn.reducer("reduce", {}),
+          Stdb.Fn.procedure("proceed", { returns: Stdb.unit() }),
         )
-        const Module = Stdb.StdbModule.make("group_middleware_order", {}).add(
-          Calls,
-        )
-        const impl = Stdb.StdbBuilder.group(
+        const Module = Stdb.Module.make("group_middleware_order", {}).add(Calls)
+        const impl = Stdb.Builder.group(
           Module,
           "Calls",
           {
@@ -53,7 +51,7 @@ describe("group middleware", (it) => {
         const handlers = runnableHandlers<{
           readonly reduce: (args: Record<string, never>) => Effect.Effect<void>
           readonly proceed: (args: Record<string, never>) => Effect.Effect<void>
-        }>(Stdb.StdbBuilder.handlersOf(Module, impl))
+        }>(Stdb.Builder.handlersOf(Module, impl))
 
         yield* handlers.reduce({})
         yield* handlers.proceed({})
@@ -70,13 +68,11 @@ describe("group middleware", (it) => {
   it.effect("short-circuits handlers when declared middleware fails", () =>
     Effect.gen(function* () {
       const events: Array<string> = []
-      const Calls = Stdb.StdbGroup.make("Calls", {
+      const Calls = Stdb.Group.make("Calls", {
         errors: Stdb.errors(MiddlewareFailure),
-      }).add(Stdb.StdbFn.reducer("reduce", {}))
-      const Module = Stdb.StdbModule.make("group_middleware_failure", {}).add(
-        Calls,
-      )
-      const impl = Stdb.StdbBuilder.group(
+      }).add(Stdb.Fn.reducer("reduce", {}))
+      const Module = Stdb.Module.make("group_middleware_failure", {}).add(Calls)
+      const impl = Stdb.Builder.group(
         Module,
         "Calls",
         {
@@ -95,7 +91,7 @@ describe("group middleware", (it) => {
         readonly reduce: (
           args: Record<string, never>,
         ) => Effect.Effect<void, MiddlewareFailure>
-      }>(Stdb.StdbBuilder.handlersOf(Module, impl))
+      }>(Stdb.Builder.handlersOf(Module, impl))
 
       const exit = yield* Effect.exit(handlers.reduce({}))
       expect(Exit.isFailure(exit)).toBe(true)
@@ -108,21 +104,20 @@ describe("group middleware", (it) => {
     () =>
       Effect.gen(function* () {
         const events: Array<string> = []
-        const Mixed = Stdb.StdbGroup.make("Mixed").add(
-          Stdb.StdbFn.reducer("reduce", {}),
-          Stdb.StdbFn.anonymousView("inspect", {
+        const Mixed = Stdb.Group.make("Mixed").add(
+          Stdb.Fn.reducer("reduce", {}),
+          Stdb.Fn.anonymousView("inspect", {
             returns: Stdb.array(
               Stdb.struct({ id: Stdb.string() }),
               testViewRowsLength,
             ),
           }),
-          Stdb.StdbFn.init(),
+          Stdb.Fn.init(),
         )
-        const Module = Stdb.StdbModule.make(
-          "group_middleware_exclusions",
-          {},
-        ).add(Mixed)
-        const impl = Stdb.StdbBuilder.group(
+        const Module = Stdb.Module.make("group_middleware_exclusions", {}).add(
+          Mixed,
+        )
+        const impl = Stdb.Builder.group(
           Module,
           "Mixed",
           {
@@ -136,7 +131,7 @@ describe("group middleware", (it) => {
           readonly reduce: (args: Record<string, never>) => Effect.Effect<void>
           readonly inspect: () => Effect.Effect<ReadonlyArray<{ id: string }>>
           readonly init: () => Effect.Effect<void>
-        }>(Stdb.StdbBuilder.handlersOf(Module, impl))
+        }>(Stdb.Builder.handlersOf(Module, impl))
 
         yield* handlers.inspect()
         yield* handlers.init()
@@ -154,14 +149,14 @@ describe("group middleware", (it) => {
   it.effect("routes only HTTP middleware to typed HTTP handlers", () =>
     Effect.gen(function* () {
       const events: Array<string> = []
-      const Http = Stdb.StdbHttpGroup.make("Http").add(
-        Stdb.StdbHttp.post("typedRoute", "/typed", {
+      const Http = Stdb.HttpGroup.make("Http").add(
+        Stdb.Http.post("typedRoute", "/typed", {
           request: Schema.Struct({}),
           response: Schema.Struct({}),
         }),
       )
-      const Module = Stdb.StdbModule.make("group_http_middleware", {}).add(Http)
-      const impl = Stdb.StdbBuilder.group(
+      const Module = Stdb.Module.make("group_http_middleware", {}).add(Http)
+      const impl = Stdb.Builder.group(
         Module,
         "Http",
         {
@@ -176,7 +171,7 @@ describe("group middleware", (it) => {
       )
       const handlers = runnableHandlers<{
         readonly typedRoute: () => Effect.Effect<Record<string, never>>
-      }>(Stdb.StdbBuilder.handlersOf(Module, impl))
+      }>(Stdb.Builder.handlersOf(Module, impl))
 
       yield* handlers.typedRoute()
 
@@ -185,17 +180,13 @@ describe("group middleware", (it) => {
   )
 
   it("rejects malformed middleware at an erased builder boundary", () => {
-    const Calls = Stdb.StdbGroup.make("Calls").add(
-      Stdb.StdbFn.reducer("reduce", {}),
-    )
-    const Module = Stdb.StdbModule.make("invalid_group_middleware", {}).add(
-      Calls,
-    )
+    const Calls = Stdb.Group.make("Calls").add(Stdb.Fn.reducer("reduce", {}))
+    const Module = Stdb.Module.make("invalid_group_middleware", {}).add(Calls)
 
     expect(() =>
-      Stdb.StdbBuilder.group(Module, "Calls", { reduce: () => Effect.void }, {
+      Stdb.Builder.group(Module, "Calls", { reduce: () => Effect.void }, {
         middleware: { reducers: "not-an-effect" },
       } as never),
-    ).toThrow(Stdb.StdbValidationError)
+    ).toThrow(Stdb.StdbValidationDefect)
   })
 })

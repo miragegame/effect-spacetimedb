@@ -6,10 +6,9 @@ const ViewString = Stdb.string(
   Schema.String.pipe(Schema.check(Schema.isMaxLength(255))),
 )
 
-const ViewsGroup = Stdb.StdbGroup.make("Views")
+const ViewsGroup = Stdb.Group.make("Views")
   .add(
-    Stdb.StdbFn.anonymousView("allUsers", {
-      public: true,
+    Stdb.Fn.anonymousView("allUsers", {
       returns: Stdb.array(
         Stdb.struct({
           id: ViewString,
@@ -20,8 +19,7 @@ const ViewsGroup = Stdb.StdbGroup.make("Views")
     }),
   )
   .add(
-    Stdb.StdbFn.view("self_user", {
-      public: false,
+    Stdb.Fn.view("self_user", {
       returns: Stdb.option(
         Stdb.struct({
           id: ViewString,
@@ -39,7 +37,7 @@ const user = Stdb.table("user", {
   },
 })
 
-const ViewsModule = Stdb.StdbModule.make("supported_views", {})
+const ViewsModule = Stdb.Module.make("supported_views", {})
   .addTables(user)
   .add(ViewsGroup).spec
 

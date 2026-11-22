@@ -15,18 +15,20 @@ import {
   ConnectionLostError,
   SubscriptionInvalidatedError,
   WsConnectError,
+  WsProtocolError,
   WsUnsupportedBuilderFeatureError,
 } from "effect-spacetimedb/client"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import {
   DisconnectedError,
   IdentityChangedError,
   UnknownCallResultError,
 } from "spacetimedb"
+import { connectionStateFor } from "../../src/client/connection-state.ts"
 import { TestLayer } from "../helpers/test-layer"
 import {
   awaitPhase,
-  connectTimeoutMillis,
+  connectDurationMax,
   makeReconnectHarness,
   plan,
   reconnectConfig,
@@ -37,6 +39,13 @@ import {
 const { expect } = EffectVitest
 const describe = EffectVitest.layer(TestLayer)
 
+const stabilityPolicy = {
+  reconnectDelayFirst: 100,
+  reconnectDelayMax: 1_000,
+  reconnectJitter: false,
+  stabilityWindow: 5_000,
+}
+
 class TokenUnavailable extends Data.TaggedError("TokenUnavailable") {}
 class PresenceRefused extends Data.TaggedError("PresenceRefused") {}
 
@@ -46,7 +55,7 @@ describe("ws automatic reconnect sessions", (it) => {
     () =>
       Effect.gen(function* () {
         const harness = yield* makeReconnectHarness()
-        const session = yield* StdbTesting.makeScopedFromModulePlan({
+        const session = yield* StdbInternal.makeScopedFromModulePlan({
           plan,
           config: reconnectConfig(harness),
         })
@@ -83,7 +92,7 @@ describe("ws automatic reconnect sessions", (it) => {
   it.effect("types the SDK's not-sent and outcome-unknown rejections", () =>
     Effect.gen(function* () {
       const harness = yield* makeReconnectHarness()
-      const session = yield* StdbTesting.makeScopedFromModulePlan({
+      const session = yield* StdbInternal.makeScopedFromModulePlan({
         plan,
         config: reconnectConfig(harness),
       })
@@ -107,7 +116,7 @@ describe("ws automatic reconnect sessions", (it) => {
     () =>
       Effect.gen(function* () {
         const harness = yield* makeReconnectHarness()
-        const session = yield* StdbTesting.makeScopedFromModulePlan({
+        const session = yield* StdbInternal.makeScopedFromModulePlan({
           plan,
           config: reconnectConfig(harness),
         })
@@ -125,7 +134,7 @@ describe("ws automatic reconnect sessions", (it) => {
   it.effect("ends the session when a reconnect changes its identity", () =>
     Effect.gen(function* () {
       const harness = yield* makeReconnectHarness()
-      const session = yield* StdbTesting.makeScopedFromModulePlan({
+      const session = yield* StdbInternal.makeScopedFromModulePlan({
         plan,
         config: reconnectConfig(harness),
       })
@@ -143,7 +152,7 @@ describe("ws automatic reconnect sessions", (it) => {
     () =>
       Effect.gen(function* () {
         const harness = yield* makeReconnectHarness()
-        const session = yield* StdbTesting.makeScopedFromModulePlan({
+        const session = yield* StdbInternal.makeScopedFromModulePlan({
           plan,
           config: reconnectConfig(harness),
         })
@@ -177,7 +186,7 @@ describe("ws automatic reconnect sessions", (it) => {
   it.effect("does not bound a session the SDK has reconnected", () =>
     Effect.gen(function* () {
       const harness = yield* makeReconnectHarness()
-      const session = yield* StdbTesting.makeScopedFromModulePlan({
+      const session = yield* StdbInternal.makeScopedFromModulePlan({
         plan,
         config: reconnectConfig(harness),
       })
@@ -189,12 +198,30 @@ describe("ws automatic reconnect sessions", (it) => {
     }).pipe(Effect.scoped),
   )
 
+  it.effect("stops the SDK retrying a connection that has already ended", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeReconnectHarness()
+      const session = yield* StdbInternal.makeScopedFromModulePlan({
+        plan,
+        config: reconnectConfig(harness),
+      })
+      connectionStateFor(harness.at(1).connection).invalidateFromTransport(
+        "a subscription target failed",
+      )
+
+      harness.drop(1, recoveringReport)
+
+      expect(session.isInvalidated()).toBe(true)
+      expect(harness.at(1).disconnectCount()).toBe(1)
+    }).pipe(Effect.scoped),
+  )
+
   it.effect(
     "fails in-flight calls as outcome-unknown when the socket drops",
     () =>
       Effect.gen(function* () {
         const harness = yield* makeReconnectHarness()
-        const session = yield* StdbTesting.makeScopedFromModulePlan({
+        const session = yield* StdbInternal.makeScopedFromModulePlan({
           plan,
           config: reconnectConfig(harness),
         })
@@ -217,7 +244,7 @@ describe("ws automatic reconnect sessions", (it) => {
   it.effect("reports the token the SDK refreshed on a reconnect", () =>
     Effect.gen(function* () {
       const harness = yield* makeReconnectHarness()
-      const session = yield* StdbTesting.makeScopedFromModulePlan({
+      const session = yield* StdbInternal.makeScopedFromModulePlan({
         plan,
         config: reconnectConfig(harness, { token: "token-initial" }),
       })
@@ -235,7 +262,7 @@ describe("ws automatic reconnect sessions", (it) => {
     () =>
       Effect.gen(function* () {
         const harness = yield* makeReconnectHarness()
-        const session = yield* StdbTesting.makeScopedFromModulePlan({
+        const session = yield* StdbInternal.makeScopedFromModulePlan({
           plan,
           config: reconnectConfig(harness),
         })
@@ -278,10 +305,10 @@ describe("ws per-attempt tokens", (it) => {
         })
         const config = reconnectConfig(harness, { token })
 
-        yield* StdbTesting.makeScopedFromModulePlan({ plan, config }).pipe(
+        yield* StdbInternal.makeScopedFromModulePlan({ plan, config }).pipe(
           Effect.scoped,
         )
-        yield* StdbTesting.makeScopedFromModulePlan({ plan, config }).pipe(
+        yield* StdbInternal.makeScopedFromModulePlan({ plan, config }).pipe(
           Effect.scoped,
         )
         expect(harness.tokens()).toEqual(["token-1", "token-2"])
@@ -314,7 +341,7 @@ describe("ws per-attempt tokens", (it) => {
           }),
         })
 
-        const session = yield* StdbTesting.makeScopedFromModulePlan({
+        const session = yield* StdbInternal.makeScopedFromModulePlan({
           plan,
           config,
         }).pipe(Effect.scoped)
@@ -331,7 +358,7 @@ describe("ws per-attempt tokens", (it) => {
         token: Effect.fail(new TokenUnavailable()),
       })
 
-      const failure = yield* StdbTesting.makeScopedFromModulePlan({
+      const failure = yield* StdbInternal.makeScopedFromModulePlan({
         plan,
         config,
       }).pipe(Effect.scoped, Effect.flip)
@@ -357,7 +384,7 @@ describe("ws per-attempt tokens", (it) => {
               : Effect.fail(new TokenUnavailable())
           }),
         })
-        const session = yield* StdbTesting.makeScopedFromModulePlan({
+        const session = yield* StdbInternal.makeScopedFromModulePlan({
           plan,
           config,
         })
@@ -404,7 +431,7 @@ describe("ws per-attempt tokens", (it) => {
               : Deferred.await(gate).pipe(Effect.as("token-late"))
           }),
         })
-        const session = yield* StdbTesting.makeScopedFromModulePlan({
+        const session = yield* StdbInternal.makeScopedFromModulePlan({
           plan,
           config,
         })
@@ -421,7 +448,7 @@ describe("ws per-attempt tokens", (it) => {
           () => undefined,
           (error: unknown) => error,
         )
-        yield* TestClock.adjust(Duration.millis(connectTimeoutMillis - 1))
+        yield* TestClock.adjust(Duration.millis(connectDurationMax - 1))
         expect(session.isInvalidated()).toBe(false)
         yield* TestClock.adjust(Duration.millis(1))
         expect(session.isInvalidated()).toBe(true)
@@ -448,7 +475,7 @@ describe("ws per-attempt tokens", (it) => {
     it.effect(`rejects a builder without ${feature}`, () =>
       Effect.gen(function* () {
         const harness = yield* makeReconnectHarness({ omit: [feature] })
-        const failure = yield* StdbTesting.makeScopedFromModulePlan({
+        const failure = yield* StdbInternal.makeScopedFromModulePlan({
           plan,
           config: reconnectConfig(harness, {
             token: Effect.succeed("token"),
@@ -475,7 +502,7 @@ describe("ws session supervisor with automatic reconnect", (it) => {
         let hookRuns = 0
         let hookReleases = 0
         const supervisor =
-          yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
             plan,
             config: reconnectConfig(harness),
             subscriptionTargets: [plan.targets.tables.user],
@@ -567,12 +594,12 @@ describe("ws session supervisor with automatic reconnect", (it) => {
     Effect.gen(function* () {
       const harness = yield* makeReconnectHarness()
       const supervisor =
-        yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+        yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
           plan,
           config: reconnectConfig(harness),
           policy: {
-            reconnectDelayMillisFirst: 100,
-            reconnectDelayMillisMax: 1_000,
+            reconnectDelayFirst: 100,
+            reconnectDelayMax: 1_000,
             reconnectJitter: false,
           },
         })
@@ -607,11 +634,210 @@ describe("ws session supervisor with automatic reconnect", (it) => {
     }).pipe(Effect.scoped),
   )
 
+  it.effect("does not add up live stretches broken by a recovery", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeReconnectHarness({
+        connectFailures: new Map([[1, new Error("connection refused")]]),
+      })
+      const supervisor =
+        yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
+          plan,
+          config: reconnectConfig(harness),
+          policy: stabilityPolicy,
+        })
+      yield* awaitPhase(
+        supervisor.phase,
+        (phase) => phase.status === "reconnecting" && phase.attempt === 1,
+      )
+      yield* TestClock.adjust(Duration.millis(100))
+      yield* awaitPhase(
+        supervisor.phase,
+        (phase) => phase.status === "live" && phase.attempt === 2,
+      )
+
+      // Two stretches of 60% of the window: more than it in all, neither of
+      // them enough to prove the session healthy.
+      yield* TestClock.adjust(Duration.millis(3_000))
+      harness.drop(2, recoveringReport)
+      yield* awaitPhase(
+        supervisor.phase,
+        (phase) => phase.status === "recovering",
+      )
+      harness.reconnect(2)
+      yield* awaitPhase(
+        supervisor.phase,
+        (phase) => phase.status === "live" && phase.attempt === 2,
+      )
+      yield* TestClock.adjust(Duration.millis(3_000))
+      harness.drop(2, { error: new Error("WebSocket closed (code 1008)") })
+      yield* awaitPhase(
+        supervisor.phase,
+        (phase) => phase.status === "reconnecting" && phase.attempt === 2,
+      )
+
+      yield* TestClock.adjust(Duration.millis(199))
+      expect(harness.buildCount()).toBe(2)
+      yield* TestClock.adjust(Duration.millis(1))
+      yield* awaitPhase(
+        supervisor.phase,
+        (phase) => phase.status === "live" && phase.attempt === 3,
+      )
+    }).pipe(Effect.scoped),
+  )
+
+  it.effect(
+    "counts a stretch that lasted the window, even if a recovery followed it",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeReconnectHarness({
+          connectFailures: new Map([[1, new Error("connection refused")]]),
+        })
+        const supervisor =
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
+            plan,
+            config: reconnectConfig(harness),
+            policy: stabilityPolicy,
+          })
+        yield* awaitPhase(
+          supervisor.phase,
+          (phase) => phase.status === "reconnecting" && phase.attempt === 1,
+        )
+        yield* TestClock.adjust(Duration.millis(100))
+        yield* awaitPhase(
+          supervisor.phase,
+          (phase) => phase.status === "live" && phase.attempt === 2,
+        )
+
+        yield* TestClock.adjust(
+          Duration.millis(stabilityPolicy.stabilityWindow),
+        )
+        harness.drop(2, recoveringReport)
+        yield* awaitPhase(
+          supervisor.phase,
+          (phase) => phase.status === "recovering",
+        )
+        harness.reconnect(2)
+        yield* awaitPhase(
+          supervisor.phase,
+          (phase) => phase.status === "live" && phase.attempt === 2,
+        )
+        harness.drop(2, { error: new Error("WebSocket closed (code 1008)") })
+        yield* awaitPhase(
+          supervisor.phase,
+          (phase) => phase.status === "reconnecting" && phase.attempt === 2,
+        )
+
+        yield* TestClock.adjust(Duration.millis(99))
+        expect(harness.buildCount()).toBe(2)
+        yield* TestClock.adjust(Duration.millis(1))
+        yield* awaitPhase(
+          supervisor.phase,
+          (phase) => phase.status === "live" && phase.attempt === 3,
+        )
+      }).pipe(Effect.scoped),
+  )
+
+  it.effect(
+    "retries a protocol close code and parks on an invalid message",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeReconnectHarness()
+        const supervisor =
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
+            plan,
+            config: reconnectConfig(harness),
+            policy: stabilityPolicy,
+          })
+        yield* awaitPhase(supervisor.phase, (phase) => phase.status === "live")
+        harness.drop(1, { error: new Error("WebSocket closed (code 1002)") })
+        yield* awaitPhase(
+          supervisor.phase,
+          (phase) => phase.status === "reconnecting",
+        )
+        expect(
+          connectionStateFor(harness.at(1).connection).invalidation()?.kind,
+        ).toBe("lost")
+
+        yield* TestClock.adjust(
+          Duration.millis(stabilityPolicy.reconnectDelayFirst),
+        )
+        yield* awaitPhase(
+          supervisor.phase,
+          (phase) => phase.status === "live" && phase.attempt === 2,
+        )
+        harness.drop(2, {
+          error: new Error("Invalid server message", {
+            cause: new RangeError("invalid row"),
+          }),
+        })
+        yield* awaitPhase(supervisor.phase, (phase) => phase.status === "fatal")
+        expect(
+          connectionStateFor(harness.at(2).connection).invalidation()?.kind,
+        ).toBe("protocolError")
+      }).pipe(Effect.scoped),
+  )
+
+  for (const reconnect of [false, true]) {
+    for (const established of [false, true]) {
+      it.effect(
+        "parks on an invalid server message, established=" +
+          String(established) +
+          " automatic reconnect=" +
+          String(reconnect),
+        () =>
+          Effect.gen(function* () {
+            const protocol = new Error("Invalid server message", {
+              cause: new RangeError("invalid row"),
+            })
+            const harness = yield* makeReconnectHarness({
+              connectFailures: new Map(established ? [] : [[1, protocol]]),
+            })
+            const { automaticReconnect, ...config } = reconnectConfig(harness)
+            const supervisor =
+              yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
+                plan,
+                config: reconnect ? { ...config, automaticReconnect } : config,
+              })
+            if (established) {
+              yield* awaitPhase(
+                supervisor.phase,
+                (phase) => phase.status === "live",
+              )
+              const session = yield* SubscriptionRef.get(supervisor.session)
+              if (!AsyncResult.isSuccess(session))
+                return yield* Effect.die("expected live session")
+              harness.at(1).holdCalls()
+              const pending = yield* session.value.reducers
+                .userUpsert(upsert)
+                .pipe(Effect.flip, Effect.forkScoped)
+              yield* harness.nextHeldCall
+              harness.drop(1, { error: protocol })
+              expect(ConnectionLostError.is(yield* Fiber.join(pending))).toBe(
+                true,
+              )
+            }
+            const fatal = yield* awaitPhase(
+              supervisor.phase,
+              (phase) => phase.status === "fatal",
+            )
+            expect(fatal).toMatchObject({
+              status: "fatal",
+              attempt: 1,
+              failure: { _tag: "WsConnectError" },
+            })
+            if (fatal.status === "fatal" && WsConnectError.is(fatal.failure)) {
+              expect(WsProtocolError.is(fatal.failure.cause)).toBe(true)
+              expect(fatal.failure.cause).toMatchObject({ cause: protocol })
+            }
+          }).pipe(Effect.scoped),
+      )
+    }
+  }
   it.effect("parks when a reconnect changes the session's identity", () =>
     Effect.gen(function* () {
       const harness = yield* makeReconnectHarness()
       const supervisor =
-        yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+        yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
           plan,
           config: reconnectConfig(harness),
         })
@@ -642,13 +868,13 @@ describe("ws session supervisor with automatic reconnect", (it) => {
     Effect.gen(function* () {
       const harness = yield* makeReconnectHarness()
       const supervisor =
-        yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+        yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
           plan,
           config: reconnectConfig(harness),
           onAutomaticReconnect: () => Effect.fail(new PresenceRefused()),
           policy: {
-            reconnectDelayMillisFirst: 100,
-            reconnectDelayMillisMax: 1_000,
+            reconnectDelayFirst: 100,
+            reconnectDelayMax: 1_000,
             reconnectJitter: false,
           },
         })
@@ -686,7 +912,7 @@ describe("ws session supervisor with automatic reconnect", (it) => {
         let hookRuns = 0
         let hookInterrupted = 0
         const supervisor =
-          yield* StdbTesting.makeWsSessionSupervisorFromModulePlan({
+          yield* StdbInternal.makeWsSessionSupervisorFromModulePlan({
             plan,
             config: reconnectConfig(harness),
             onAutomaticReconnect: () =>
@@ -732,7 +958,7 @@ describe("ws session supervisor with automatic reconnect", (it) => {
     Effect.gen(function* () {
       const harness = yield* makeReconnectHarness()
       expect(() =>
-        StdbTesting.makeWsSessionSupervisorFromModulePlan({
+        StdbInternal.makeWsSessionSupervisorFromModulePlan({
           plan,
           config: reconnectConfig(harness, { automaticReconnect: undefined }),
           onAutomaticReconnect: () => Effect.void,

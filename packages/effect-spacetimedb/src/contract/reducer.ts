@@ -11,10 +11,8 @@ export type ReducerSpec<
   Errors extends AnyErrorDefinition | undefined =
     | AnyErrorDefinition
     | undefined,
-  Public extends boolean = boolean,
 > = {
   readonly kind: "reducer"
-  readonly public: Public
   readonly params: Params
 } & (Errors extends AnyErrorDefinition
   ? {
@@ -27,7 +25,6 @@ export type ReducerSpec<
 const EmptyParams = struct({})
 
 type ReducerDefineOptions = {
-  readonly public?: boolean
   readonly params?: StructLikeValueType
   readonly errors?: ErrorsInput
 }
@@ -39,13 +36,6 @@ type ParamsOf<Options extends ReducerDefineOptions | undefined> =
     ? Params
     : typeof EmptyParams
 
-type PublicOfOptions<Options extends ReducerDefineOptions | undefined> =
-  Options extends {
-    readonly public: infer Public extends boolean
-  }
-    ? Public
-    : true
-
 type ErrorsOfOptions<Options extends ReducerDefineOptions | undefined> =
   Options extends {
     readonly errors: infer Errors extends ErrorsInput
@@ -55,14 +45,9 @@ type ErrorsOfOptions<Options extends ReducerDefineOptions | undefined> =
 
 export const define = <const Options extends ReducerDefineOptions | undefined>(
   options?: Options,
-): ReducerSpec<
-  ParamsOf<Options>,
-  ErrorsOfOptions<Options>,
-  PublicOfOptions<Options>
-> => {
+): ReducerSpec<ParamsOf<Options>, ErrorsOfOptions<Options>> => {
   const reducer = {
     kind: "reducer" as const,
-    public: (options?.public ?? true) as PublicOfOptions<Options>,
     params: (options?.params ?? EmptyParams) as ParamsOf<Options>,
   }
 
@@ -78,9 +63,5 @@ export const define = <const Options extends ReducerDefineOptions | undefined>(
           errors: errors as ErrorsOfOptions<Options>,
         }
       : reducer
-  ) as ReducerSpec<
-    ParamsOf<Options>,
-    ErrorsOfOptions<Options>,
-    PublicOfOptions<Options>
-  >
+  ) as ReducerSpec<ParamsOf<Options>, ErrorsOfOptions<Options>>
 }

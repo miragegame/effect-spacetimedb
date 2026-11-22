@@ -3,7 +3,7 @@ import * as Stdb from "effect-spacetimedb"
 import { Range } from "spacetimedb/server"
 import { Db, ExampleModule, Tx } from "../module"
 
-export const MembershipFunctionsLive = Stdb.StdbBuilder.group(
+export const MembershipFunctionsLive = Stdb.Builder.group(
   ExampleModule,
   "Memberships",
   {

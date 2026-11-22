@@ -1,4 +1,4 @@
-import { make as makeServer } from "../../src/server/bind.ts"
+import { makeServer } from "../helpers/module-server"
 import * as Effect from "effect/Effect"
 import * as EffectVitest from "@effect/vitest"
 const { expect } = EffectVitest
@@ -18,8 +18,8 @@ void SpacetimeServerStub.isRowTypedQuery
 void SpacetimeServerStub.t
 void SpacetimeServerStub.table
 
-const ManifestModule = Stdb.StdbModule.make("http_manifest", {}).add(
-  Stdb.StdbHttpGroup.make("Http").add(Stdb.StdbHttp.post("ping", "/ping")),
+const ManifestModule = Stdb.Module.make("http_manifest", {}).add(
+  Stdb.HttpGroup.make("Http").add(Stdb.Http.post("ping", "/ping")),
 ).spec
 
 describe("HTTP handler compiler manifest", (it) => {
@@ -33,11 +33,9 @@ describe("HTTP handler compiler manifest", (it) => {
         })
         const exported = server.handlers({
           httpHandlers: {
-            ping: server.httpHandler(
-              Effect.fn(function* (_req: Stdb.Request) {
-                return new Stdb.SyncResponse("pong")
-              }),
-            ),
+            ping: Effect.fn(function* (_req: Stdb.Request) {
+              return new Stdb.SyncResponse("pong")
+            }),
           },
         })
 

@@ -9,7 +9,7 @@ const staticTagsUser = Stdb.table("static_tags_user", {
   },
 })
 
-const ModuleWithAccessors = Stdb.StdbModule.make(
+const ModuleWithAccessors = Stdb.Module.make(
   "static_tags_typecheck",
   {},
 ).addTables(staticTagsUser)

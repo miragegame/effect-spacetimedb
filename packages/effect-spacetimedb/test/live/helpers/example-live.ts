@@ -5,7 +5,10 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type { WsSession } from "effect-spacetimedb/client"
 import type { DevServerError } from "effect-spacetimedb/dev-server"
-import type { TableRow, WsConnectError } from "effect-spacetimedb/testing"
+import type {
+  TableRow,
+  WsConnectError,
+} from "effect-spacetimedb/testing/internal"
 import * as ExampleModuleFixture from "effect-spacetimedb/testing/example-module"
 import {
   CONVERGENCE_TIMEOUT_MS,

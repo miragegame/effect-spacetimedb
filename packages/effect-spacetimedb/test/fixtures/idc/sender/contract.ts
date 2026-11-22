@@ -35,13 +35,13 @@ export class FixturePingTooLarge extends Schema.TaggedError<FixturePingTooLarge>
   { rowBytes: Schema.Int },
 ) {}
 
-export const IdcSenderSends = Stdb.StdbGroup.make("IdcSenderSends", {
+export const IdcSenderSends = Stdb.Group.make("IdcSenderSends", {
   errors: Stdb.errors(FixturePingTooLarge),
 }).add(
-  Stdb.StdbFn.reducer("sendPing", {
+  Stdb.Fn.reducer("sendPing", {
     params: Stdb.struct({ note: Stdb.string(), requestId: Stdb.string() }),
   }),
-  Stdb.StdbFn.reducer("sendDetails", {
+  Stdb.Fn.reducer("sendDetails", {
     params: Stdb.struct({
       body: Stdb.string(),
       labels: Stdb.array(Stdb.string(), { minimum: 0, maximum: 16 }),
@@ -49,16 +49,16 @@ export const IdcSenderSends = Stdb.StdbGroup.make("IdcSenderSends", {
   }),
 )
 
-export const IdcSenderSettles = Stdb.StdbGroup.make("IdcSenderSettles").add(
-  Stdb.StdbFn.outboxResult("pingSettled", { table: pingOutbox }),
-  Stdb.StdbFn.outboxResult("detailsSettled", { table: detailsOutbox }),
+export const IdcSenderSettles = Stdb.Group.make("IdcSenderSettles").add(
+  Stdb.Fn.outboxResult("pingSettled", { table: pingOutbox }),
+  Stdb.Fn.outboxResult("detailsSettled", { table: detailsOutbox }),
 )
 
 /**
  * The sending side of the fixtures. `IDC_FIXTURE_PEER` is the hex identity of
  * the receiving database: its peer resolver reads it, never a call argument.
  */
-export const IdcSenderModule = Stdb.StdbModule.make("idc_fixture_sender", {
+export const IdcSenderModule = Stdb.Module.make("idc_fixture_sender", {
   environment: {
     IDC_FIXTURE_PEER: Stdb.Environment.string(),
   },

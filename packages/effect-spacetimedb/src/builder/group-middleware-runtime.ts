@@ -1,8 +1,8 @@
 import * as Effect from "effect/Effect"
 import * as Match from "effect/Match"
 import {
-  StdbDiagnostic,
-  StdbValidationError,
+  Diagnostic,
+  StdbValidationDefect,
 } from "../contract/module-validation.ts"
 import { outboxResultMetadataOf } from "../contract/outbox-table.ts"
 import type { AnyEndpointDecl } from "./declarations.ts"
@@ -15,10 +15,10 @@ const invalidMiddleware = (
   groupId: string,
   key: string | undefined,
   message: string,
-): StdbValidationError =>
-  new StdbValidationError({
+): StdbValidationDefect =>
+  new StdbValidationDefect({
     diagnostics: [
-      new StdbDiagnostic({
+      new Diagnostic({
         code: "InvalidGroupMiddleware",
         path: [
           "groups",

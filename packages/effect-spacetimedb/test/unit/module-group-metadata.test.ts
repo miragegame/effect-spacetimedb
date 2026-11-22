@@ -6,16 +6,16 @@ const { describe, expect, it } = EffectVitest
 
 describe("module group metadata", () => {
   it("assembles sorted reducer, procedure, and HTTP group records", () => {
-    const Zeta = Stdb.StdbGroup.make("Zeta")
-      .add(Stdb.StdbFn.reducer("zetaReducer", {}))
-      .add(Stdb.StdbFn.procedure("alphaProcedure", { returns: Stdb.unit() }))
-    const Alpha = Stdb.StdbGroup.make("Alpha")
-      .add(Stdb.StdbFn.reducer("alphaReducer", {}))
-      .add(Stdb.StdbFn.procedure("zetaProcedure", { returns: Stdb.unit() }))
-    const Http = Stdb.StdbHttpGroup.make("Http").add(
-      Stdb.StdbHttp.post("middleHandler", "/middle"),
+    const Zeta = Stdb.Group.make("Zeta")
+      .add(Stdb.Fn.reducer("zetaReducer", {}))
+      .add(Stdb.Fn.procedure("alphaProcedure", { returns: Stdb.unit() }))
+    const Alpha = Stdb.Group.make("Alpha")
+      .add(Stdb.Fn.reducer("alphaReducer", {}))
+      .add(Stdb.Fn.procedure("zetaProcedure", { returns: Stdb.unit() }))
+    const Http = Stdb.HttpGroup.make("Http").add(
+      Stdb.Http.post("middleHandler", "/middle"),
     )
-    const module = Stdb.StdbModule.make("sorted_groups", {}).add(
+    const module = Stdb.Module.make("sorted_groups", {}).add(
       Zeta,
       Alpha,
       Http,
@@ -41,7 +41,7 @@ describe("module group metadata", () => {
   })
 
   it("defaults group records for nonempty hand-defined specs", () => {
-    const ping = Stdb.StdbFn.reducer("ping", {}).spec
+    const ping = Stdb.Fn.reducer("ping", {}).spec
     const module = define({
       name: "hand_defined_groups",
       reducers: { ping },

@@ -9,6 +9,6 @@
   "dependencies": {
     "effect": "4.1.1",
     "effect-spacetimedb": "workspace:*",
-    "spacetimedb": "2.14.0"
+    "spacetimedb": "2.16.1"
   }
 }

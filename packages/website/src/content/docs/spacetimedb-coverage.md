@@ -7,7 +7,7 @@ sidebar:
 ---
 
 This map tracks the SpacetimeDB Core Concepts taxonomy against these docs, as of
-SpacetimeDB 2.14.0. Every upstream topic has exactly one row.
+SpacetimeDB 2.16.1. Every upstream topic has exactly one row.
 
 | Upstream Core Concept topic | Upstream link | Our status | Our page / note |
 | --- | --- | --- | --- |
@@ -20,7 +20,7 @@ SpacetimeDB 2.14.0. Every upstream topic has exactly one row.
 | Databases / Migrations / Automatic Migrations | [SpacetimeDB -> Automatic Migrations](https://spacetimedb.com/docs/databases/automatic-migrations) | mirrored | [Migrations](/core-concepts/databases/migrations) |
 | Databases / Migrations / Incremental Migrations | [SpacetimeDB -> Incremental Migrations](https://spacetimedb.com/docs/databases/incremental-migrations) | mirrored | [Migrations](/core-concepts/databases/migrations) |
 | Databases / Environment Variables | [SpacetimeDB -> Environment Variables](https://spacetimedb.com/docs/databases/environment-variables) | mirrored | [Environment Variables](/core-concepts/databases/environment-variables); declarations are typed contract members, reads are per-call `Env` effects, secrets read back `Redacted`. |
-| Databases / Submodules | [SpacetimeDB -> Submodules](https://spacetimedb.com/docs/submodules) | not covered | Upstream 2.8.0 lets a TypeScript module mount another module under a namespace (`schema({ tbl, lib })`, `ctx.db.<ns>`, `ctx.as.<ns>`). The contract DSL does not expose it yet; the runtime tolerates the SDK's always-present namespaces. |
+| Databases / Submodules | [SpacetimeDB -> Submodules](https://spacetimedb.com/docs/submodules) | mirrored | [Module and native mounts](/core-concepts/databases/submodules) |
 | Functions | [SpacetimeDB -> Functions](https://spacetimedb.com/docs/functions) | mirrored | Section root represented by the Functions sidebar group. |
 | Functions / Reducers | [SpacetimeDB -> Reducers](https://spacetimedb.com/docs/functions/reducers) | mirrored | [Reducers](/core-concepts/functions/reducers) |
 | Functions / Reducers / Reducer Context | [SpacetimeDB -> Reducer Context](https://spacetimedb.com/docs/functions/reducers/reducer-context) | mirrored | [Reducer Context](/core-concepts/functions/reducer-context) |
@@ -40,6 +40,7 @@ SpacetimeDB 2.14.0. Every upstream topic has exactly one row.
 | Tables / Access Permissions | [SpacetimeDB -> Access Permissions](https://spacetimedb.com/docs/tables/access-permissions) | not-supported | [Access Permissions](/core-concepts/tables/access-permissions); RLS / `clientVisibilityFilter` is not supported. |
 | Tables / Scheduled Tables | [SpacetimeDB -> Scheduled Tables](https://spacetimedb.com/docs/tables/schedule-tables) | mirrored | [Scheduled Tables](/core-concepts/tables/scheduled-tables) |
 | Tables / Event Tables | [SpacetimeDB -> Event Tables](https://spacetimedb.com/docs/tables/event-tables) | mirrored | [Event Tables](/core-concepts/tables/event-tables) |
+| Tables / Storage and Cache Policies | [SpacetimeDB -> Table Storage and Cache Policies](https://spacetimedb.com/docs/tables/storage-and-cache-policies/) | mirrored | [Table policies and module default](/core-concepts/tables/performance) |
 | Tables / Performance | [SpacetimeDB -> Performance](https://spacetimedb.com/docs/tables/performance) | mirrored | [Performance](/core-concepts/tables/performance) |
 | Clients / Subscriptions | [SpacetimeDB -> Subscriptions](https://spacetimedb.com/docs/clients/subscriptions) | mirrored | [Subscriptions](/core-concepts/subscriptions) |
 | Clients / Subscriptions / Semantics | [SpacetimeDB -> Subscription Semantics](https://spacetimedb.com/docs/clients/subscriptions/semantics) | mirrored | [Subscriptions](/core-concepts/subscriptions) |

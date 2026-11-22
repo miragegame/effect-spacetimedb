@@ -1,10 +1,9 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Cause from "effect/Cause"
 import * as Exit from "effect/Exit"
-import { CallableInterruptedError } from "effect-spacetimedb/server"
+import { CallableInterruptedDefect } from "effect-spacetimedb/server"
 import {
   toLifecycleThrow,
-  toProcedureValue,
   toReducerThrow,
   toViewValue,
 } from "../../src/server/callable-runtime.ts"
@@ -16,7 +15,6 @@ const interrupted = Exit.failCause(Cause.interrupt(1))
 describe("callable interruption labels", () => {
   const cases = [
     ["reducer", () => toReducerThrow(interrupted)],
-    ["procedure", () => toProcedureValue(interrupted)],
     ["view", () => toViewValue(interrupted)],
     ["lifecycle", () => toLifecycleThrow(interrupted)],
   ] as const
@@ -26,7 +24,7 @@ describe("callable interruption labels", () => {
       try {
         invoke()
       } catch (error) {
-        expect(error).toBeInstanceOf(CallableInterruptedError)
+        expect(error).toBeInstanceOf(CallableInterruptedDefect)
         expect(error).toMatchObject({ kind })
         return
       }

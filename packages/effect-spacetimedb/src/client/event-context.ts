@@ -37,7 +37,7 @@ export type StdbEventContext = Data.TaggedEnum<{
 
 export const StdbEventContext = Data.taggedEnum<StdbEventContext>()
 
-type DecodeContext = {
+export type DecodeContext = {
   readonly table?: string
 }
 

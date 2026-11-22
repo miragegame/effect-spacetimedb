@@ -1,5 +1,10 @@
+import { tableRelation } from "./websocket-contract.ts"
+import type { ModulePlan } from "../module-plan.ts"
+import type { MembersByPath } from "../member-path.ts"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
@@ -11,11 +16,15 @@ import type { TableRow } from "../contract/table.ts"
 import type { SinglePrimaryKeyValue } from "../contract/table-keys.ts"
 import type { PublicPersistentTableKeys } from "../subscription-target.ts"
 import { typedEntries, typedFromEntries } from "../utils.ts"
-import type { WsConnectionState } from "./connection-state.ts"
+import {
+  subscriptionInvalidated,
+  type WsConnectionState,
+} from "./connection-state.ts"
 import { streamTableSnapshotSignals } from "./session-stream.ts"
 import {
   canonicalizeTableGroupKeys,
   canonicalValueKey,
+  failureOver,
   subscribeRowRef as makeRowRef,
   subscribeTableRef as makeTableRef,
   type TableGroupRef,
@@ -58,7 +67,7 @@ export const makeTableRefAccess = <
   ErrorContext,
   RelationContext,
 >(options: {
-  readonly module: Module
+  readonly plan: ModulePlan<Module>
   readonly connection: WsConnectionLike<Module, ErrorContext, RelationContext>
   readonly connectionState: WsConnectionState
   readonly tables: PublicTableCache<Module>
@@ -68,7 +77,7 @@ export const makeTableRefAccess = <
   const sharedTableRefSemaphore = Semaphore.makeUnsafe(1)
   const withSharedTableRefLock = Semaphore.withPermit(sharedTableRefSemaphore)
   const tablePrimaryKeyColumns = typedFromEntries(
-    typedEntries(options.module.tables).map(([key, tableSpec]) => [
+    typedEntries(options.plan.tables).map(([key, tableSpec]) => [
       key,
       Object.entries(tableSpec.columns).find(
         ([, column]) => fieldOptions(column).primaryKey,
@@ -78,8 +87,8 @@ export const makeTableRefAccess = <
 
   function rowMatchesPrimaryKey<Key extends PublicPersistentTableKeys<Module>>(
     key: Key,
-    row: TableRow<Module["tables"][Key]>,
-    primaryKey: SinglePrimaryKeyValue<Module["tables"][Key]>,
+    row: TableRow<MembersByPath<Module, "tables">[Key]>,
+    primaryKey: SinglePrimaryKeyValue<MembersByPath<Module, "tables">[Key]>,
   ): boolean {
     const primaryKeyColumn = tablePrimaryKeyColumns[key]
     if (primaryKeyColumn === undefined) {
@@ -88,7 +97,11 @@ export const makeTableRefAccess = <
 
     return (
       canonicalValueKey(
-        row[primaryKeyColumn as keyof TableRow<Module["tables"][Key]>],
+        row[
+          primaryKeyColumn as keyof TableRow<
+            MembersByPath<Module, "tables">[Key]
+          >
+        ],
       ) === canonicalValueKey(primaryKey)
     )
   }
@@ -99,16 +112,34 @@ export const makeTableRefAccess = <
   ): string =>
     canonicalValueKey([
       "table-ref",
-      options.module.name,
+      options.plan.module.name,
       key,
       streamOptions?.buffer ?? null,
     ] as const)
+
+  // A ref whose stream already ended keeps its rows, and has no stream left to
+  // hear that the connection's end then revoked them: an end that came later, or
+  // a `lost` end its supervisor later found it could not vouch for.
+  const revokeRowsOnInvalidation = <Row>(ref: TableRef<Row, TableRefFailure>) =>
+    options.connectionState.awaitRevocation().pipe(
+      Effect.flatMap((invalidation) =>
+        SubscriptionRef.update(ref, (current) =>
+          current.pipe(AsyncResult.value, Option.isSome)
+            ? failureOver(
+                current,
+                Cause.fail(subscriptionInvalidated(invalidation)),
+              )
+            : current,
+        ),
+      ),
+      Effect.forkScoped,
+    )
 
   function makeUnsharedTableRef<Key extends PublicPersistentTableKeys<Module>>(
     key: Key,
     streamOptions?: WsStreamOptions,
   ) {
-    const relation = options.connection.db[key]
+    const relation = tableRelation(options.connection, key)
 
     return makeTableRef({
       readSnapshot: widenSnapshotFailure(options.tables[key].toArray()),
@@ -120,7 +151,7 @@ export const makeTableRefAccess = <
           streamOptions?.buffer,
         ),
       ),
-    })
+    }).pipe(Effect.tap(revokeRowsOnInvalidation))
   }
 
   function subscribeTableRef<Key extends PublicPersistentTableKeys<Module>>(
@@ -135,7 +166,7 @@ export const makeTableRefAccess = <
         if (existing !== undefined) {
           existing.refCount += 1
           return existing as SharedTableRefEntry<
-            TableRow<Module["tables"][Key]>
+            TableRow<MembersByPath<Module, "tables">[Key]>
           >
         }
 
@@ -147,7 +178,9 @@ export const makeTableRefAccess = <
           ref,
           refCount: 1,
           scope,
-        } satisfies SharedTableRefEntry<TableRow<Module["tables"][Key]>>
+        } satisfies SharedTableRefEntry<
+          TableRow<MembersByPath<Module, "tables">[Key]>
+        >
         sharedTableRefs.set(cacheKey, entry as SharedTableRefEntry<unknown>)
         return entry
       }).pipe(withSharedTableRefLock),
@@ -167,7 +200,7 @@ export const makeTableRefAccess = <
 
   function subscribeRowRef<Key extends PublicPersistentTableKeys<Module>>(
     key: Key,
-    primaryKey: SinglePrimaryKeyValue<Module["tables"][Key]>,
+    primaryKey: SinglePrimaryKeyValue<MembersByPath<Module, "tables">[Key]>,
     streamOptions?: WsStreamOptions,
   ) {
     return makeRowRef({
@@ -210,6 +243,21 @@ export const makeTableRefAccess = <
       )
     }
 
+    // A group's rows are only whole while every table is, so a table's failure
+    // keeps the last whole snapshot rather than any one table's previous rows.
+    const nextGroupValue = (
+      current: AsyncResult.AsyncResult<
+        TableGroupSnapshot<Module, Keys>,
+        TableRefFailure
+      >,
+      entries: ReadonlyArray<GroupTableRefEntry>,
+    ) => {
+      const value = readGroupValue(entries)
+      return AsyncResult.isFailure(value)
+        ? failureOver(current, value.cause)
+        : value
+    }
+
     return Effect.gen(function* () {
       const tableRefs = yield* Effect.forEach(canonicalKeys, (key) =>
         subscribeTableRef(key, streamOptions).pipe(
@@ -229,11 +277,15 @@ export const makeTableRefAccess = <
 
       yield* Stream.mergeAll(changes, { concurrency: "unbounded" }).pipe(
         Stream.runForEach(() =>
-          SubscriptionRef.set(ref, readGroupValue(tableRefs)),
+          SubscriptionRef.update(ref, (current) =>
+            nextGroupValue(current, tableRefs),
+          ),
         ),
         Effect.matchCauseEffect({
           onFailure: (cause) =>
-            SubscriptionRef.set(ref, AsyncResult.failure(cause)),
+            SubscriptionRef.update(ref, (current) =>
+              failureOver(current, cause),
+            ),
           onSuccess: () => Effect.void,
         }),
         Effect.forkScoped,

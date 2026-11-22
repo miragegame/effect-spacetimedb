@@ -12,35 +12,35 @@ Declared errors are tagged errors with a namespace prefix. The namespace keeps
 wire tags globally unique within a module, while each field uses a normal
 `Stdb.*` value type.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
 const AppErrors = Stdb.errors.namespace("App")({
-  UserMissing: Stdb.error({ userId: Stdb.string() }),
+  UserMissing: Stdb.error({ userId: Stdb.string() }, { status: 404 }),
 })
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.reducer("user_require", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.reducer("userRequire", {
     params: Stdb.struct({ userId: Stdb.string() }),
     errors: AppErrors,
   }),
-  Stdb.StdbFn.procedure("user_get", {
+  Stdb.Fn.procedure("userGet", {
     params: Stdb.struct({ userId: Stdb.string() }),
     returns: Stdb.option(Stdb.struct({ id: Stdb.string() })),
     errors: AppErrors,
   }),
 )
 
-const UserRoutes = Stdb.StdbHttpGroup.make("UserRoutes").add(
-  Stdb.StdbHttp.post("user_token_rotate", "/users/token/rotate", {
+const UserRoutes = Stdb.HttpGroup.make("UserRoutes").add(
+  Stdb.Http.post("userTokenRotate", "/users/token/rotate", {
     request: Stdb.struct({ userId: Stdb.string() }).schema,
     response: Stdb.struct({ token: Stdb.string() }).schema,
     errors: AppErrors,
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").add(Users).add(UserRoutes)
+const Module = Stdb.Module.make("app").add(Users).add(UserRoutes)
 
 const fail = (userId: string) =>
   Effect.gen(function* () {
@@ -61,7 +61,7 @@ Clients receive declared tagged errors directly from reducer and procedure
 calls, and typed HTTP routes deliver the same errors through the projected
 Effect `HttpApi` client:
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
@@ -74,30 +74,30 @@ declare const token: string
 declare const userId: string
 
 const AppErrors = Stdb.errors.namespace("App")({
-  UserMissing: Stdb.error({ userId: Stdb.string() }),
+  UserMissing: Stdb.error({ userId: Stdb.string() }, { status: 404 }),
 })
 
-const Users = Stdb.StdbGroup.make("Users").add(
-  Stdb.StdbFn.reducer("user_require", {
+const Users = Stdb.Group.make("Users").add(
+  Stdb.Fn.reducer("userRequire", {
     params: Stdb.struct({ userId: Stdb.string() }),
     errors: AppErrors,
   }),
-  Stdb.StdbFn.procedure("user_get", {
+  Stdb.Fn.procedure("userGet", {
     params: Stdb.struct({ userId: Stdb.string() }),
     returns: Stdb.option(Stdb.struct({ id: Stdb.string() })),
     errors: AppErrors,
   }),
 )
 
-const UserRoutes = Stdb.StdbHttpGroup.make("UserRoutes").add(
-  Stdb.StdbHttp.post("user_token_rotate", "/users/token/rotate", {
+const UserRoutes = Stdb.HttpGroup.make("UserRoutes").add(
+  Stdb.Http.post("userTokenRotate", "/users/token/rotate", {
     request: Stdb.struct({ userId: Stdb.string() }).schema,
     response: Stdb.struct({ token: Stdb.string() }).schema,
     errors: AppErrors,
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").add(Users).add(UserRoutes)
+const Module = Stdb.Module.make("app").add(Users).add(UserRoutes)
 const Example = Stdb.project(Module)
 const rpcClient = Example.client.http.make({
   uri,
@@ -106,13 +106,13 @@ const rpcClient = Example.client.http.make({
   callDurationMax: "10 seconds",
 })
 
-const requireUser = rpcClient.reducers.user_require({ userId }).pipe(
+const requireUser = rpcClient.reducers.userRequire({ userId }).pipe(
   Effect.catchTag("AppUserMissing", (error) =>
     Effect.log(`missing ${error.userId}`),
   ),
 )
 
-const findUser = rpcClient.procedures.user_get({ userId }).pipe(
+const findUser = rpcClient.procedures.userGet({ userId }).pipe(
   Effect.catchTag("AppUserMissing", () => Effect.succeed(undefined)),
 )
 
@@ -126,7 +126,7 @@ const rotateToken = Effect.gen(function* () {
     ),
   })
 
-  return yield* client.UserRoutes.user_token_rotate({
+  return yield* client.UserRoutes.userTokenRotate({
     payload: { userId },
   }).pipe(
     Effect.map((response) => response.token),
@@ -150,3 +150,33 @@ errors are emitted by reducer, procedure, and typed HTTP route calls.
 
 Declared errors are Effect failures. Defects remain defects, and
 plain host rejection strings are kept separate from decoded domain failures.
+
+## Undeclared failures
+
+A procedure never throws at the host, because the host answers an exception out
+of a procedure by discarding the module's isolate. Every procedure a client can
+call returns a result on the wire, so generated bindings type its return as
+`Result<T, string>`, and any failure lands in the `err` arm:
+
+- Arguments that fail to decode answer with a message about the caller's input.
+  Typed clients fail with `RemoteRejectedError` with `status: 400`.
+- Anything else, a defect, an interruption, an undeclared host failure or a
+  result that fails to encode, answers with a fixed message and no detail.
+  Typed clients fail with `RemoteRejectedError` with `status: 500`, and the module
+  log holds the cause.
+
+Any commit a procedure's `Tx.run` made before the failure stands; a failed
+`Tx.run` rolls back before the procedure answers. A scheduled procedure has no
+caller and must return unit, so its failure only reaches the module log.
+
+Reducers abort by throwing, so arguments that fail to decode are a sender error
+carrying the same message, and any other undeclared failure answers `530` with
+the host's own text. A view has no result arm, so a failure in one still throws;
+the host logs it, keeps the isolate and answers no rows.
+
+`build(...)` takes `onDefect` to observe every undeclared failure, once each. A
+`StdbSenderError` is an answer only from a reducer or a lifecycle hook; in a
+procedure or a view it is an undeclared failure like any other. A caller's bad
+arguments never reach `onDefect`, to a reducer, a procedure or a view: the caller
+did that, and any caller could fill the log. A view still throws on them, because
+a view has no reply. See [Runtime model](/the-effect-layer/runtime-model).

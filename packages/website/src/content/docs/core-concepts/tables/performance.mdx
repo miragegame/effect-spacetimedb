@@ -1,15 +1,42 @@
 ---
 draft: false
 title: Performance
-description: Link to SpacetimeDB table-performance docs; effect-spacetimedb has no extra runtime semantics.
+description: Choose where table rows reside and understand the memory cost of indexes.
 sidebar:
   order: 10
 ---
 
 <a class="upstream-doc" href="https://spacetimedb.com/docs/tables/performance" target="_blank" rel="noopener noreferrer">SpacetimeDB: Performance ↗</a>
 
-Table performance is a SpacetimeDB runtime concern. effect-spacetimedb exposes
-the native index algorithms through `.index(...)` and `Stdb.index(...)`, but it
-does not change the host query planner or storage semantics.
+## Where rows reside
 
-For authoring syntax, see [Indexes](/core-concepts/tables/indexes).
+Set `cachePolicy` on a regular, scheduled, or outbox table. To set a default for the module, pass `settings: { tableCachePolicyDefault: "required_on_disk" }` to `Stdb.Module.make`. An explicit table policy takes precedence. Event tables never retain rows and cannot declare a policy.
+
+```typescript
+import * as Stdb from "effect-spacetimedb"
+
+const activeMatch = Stdb.table("activeMatch", {
+  columns: { id: Stdb.u64().primaryKey() },
+  cachePolicy: "required_in_memory",
+})
+
+const Module = Stdb.Module.make("matches", {
+  settings: { tableCachePolicyDefault: "required_on_disk" },
+}).addTables(activeMatch)
+```
+
+| Policy | Placement in SpacetimeDB 2.16 |
+| --- | --- |
+| `required_in_memory` | Keeps rows resident. This is the default. |
+| `required_on_disk` | Allows the host to page cold data to local disk and keep hot data in memory. |
+| `no_requirement` | Lets the host choose placement. Standalone treats it like `required_on_disk`. |
+
+Indexes and system tables stay in memory. Both disk-capable policies require every index on the table to be a btree, including backing indexes for keys. Contract validation reports `CachePolicyRequiresBTree` with the table, index and source of the policy.
+
+Standalone has an unlimited resident-memory budget. As of 2.16 the standard Maincloud limit is 24 GiB of resident memory per database. If a cold read fails or the host exceeds the budget, it ends execution and returns a failed internal outcome to the caller. A handler cannot catch that failure. Upstream plans to make `no_requirement` the default in 3.0. [SpacetimeDB tiered storage](https://spacetimedb.com/docs/tables/storage-and-cache-policies/)
+
+Changing placement preserves rows during an [automatic migration](/core-concepts/databases/migrations). It leaves generated client bindings byte-identical.
+
+## Subscribed client rows
+
+The TypeScript SDK keeps subscribed rows in the client process regardless of their server placement. In 2.16.1 it also builds a tree for each subscribed btree index as rows arrive. Unique lookups and equality-prefix filters use these trees. A range on the first column still scans the cache. The SDK patch corrects range comparison for object-backed keys such as timestamps. Apply the patch in the consuming project when relying on those ranges. [Index syntax](/core-concepts/tables/indexes)

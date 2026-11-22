@@ -2,7 +2,7 @@ import * as Match from "effect/Match"
 
 import { canonicalNameForPolicy } from "./canonical-name.ts"
 
-import { StdbDiagnostic } from "./diagnostic.ts"
+import { Diagnostic } from "./diagnostic.ts"
 
 import {
   type AnyErrorDefinition,
@@ -21,6 +21,10 @@ import {
   validateValueType,
 } from "./module-validation-common.ts"
 import type { AnyTableSpec } from "./table.ts"
+import {
+  isTableCachePolicy,
+  resolveTableCachePolicy,
+} from "./table-cache-policy.ts"
 import type { ModuleSettings } from "./settings.ts"
 import {
   type AnyValueType,
@@ -121,12 +125,31 @@ export const isU64ColumnType = (value: unknown): boolean =>
   isColumnTypeKind(value, "u64")
 
 export const validateTable = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   tableKey: string,
   table: AnyTableSpec,
-  caseConversionPolicy: ModuleSettings["caseConversionPolicy"],
+  settings: ModuleSettings,
   completed: WeakSet<object>,
 ) => {
+  if (table.cachePolicy !== undefined) {
+    const path = ["tables", tableKey, "cachePolicy"]
+    if (!isTableCachePolicy(table.cachePolicy)) {
+      pushDiagnostic(
+        diagnostics,
+        "UnknownTableCachePolicy",
+        path,
+        `Unknown cache policy ${String(table.cachePolicy)} on table ${tableKey}`,
+      )
+    }
+    if (table.event) {
+      pushDiagnostic(
+        diagnostics,
+        "EventTableCachePolicy",
+        path,
+        `Event table ${tableKey} cannot declare a cache policy because event rows are never stored`,
+      )
+    }
+  }
   if (table.event && table.scheduled) {
     pushDiagnostic(
       diagnostics,
@@ -144,7 +167,7 @@ export const validateTable = (
   for (const [columnName, column] of Object.entries(table.columns)) {
     const nativeName =
       fieldOptions(column).name ??
-      canonicalNameForPolicy(caseConversionPolicy, columnName)
+      canonicalNameForPolicy(settings.caseConversionPolicy, columnName)
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(nativeName)) {
       pushDiagnostic(
         diagnostics,
@@ -230,8 +253,23 @@ export const validateTable = (
     )
   }
 
+  const policy = resolveTableCachePolicy(table, settings)
   for (const [indexOffset, index] of table.indexes.entries()) {
     const indexPath = ["tables", tableKey, "indexes", indexOffset]
+    if (
+      isTableCachePolicy(policy) &&
+      policy !== "required_in_memory" &&
+      index.algorithm !== "btree"
+    ) {
+      const source =
+        table.cachePolicy === undefined ? "module default" : "table"
+      pushDiagnostic(
+        diagnostics,
+        "CachePolicyRequiresBTree",
+        indexPath,
+        `Table ${tableKey} with cache policy ${policy} (${source}) requires a btree index for ${index.name}, found ${index.algorithm}`,
+      )
+    }
     assertValidColumnSelection(
       diagnostics,
       "Index",
@@ -311,7 +349,7 @@ export const isStructValueType = (
 ): boolean => structFields(value) !== undefined
 
 const validateViewParams = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   viewKey: string,
   view: AnyViewSpec,
   completed: WeakSet<object>,
@@ -347,7 +385,7 @@ const validateViewParams = (
 }
 
 export const validateView = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   viewKey: string,
   view: AnyViewSpec,
   completed: WeakSet<object>,
@@ -380,7 +418,7 @@ export const validateView = (
 }
 
 export const validateDeclaredErrorTags = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   module: AnyModuleSpec,
 ): void => {
   const declaredTags = new Map<

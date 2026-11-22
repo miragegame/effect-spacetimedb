@@ -1,15 +1,50 @@
 ---
 draft: false
 title: File Storage
-description: Link to SpacetimeDB file-storage docs; effect-spacetimedb has no extra API.
+description: Mount the native files library and call its helpers from an Effect reducer.
 sidebar:
   order: 9
 ---
 
-<a class="upstream-doc" href="https://spacetimedb.com/docs/tables/file-storage" target="_blank" rel="noopener noreferrer">SpacetimeDB: File Storage ↗</a>
+Mount `@spacetimedb/files/submodule` to store files in the same database as your application. Install `@spacetimedb/files` alongside the SDK and ensure both resolve the same `spacetimedb/server` instance. Declare a type-only reference in the shared contract. The module entry supplies the actual library.
 
-effect-spacetimedb does not add a file-storage authoring API. Follow the
-SpacetimeDB documentation for runtime file storage behavior and keep only the
-metadata that belongs in module tables in `Stdb.table(...)`.
+```ts title="files-contract.ts"
+import * as Stdb from "effect-spacetimedb"
 
-Status: link-only; no Effect-specific delta.
+export const Drive = Stdb.Module.make("drive")
+  .mountNative<typeof import("@spacetimedb/files/submodule")>()("files")
+  .add(Stdb.Group.make("Uploads").add(
+    Stdb.Fn.reducer("upload", {
+      params: Stdb.struct({ bytes: Stdb.bytes() }),
+    }),
+  ))
+```
+
+This reducer stores an owner-visible file under the calling identity. The mounted native context omits `env`. The `@spacetimedb/files` 0.1.0 helper signature expects a full reducer context including `env`. Its upload helper uses fields available on the mounted alias. Keep the type assertion local to the helper call.
+
+```ts title="files-server.ts"
+import * as files from "@spacetimedb/files/submodule"
+import * as Effect from "effect/Effect"
+import * as Stdb from "effect-spacetimedb"
+import { build } from "effect-spacetimedb/server-compiler"
+import { Drive } from "./files-contract"
+
+const uploads = Stdb.Builder.group(Drive, "Uploads", {
+  upload: ({ bytes }) => Drive.mounts.files.use((ctx) =>
+    files.uploadFile(ctx as files.FilesCtx, {
+      path: "/attachment.bin",
+      bytes: Array.from(bytes),
+      mimeType: "application/octet-stream",
+      visibility: files.FILE_VISIBILITY_OWNER,
+    }, ctx.sender.toHexString()),
+  ).pipe(Effect.asVoid),
+})
+const compiled = build(Drive, [
+  uploads,
+  Stdb.Builder.mountNative(Drive, "files", files),
+])
+export const ModuleExports = compiled.exportGroup()
+export default compiled.schema
+```
+
+For a read procedure, use the same alias inside `Drive.withTx` and call `files.readFileBytes` with the path and authorized owner. The root module supplies any public routes and checks access before returning file contents. See [Submodules](/core-concepts/databases/submodules) and [SpacetimeDB File Storage](https://spacetimedb.com/docs/tables/file-storage).

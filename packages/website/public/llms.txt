@@ -6,7 +6,7 @@ This file indexes the documentation site at https://effect-stdb.dev. Each docs p
 
 ## Start here
 
-- [Getting Started](https://effect-stdb.dev/getting-started) - Install effect-spacetimedb, write a minimal module, build it, and generate a client.
+- [Getting Started](https://effect-stdb.dev/getting-started) - From an empty directory to a reducer call on a local SpacetimeDB, with effect-spacetimedb.
 
 ## Core Concepts
 
@@ -24,20 +24,22 @@ Mirrored SpacetimeDB Core Concepts pages that link upstream and document only th
 - [Migrations](https://effect-stdb.dev/core-concepts/databases/migrations) - Link to SpacetimeDB migrations; effect-spacetimedb adds no migration layer.
 - [Scheduled Tables](https://effect-stdb.dev/core-concepts/tables/scheduled-tables) - Use scheduled tables and scheduled reducers or procedures.
 - [SDK API](https://effect-stdb.dev/core-concepts/clients/sdk-api) - Use the projected Effect HTTP client, WebSocket session, targets, and HttpApi projection.
-- [Auto-Increment](https://effect-stdb.dev/core-concepts/tables/auto-increment) - Use auto-increment primary keys and generated schedule ids.
+- [Auto-Increment](https://effect-stdb.dev/core-concepts/tables/auto-increment) - Use auto-increment columns and generated schedule ids.
 - [Environment Variables](https://effect-stdb.dev/core-concepts/databases/environment-variables) - Declare typed database environment keys and read them as Effects, with secrets kept Redacted.
 - [HTTP Handlers](https://effect-stdb.dev/core-concepts/functions/http-handlers) - Add typed and raw server-to-server HTTP handlers to a module.
 - [Procedures](https://effect-stdb.dev/core-concepts/functions/procedures) - Declare read-returning callables and run mutations inside explicit transactions.
 - [Default Values](https://effect-stdb.dev/core-concepts/tables/default-values) - Attach native SpaceTimeDB column defaults to value types.
 - [Error Handling](https://effect-stdb.dev/core-concepts/functions/error-handling) - Model domain failures as tagged errors that cross reducer, procedure, route, and client boundaries.
+- [Submodules](https://effect-stdb.dev/core-concepts/databases/submodules) - Mount an Effect module or a native SDK library under a namespace in the same database.
 - [Views](https://effect-stdb.dev/core-concepts/functions/views) - Declare sender and anonymous views with typed read-only access.
 - [Client Connection](https://effect-stdb.dev/core-concepts/clients/connection) - Project a module contract into typed HTTP and WebSocket clients.
 - [Inter-Database Calls](https://effect-stdb.dev/core-concepts/functions/inter-database-calls) - Call another database's reducers through outbox tables, receivers and settle reducers.
 - [Event Tables](https://effect-stdb.dev/core-concepts/tables/event-tables) - Declare event tables and subscribe to event-table streams safely.
 - [Subscriptions](https://effect-stdb.dev/core-concepts/subscriptions) - Use scoped WebSocket sessions, table targets, and event-table streams safely.
 - [Access Permissions](https://effect-stdb.dev/core-concepts/tables/access-permissions) - Public table visibility, and the unsupported RLS surface.
-- [File Storage](https://effect-stdb.dev/core-concepts/tables/file-storage) - Link to SpacetimeDB file-storage docs; effect-spacetimedb has no extra API.
-- [Performance](https://effect-stdb.dev/core-concepts/tables/performance) - Link to SpacetimeDB table-performance docs; effect-spacetimedb has no extra runtime semantics.
+- [Testing](https://effect-stdb.dev/core-concepts/testing) - Run a module's handlers in-process with the test harness, bindCallables and the inter-database pump.
+- [File Storage](https://effect-stdb.dev/core-concepts/tables/file-storage) - Mount the native files library and call its helpers from an Effect reducer.
+- [Performance](https://effect-stdb.dev/core-concepts/tables/performance) - Choose where table rows reside and understand the memory cost of indexes.
 
 ## The Effect Layer
 
@@ -50,6 +52,7 @@ Effect-native design rationale and runtime constraints with no direct SpacetimeD
 - [Randomness And Determinism](https://effect-stdb.dev/the-effect-layer/randomness-and-determinism) - Deterministic randomness for reducers, and why it is not secret.
 - [Stdb.option vs Stdb.optional](https://effect-stdb.dev/the-effect-layer/option-vs-optional) - Choose value nullability or field optionality intentionally.
 - [Migrating From Native SDK Shape](https://effect-stdb.dev/the-effect-layer/migrating-from-native-sdk) - Move from native SpaceTimeDB module code to effect-spacetimedb contracts incrementally.
+- [Upgrading from 0.8 to 0.9](https://effect-stdb.dev/the-effect-layer/upgrading-from-0-8) - Upgrade the toolchain, migrate contracts and clients, and regenerate bindings.
 
 ## Reference
 

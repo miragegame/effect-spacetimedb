@@ -2,7 +2,7 @@ import * as EffectVitest from "@effect/vitest"
 
 const { describe, expect, it } = EffectVitest
 
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { builderTypeName, typeBuilder } from "../helpers/type-builder"
 
 const printGolden = (name: string, actual: string): void => {
@@ -26,9 +26,9 @@ const expectGolden = (
 describe("SATS type-name goldens", () => {
   it("keeps exact FNV digest outputs stable", () => {
     const fingerprint =
-      StdbTesting.ContractTypeName.primitiveFingerprint("String")
+      StdbInternal.ContractTypeName.primitiveFingerprint("String")
     const digest =
-      StdbTesting.ContractTypeName.stableStructuralDigest(fingerprint)
+      StdbInternal.ContractTypeName.stableStructuralDigest(fingerprint)
 
     expectGolden(
       "primitiveStringFingerprint",
@@ -42,24 +42,25 @@ describe("SATS type-name goldens", () => {
     )
     expectGolden(
       "primitiveStringDecimalDigest",
-      StdbTesting.ContractTypeName.decimalDigestSuffix(digest),
+      StdbInternal.ContractTypeName.decimalDigestSuffix(digest),
       "0604153523701416458716919679988306352664",
     )
   })
 
   it("keeps exact content-addressed generated names stable", () => {
-    const Struct = StdbTesting.ContractType.struct({
-      id: StdbTesting.ContractType.string(),
-      count: StdbTesting.ContractType.u32(),
+    const Struct = StdbInternal.ContractType.struct({
+      id: StdbInternal.ContractType.string(),
+      count: StdbInternal.ContractType.u32(),
     })
-    const Sum = StdbTesting.ContractType.sum({
-      prose: StdbTesting.ContractType.struct({
-        text: StdbTesting.ContractType.string(),
+    const Sum = StdbInternal.ContractType.sum({
+      prose: StdbInternal.ContractType.struct({
+        text: StdbInternal.ContractType.string(),
       }),
-      untilRemoved: StdbTesting.ContractType.unit(),
+      untilRemoved: StdbInternal.ContractType.unit(),
     })
-    const Literal = StdbTesting.ContractType.literal("joined", "left")
-    const NonIdentifierLiteral = StdbTesting.ContractType.literal("edit-action")
+    const Literal = StdbInternal.ContractType.literal("joined", "left")
+    const NonIdentifierLiteral =
+      StdbInternal.ContractType.literal("edit-action")
     const NamedStruct = Struct.named("NamedGoldenStruct")
     const NamedLiteral = Literal.named("NamedGoldenLiteral")
 

@@ -14,16 +14,15 @@ import {
 const { expect } = EffectVitest
 
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import "../../src/server-compiler.ts"
 import {
   StdbAutoIncOverflowError,
-  StdbDbSchemaMismatchError,
-  StdbDecodeError,
-  StdbHostCallError,
+  StdbTableOperationDefect,
   StdbNoSuchRowError,
   StdbScheduleDelayTooLongError,
   StdbUniqueAlreadyExistsError,
+  StdbDbSchemaMismatchDefect,
 } from "effect-spacetimedb/server"
 import type { Bound as NativeBound } from "spacetimedb/server"
 import { indexValueCodecOf } from "../../src/index-value-codec.ts"
@@ -105,7 +104,7 @@ const indexedUser = Stdb.table("user", {
   ],
 })
 
-const IndexedModule = Stdb.StdbModule.make("indexed_users", {}).addTables(
+const IndexedModule = Stdb.Module.make("indexed_users", {}).addTables(
   indexedUser,
 ).spec
 
@@ -152,7 +151,7 @@ const algorithmIndexedUser = Stdb.table("algorithmUser", {
   ],
 })
 
-const AlgorithmIndexedModule = Stdb.StdbModule.make(
+const AlgorithmIndexedModule = Stdb.Module.make(
   "algorithm_indexed_users",
   {},
 ).addTables(algorithmIndexedUser).spec
@@ -164,7 +163,7 @@ const presenceTable = Stdb.table("presence", {
   },
 })
 
-const LiteralModule = Stdb.StdbModule.make("literal_rows", {}).addTables(
+const LiteralModule = Stdb.Module.make("literal_rows", {}).addTables(
   presenceTable,
 ).spec
 
@@ -184,7 +183,7 @@ const eventTable = Stdb.table("event", {
   },
 })
 
-const StructuredEventModule = Stdb.StdbModule.make(
+const StructuredEventModule = Stdb.Module.make(
   "structured_events",
   {},
 ).addTables(eventTable).spec
@@ -195,17 +194,17 @@ const scheduledJobTable = Stdb.scheduledTable("scheduledJob", {
   },
 })
 
-const scheduledJobCallables = Stdb.StdbGroup.make("ScheduledJob").add(
-  Stdb.StdbFn.scheduledProcedure("scheduledJobFire", {
+const scheduledJobCallables = Stdb.Group.make("ScheduledJob").add(
+  Stdb.Fn.scheduledProcedure("scheduledJobFire", {
     table: scheduledJobTable,
   }),
 )
 
-const ScheduledJobModule = Stdb.StdbModule.make("scheduled_jobs", {})
+const ScheduledJobModule = Stdb.Module.make("scheduled_jobs", {})
   .addTables(scheduledJobTable)
   .add(scheduledJobCallables).spec
 
-const LazyHandleModule = Stdb.StdbModule.make("lazy_handles", {}).addTables(
+const LazyHandleModule = Stdb.Module.make("lazy_handles", {}).addTables(
   Stdb.table("lazyA", { columns: { value: Stdb.string() } }),
   Stdb.table("lazyB", { columns: { value: Stdb.string() } }),
 ).spec
@@ -240,7 +239,7 @@ type StructuredEventEncodedRow = {
       }
 }
 
-type ScheduledJobRow = StdbTesting.TableRow<typeof scheduledJobTable>
+type ScheduledJobRow = StdbInternal.TableRow<typeof scheduledJobTable>
 
 const makeRawStringIdTableCore = <Row extends { readonly id: string }>(
   rows: Array<Row>,
@@ -278,7 +277,7 @@ const makeRawStringIdTableCore = <Row extends { readonly id: string }>(
     update: (row: Row) => {
       const index = rows.findIndex((candidate) => candidate.id === row.id)
       if (index < 0) {
-        throw new Error(`Cannot update missing ${label} ${row.id}`)
+        throw hostCause("NoSuchRow")
       }
 
       rows[index] = row
@@ -619,12 +618,17 @@ const failureFromExit = (exit: Exit.Exit<unknown, unknown>): unknown => {
   return unwrapTestEffectCallbackError(failure.value)
 }
 
+const defectFromExit = (exit: Exit.Exit<unknown, unknown>) => {
+  if (Exit.isSuccess(exit)) throw new Error("Expected table operation to die")
+  return exit.cause.reasons.find(Cause.isDieReason)?.defect
+}
+
 describe("db handle factory", (it) => {
   it.effect(
     "builds read-write and read-only handles from module metadata",
     () =>
       Effect.gen(function* () {
-        const factory = StdbTesting.makeDbHandleFactory(IndexedModule)
+        const factory = StdbInternal.makeDbHandleFactory(IndexedModule)
         const rawDb = makeRawDb([adaRow, bobRow, annRow])
 
         const db = factory.readwrite(rawDb as never)
@@ -676,8 +680,8 @@ describe("db handle factory", (it) => {
             email: "ada@example.com",
           } as never),
         )
-        expect(failureFromExit(invalidLookupExit)).toBeInstanceOf(
-          StdbDecodeError,
+        expect(defectFromExit(invalidLookupExit)).toBeInstanceOf(
+          StdbTableOperationDefect,
         )
         const inheritedLookup = Object.create({
           email: "ada@example.com",
@@ -686,8 +690,8 @@ describe("db handle factory", (it) => {
         const inheritedLookupExit = yield* Effect.exit(
           db.user.emailTenant.find(inheritedLookup as never),
         )
-        expect(failureFromExit(inheritedLookupExit)).toBeInstanceOf(
-          StdbDecodeError,
+        expect(defectFromExit(inheritedLookupExit)).toBeInstanceOf(
+          StdbTableOperationDefect,
         )
         expect(
           yield* db.user.nameIndex.filterStream("Ada").pipe(Stream.runCollect),
@@ -702,11 +706,11 @@ describe("db handle factory", (it) => {
         yield* db.user.id.update(beaRow)
 
         expect(yield* db.user.id.find("user-1")).toEqual(beaRow)
-        expect(yield* db.user.id.replace(beaRow)).toEqual(beaRow)
+        expect(yield* db.user.id.update(beaRow)).toEqual(beaRow)
         expect(
           failureFromExit(
             yield* Effect.exit(
-              db.user.id.replace({
+              db.user.id.update({
                 id: "missing",
                 tenant: "tenant-a",
                 email: "missing@example.com",
@@ -714,7 +718,7 @@ describe("db handle factory", (it) => {
               }),
             ),
           ),
-        ).toBeInstanceOf(StdbHostCallError)
+        ).toBeInstanceOf(StdbNoSuchRowError)
         expect(yield* db.user.id.exists("user-1")).toBe(true)
         expect(yield* db.user.id.exists("missing")).toBe(false)
         expect(
@@ -759,7 +763,7 @@ describe("db handle factory", (it) => {
           bobRow,
         ])
         expect(yield* db.user.toArray()).toEqual([adaRow, bobRow])
-        expect(yield* db.user.emailOnly.deleteAll("bob@example.com")).toBe(1)
+        expect(yield* db.user.emailOnly.delete("bob@example.com")).toBe(1)
         expect(yield* db.user.toArray()).toEqual([adaRow])
         expect(yield* db.user.clear()).toBe(1n)
         expect(yield* db.user.toArray()).toEqual([])
@@ -833,7 +837,7 @@ describe("db handle factory", (it) => {
     "maps hash indexes to point filters and direct indexes to range filters",
     () =>
       Effect.gen(function* () {
-        const factory = StdbTesting.makeDbHandleFactory(AlgorithmIndexedModule)
+        const factory = StdbInternal.makeDbHandleFactory(AlgorithmIndexedModule)
         const rawDb = makeRawAlgorithmDb([
           algorithmAdaRow,
           algorithmBeaRow,
@@ -871,14 +875,15 @@ describe("db handle factory", (it) => {
             tenant: "tenant-a",
           } as never),
         )
-        expect(failureFromExit(partialHashExit)).toBeInstanceOf(StdbDecodeError)
+        expect(defectFromExit(partialHashExit)).toBeInstanceOf(
+          StdbTableOperationDefect,
+        )
 
         const hashLookup = db.algorithmUser.tenantHash as Record<
           string,
           unknown
         >
         expect("find" in hashLookup).toBe(false)
-        expect("deleteAll" in hashLookup).toBe(false)
 
         const scoreRange = {
           from: { tag: "included" as const, value: 10 },
@@ -940,7 +945,7 @@ describe("db handle factory", (it) => {
     "schedules rows with the autoInc sentinel on scheduled tables",
     () =>
       Effect.gen(function* () {
-        const factory = StdbTesting.makeDbHandleFactory(ScheduledJobModule)
+        const factory = StdbInternal.makeDbHandleFactory(ScheduledJobModule)
         const rawDb = makeRawScheduledJobDb()
         const db = factory.readwrite(rawDb as never)
         const readonlyDb = factory.readonly(rawDb as never)
@@ -965,7 +970,7 @@ describe("db handle factory", (it) => {
     "encodes authored literal rows on writes and decodes them on reads",
     () =>
       Effect.gen(function* () {
-        const factory = StdbTesting.makeDbHandleFactory(LiteralModule)
+        const factory = StdbInternal.makeDbHandleFactory(LiteralModule)
         const rawRows: Array<LiteralEncodedRow> = []
         const db = factory.readwrite({
           presence: {
@@ -1045,10 +1050,10 @@ describe("db handle factory", (it) => {
           } as never,
         })
 
-        const streamFailure = failureFromExit(
+        const streamFailure = defectFromExit(
           yield* Effect.exit(db.presence.stream().pipe(Stream.runCollect)),
         )
-        expect(streamFailure).toBeInstanceOf(StdbDecodeError)
+        expect(streamFailure).toBeInstanceOf(StdbTableOperationDefect)
       }),
   )
 
@@ -1056,7 +1061,7 @@ describe("db handle factory", (it) => {
     "encodes structured sum rows to the server host shape on writes",
     () =>
       Effect.gen(function* () {
-        const factory = StdbTesting.makeDbHandleFactory(StructuredEventModule)
+        const factory = StdbInternal.makeDbHandleFactory(StructuredEventModule)
         const rawRows: Array<StructuredEventEncodedRow> = []
         const db = factory.readwrite({
           event: {
@@ -1157,10 +1162,12 @@ describe("db handle factory", (it) => {
   )
 
   it.effect(
-    "maps host method failures to labeled StdbHostCallError values",
+    "maps host method failures to labeled StdbTableOperationDefect values",
     () =>
       Effect.gen(function* () {
-        const factory = StdbTesting.makeDbHandleFactory(IndexedModule)
+        const factory = StdbInternal.makeDbHandleFactory(IndexedModule)
+        const deleteCause = hostCause("NoSuchRow")
+        const insertCause = hostCause("NoSuchRow")
         const db = factory.readwrite({
           user: {
             count: () => {
@@ -1168,9 +1175,11 @@ describe("db handle factory", (it) => {
             },
             iter: () => ([] as Array<UserRow>).values(),
             insert: (_row: UserRow) => {
-              throw new Error("insert failed")
+              throw insertCause
             },
-            delete: (_row: UserRow) => false,
+            delete: (_row: UserRow) => {
+              throw deleteCause
+            },
             id: {
               find: (_id: string) => {
                 throw new Error("lookup failed")
@@ -1195,23 +1204,42 @@ describe("db handle factory", (it) => {
           },
         } as never)
 
-        const countFailure = failureFromExit(
-          yield* Effect.exit(db.user.count()),
-        )
-        expect(countFailure).toBeInstanceOf(StdbHostCallError)
-        expect((countFailure as StdbHostCallError).op).toBe("db.user.count")
+        expect(
+          defectFromExit(yield* Effect.exit(db.user.delete(adaRow))),
+        ).toMatchObject({
+          _tag: "StdbTableOperationDefect",
+          table: "user",
+          op: "db.user.delete",
+          cause: deleteCause,
+        })
+        expect(
+          defectFromExit(yield* Effect.exit(db.user.insert(adaRow))),
+        ).toMatchObject({
+          _tag: "StdbTableOperationDefect",
+          table: "user",
+          op: "db.user.insert",
+          cause: insertCause,
+        })
 
-        const lookupFailure = failureFromExit(
+        const countFailure = defectFromExit(yield* Effect.exit(db.user.count()))
+        expect(countFailure).toBeInstanceOf(StdbTableOperationDefect)
+        expect((countFailure as StdbTableOperationDefect).op).toBe(
+          "db.user.count",
+        )
+
+        const lookupFailure = defectFromExit(
           yield* Effect.exit(db.user.id.find("user-1")),
         )
-        expect(lookupFailure).toBeInstanceOf(StdbHostCallError)
-        expect((lookupFailure as StdbHostCallError).op).toBe("db.user.id.find")
+        expect(lookupFailure).toBeInstanceOf(StdbTableOperationDefect)
+        expect((lookupFailure as StdbTableOperationDefect).op).toBe(
+          "db.user.id.find",
+        )
 
-        const filterFailure = failureFromExit(
+        const filterFailure = defectFromExit(
           yield* Effect.exit(db.user.nameIndex.filterToArray("Ada")),
         )
-        expect(filterFailure).toBeInstanceOf(StdbHostCallError)
-        expect((filterFailure as StdbHostCallError).op).toBe(
+        expect(filterFailure).toBeInstanceOf(StdbTableOperationDefect)
+        expect((filterFailure as StdbTableOperationDefect).op).toBe(
           "db.user.nameIndex.filter",
         )
       }),
@@ -1221,7 +1249,7 @@ describe("db handle factory", (it) => {
     "maps discriminated host write failures to labeled tagged errors",
     () =>
       Effect.gen(function* () {
-        const factory = StdbTesting.makeDbHandleFactory(IndexedModule)
+        const factory = StdbInternal.makeDbHandleFactory(IndexedModule)
 
         const uniqueCause = hostCause("UniqueAlreadyExists")
         const uniqueDb = factory.readwrite({
@@ -1242,27 +1270,6 @@ describe("db handle factory", (it) => {
         )
         expect((uniqueFailure as StdbUniqueAlreadyExistsError).cause).toBe(
           uniqueCause,
-        )
-
-        const overflowCause = hostCause("AutoIncOverflow")
-        const overflowDb = factory.readwrite({
-          ...makeRawDb([]),
-          user: {
-            ...makeRawDb([]).user,
-            insert: () => {
-              throw overflowCause
-            },
-          },
-        } as never)
-        const overflowFailure = failureFromExit(
-          yield* Effect.exit(overflowDb.user.insert(adaRow)),
-        )
-        expect(overflowFailure).toBeInstanceOf(StdbAutoIncOverflowError)
-        expect((overflowFailure as StdbAutoIncOverflowError).op).toBe(
-          "db.user.insert",
-        )
-        expect((overflowFailure as StdbAutoIncOverflowError).cause).toBe(
-          overflowCause,
         )
 
         const noSuchRowCause = hostCause("NoSuchRow")
@@ -1291,7 +1298,7 @@ describe("db handle factory", (it) => {
 
         const delayCause = hostCause("ScheduleAtDelayTooLong")
         const scheduledFactory =
-          StdbTesting.makeDbHandleFactory(ScheduledJobModule)
+          StdbInternal.makeDbHandleFactory(ScheduledJobModule)
         const rawScheduledDb = makeRawScheduledJobDb()
         const delayDb = scheduledFactory.readwrite({
           ...rawScheduledDb,
@@ -1302,6 +1309,29 @@ describe("db handle factory", (it) => {
             },
           },
         } as never)
+        const overflowCause = hostCause("AutoIncOverflow")
+        const overflowDb = scheduledFactory.readwrite({
+          ...rawScheduledDb,
+          scheduledJob: {
+            ...rawScheduledDb.scheduledJob,
+            insert: () => {
+              throw overflowCause
+            },
+          },
+        } as never)
+        const overflow = failureFromExit(
+          yield* Effect.exit(
+            overflowDb.scheduledJob.schedule({
+              scheduledAt: Stdb.ScheduleAt.interval("1 second"),
+              note: "full",
+            }),
+          ),
+        )
+        expect(overflow).toBeInstanceOf(StdbAutoIncOverflowError)
+        expect(overflow).toMatchObject({
+          op: "db.scheduledJob.insert",
+          cause: overflowCause,
+        })
         const delayFailure = failureFromExit(
           yield* Effect.exit(
             delayDb.scheduledJob.schedule({
@@ -1322,7 +1352,7 @@ describe("db handle factory", (it) => {
 
   it.effect("encodes structural server ranges as native prefix bounds", () =>
     Effect.gen(function* () {
-      const factory = StdbTesting.makeDbHandleFactory(IndexedModule, {
+      const factory = StdbInternal.makeDbHandleFactory(IndexedModule, {
         makeRange: (from, to) => new TestNativeRange(from, to),
       })
       const rawDb = makeRawDb([adaRow])
@@ -1419,7 +1449,7 @@ describe("db handle factory", (it) => {
 
   it.effect("wraps iterator next, return, and throw failures with labels", () =>
     Effect.gen(function* () {
-      const factory = StdbTesting.makeDbHandleFactory(IndexedModule)
+      const factory = StdbInternal.makeDbHandleFactory(IndexedModule)
       const throwingIterator = () => ({
         next: () => {
           throw new Error("next failed")
@@ -1462,19 +1492,21 @@ describe("db handle factory", (it) => {
       const iterator =
         (yield* db.user.unsafe.iter()) as unknown as ThrowingIterator
 
-      const streamFailure = failureFromExit(
+      const streamFailure = defectFromExit(
         yield* Effect.exit(db.user.stream().pipe(Stream.runCollect)),
       )
-      expect(streamFailure).toBeInstanceOf(StdbHostCallError)
-      expect((streamFailure as StdbHostCallError).op).toBe("db.user.iter.next")
+      expect(streamFailure).toBeInstanceOf(StdbTableOperationDefect)
+      expect((streamFailure as StdbTableOperationDefect).op).toBe(
+        "db.user.iter.next",
+      )
 
-      const rangeStreamFailure = failureFromExit(
+      const rangeStreamFailure = defectFromExit(
         yield* Effect.exit(
           db.user.nameIndex.filterStream("Ada").pipe(Stream.runCollect),
         ),
       )
-      expect(rangeStreamFailure).toBeInstanceOf(StdbHostCallError)
-      expect((rangeStreamFailure as StdbHostCallError).op).toBe(
+      expect(rangeStreamFailure).toBeInstanceOf(StdbTableOperationDefect)
+      expect((rangeStreamFailure as StdbTableOperationDefect).op).toBe(
         "db.user.nameIndex.filter.next",
       )
 
@@ -1486,8 +1518,10 @@ describe("db handle factory", (it) => {
           }),
         ),
       )
-      expect(nextFailure).toBeInstanceOf(StdbHostCallError)
-      expect((nextFailure as StdbHostCallError).op).toBe("db.user.iter.next")
+      expect(nextFailure).toBeInstanceOf(StdbTableOperationDefect)
+      expect((nextFailure as StdbTableOperationDefect).op).toBe(
+        "db.user.iter.next",
+      )
 
       const returnFailure = failureFromExit(
         yield* Effect.exit(
@@ -1497,8 +1531,8 @@ describe("db handle factory", (it) => {
           }),
         ),
       )
-      expect(returnFailure).toBeInstanceOf(StdbHostCallError)
-      expect((returnFailure as StdbHostCallError).op).toBe(
+      expect(returnFailure).toBeInstanceOf(StdbTableOperationDefect)
+      expect((returnFailure as StdbTableOperationDefect).op).toBe(
         "db.user.iter.return",
       )
 
@@ -1510,14 +1544,16 @@ describe("db handle factory", (it) => {
           }),
         ),
       )
-      expect(throwFailure).toBeInstanceOf(StdbHostCallError)
-      expect((throwFailure as StdbHostCallError).op).toBe("db.user.iter.throw")
+      expect(throwFailure).toBeInstanceOf(StdbTableOperationDefect)
+      expect((throwFailure as StdbTableOperationDefect).op).toBe(
+        "db.user.iter.throw",
+      )
     }),
   )
 
   it.effect("closes safe stream iterators when consumers stop early", () =>
     Effect.gen(function* () {
-      const factory = StdbTesting.makeDbHandleFactory(IndexedModule)
+      const factory = StdbInternal.makeDbHandleFactory(IndexedModule)
       let index = 0
       let returnCount = 0
       const iterator = {
@@ -1577,7 +1613,7 @@ describe("db handle factory", (it) => {
 
   it.effect("first decodes one row and always closes the iterator", () =>
     Effect.gen(function* () {
-      const factory = StdbTesting.makeDbHandleFactory(IndexedModule)
+      const factory = StdbInternal.makeDbHandleFactory(IndexedModule)
       let nextCount = 0
       let returnCount = 0
       const iterator = {
@@ -1602,7 +1638,7 @@ describe("db handle factory", (it) => {
 
   it.effect("first closes the iterator when row decoding fails", () =>
     Effect.gen(function* () {
-      const factory = StdbTesting.makeDbHandleFactory(IndexedModule)
+      const factory = StdbInternal.makeDbHandleFactory(IndexedModule)
       let returnCount = 0
       const rawDb = makeRawDb([])
       Object.assign(rawDb.user, {
@@ -1616,18 +1652,18 @@ describe("db handle factory", (it) => {
       })
       const db = factory.readwrite(rawDb as never)
 
-      expect(yield* Effect.flip(db.user.first())).toBeInstanceOf(
-        StdbDecodeError,
-      )
+      expect(
+        defectFromExit(yield* Effect.exit(db.user.first())),
+      ).toBeInstanceOf(StdbTableOperationDefect)
       expect(returnCount).toBe(1)
     }),
   )
 
   it("validates all raw database keys before constructing a table handle", () => {
-    const factory = StdbTesting.makeDbHandleFactory(LazyHandleModule)
+    const factory = StdbInternal.makeDbHandleFactory(LazyHandleModule)
 
     expect(() => factory.readwrite({ lazyA: {} } as never)).toThrow(
-      StdbDbSchemaMismatchError,
+      StdbDbSchemaMismatchDefect,
     )
     try {
       factory.readwrite({ lazyA: {} } as never)
@@ -1641,7 +1677,7 @@ describe("db handle factory", (it) => {
   })
 
   it("constructs and memoizes only accessed table handles per invocation", () => {
-    const factory = StdbTesting.makeDbHandleFactory(LazyHandleModule)
+    const factory = StdbInternal.makeDbHandleFactory(LazyHandleModule)
     let lazyAReads = 0
     let lazyBReads = 0
     const rawDb = Object.defineProperties(

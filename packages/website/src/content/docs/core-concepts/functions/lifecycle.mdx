@@ -9,24 +9,24 @@ sidebar:
 <a class="upstream-doc" href="https://spacetimedb.com/docs/functions/reducers/lifecycle" target="_blank" rel="noopener noreferrer">SpacetimeDB: Lifecycle ↗</a>
 
 Lifecycle hooks can be declared in the module config and implemented with
-`StdbBuilder.lifecycle(...)`.
+`Builder.lifecycle(...)`.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
 const Lifecycle = {
-  init: Stdb.StdbFn.init(),
-  clientConnected: Stdb.StdbFn.clientConnected(),
-  clientDisconnected: Stdb.StdbFn.clientDisconnected(),
+  init: Stdb.Fn.init(),
+  clientConnected: Stdb.Fn.clientConnected(),
+  clientDisconnected: Stdb.Fn.clientDisconnected(),
 }
 
-const Module = Stdb.StdbModule.make("app", {
+const Module = Stdb.Module.make("app", {
   lifecycle: Lifecycle,
 })
 const { ReducerCtx } = Module
 
-const LifecycleLive = Stdb.StdbBuilder.lifecycle(Module, {
+const LifecycleLive = Stdb.Builder.lifecycle(Module, {
   // Runs once when the module is first published.
   init: () => Effect.log("module initialized"),
   // clientConnected / clientDisconnected run as the joining or leaving client,

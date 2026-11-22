@@ -1,10 +1,10 @@
-import { make as makeServer } from "../../src/server/bind.ts"
+import { makeServer } from "../helpers/module-server"
 import * as Effect from "effect/Effect"
 import * as EffectVitest from "@effect/vitest"
 const { expect } = EffectVitest
 import * as Stdb from "effect-spacetimedb"
 import { compileModule } from "../helpers/compile-module"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { TestSyncRunner } from "../helpers/sync-runner"
 import { TestLayer } from "../helpers/test-layer"
 
@@ -30,7 +30,7 @@ const membership = Stdb.table("membership", {
   ],
 })
 
-const CompositeUniqueModule = Stdb.StdbModule.make("composite_unique", {
+const CompositeUniqueModule = Stdb.Module.make("composite_unique", {
   settings: {
     caseConversionPolicy: "none",
   },
@@ -44,23 +44,22 @@ const userProfile = Stdb.table("userProfile", {
   indexes: [Stdb.index({ name: "byUser", columns: ["userId"] })],
 })
 
-const ExplicitNamesModule = Stdb.StdbModule.make(
-  "explicit_names",
-  {},
-).addTables(userProfile).spec
+const ExplicitNamesModule = Stdb.Module.make("explicit_names", {}).addTables(
+  userProfile,
+).spec
 
 const scheduledNonePolicy = Stdb.scheduledTable("scheduledNonePolicy", {
   columns: {
     note: Stdb.string(),
   },
 })
-const scheduledNonePolicyProcedure = Stdb.StdbFn.scheduledProcedure(
+const scheduledNonePolicyProcedure = Stdb.Fn.scheduledProcedure(
   "scheduledNonePolicyFire",
   {
     table: scheduledNonePolicy,
   },
 )
-const scheduledNonePolicyGroup = Stdb.StdbGroup.make("ScheduledNonePolicy").add(
+const scheduledNonePolicyGroup = Stdb.Group.make("ScheduledNonePolicy").add(
   scheduledNonePolicyProcedure,
 )
 
@@ -76,7 +75,7 @@ const ScheduledNonePolicyModule: Stdb.ModuleSpec<
   {},
   {},
   { readonly scheduledNonePolicyFire: "ScheduledNonePolicy" }
-> = Stdb.StdbModule.make("scheduled_none_policy", {
+> = Stdb.Module.make("scheduled_none_policy", {
   settings: {
     caseConversionPolicy: "none",
   },
@@ -128,7 +127,7 @@ describe("server constraint materialization", (it) => {
     "preserves composite unique constraints through the pure table-options materializer",
     () =>
       Effect.gen(function* () {
-        const options = StdbTesting.materializeTableOptions(
+        const options = StdbInternal.materializeTableOptions(
           CompositeUniqueModule.tables.membership,
         )
 
@@ -148,9 +147,9 @@ describe("server constraint materialization", (it) => {
           },
         ])
 
-        const noneOptions = StdbTesting.materializeTableOptions(
+        const noneOptions = StdbInternal.materializeTableOptions(
           CompositeUniqueModule.tables.membership,
-          CompositeUniqueModule.settings.caseConversionPolicy,
+          CompositeUniqueModule.settings,
         )
 
         expect(noneOptions.indexes).toEqual([

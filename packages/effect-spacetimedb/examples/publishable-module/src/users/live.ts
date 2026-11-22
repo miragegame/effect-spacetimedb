@@ -52,77 +52,70 @@ const seedMutationSender = Effect.fn(function* (name: UserName) {
   yield* replaceUser({ userId, name })
 })
 
-export const UserFunctionsLive = Stdb.StdbBuilder.group(
-  ExampleModule,
-  "Users",
-  {
-    userUpsert: ({ userId, name }) => replaceUser({ userId, name }),
-    userRequire: Effect.fn(function* ({ userId }) {
-      const db = yield* Db
-      yield* db.user.id.findOrFail(userId, (missingUserId) =>
-        UserMissingError.make({
-          userId: missingUserId,
-        }),
-      )
-    }),
-    seedSelfUser: ({ name }) => seedMutationSender(name),
-    emitPresence: Effect.fn(function* ({ userId, kind }) {
-      const db = yield* Db
-      yield* db.presenceEvent.insert({
-        userId,
-        kind,
-      })
-    }),
-    userGet: Effect.fn(function* ({ userId }) {
-      const tx = yield* Tx
-      return yield* tx.run(
-        Effect.gen(function* () {
-          const db = yield* Db
-          return yield* db.user.id.findOrFail(userId, (missingUserId) =>
-            UserMissingError.make({
-              userId: missingUserId,
-            }),
-          )
-        }),
-      )
-    }),
-    presenceEventCount: Effect.fn(function* () {
-      const tx = yield* Tx
-      return yield* tx.run(
-        Effect.gen(function* () {
-          const db = yield* Db
-          return yield* db.presenceEvent.count()
-        }),
-      )
-    }),
-    allUsers: () =>
-      Effect.gen(function* () {
-        const db = yield* ReadonlyDb
-        return yield* db.user.toArray()
+export const UserFunctionsLive = Stdb.Builder.group(ExampleModule, "Users", {
+  userUpsert: ({ userId, name }) => replaceUser({ userId, name }),
+  userRequire: Effect.fn(function* ({ userId }) {
+    const db = yield* Db
+    yield* db.user.id.findOrFail(userId, (missingUserId) =>
+      UserMissingError.make({
+        userId: missingUserId,
       }),
-    allUsersQuery: () =>
+    )
+  }),
+  seedSelfUser: ({ name }) => seedMutationSender(name),
+  emitPresence: Effect.fn(function* ({ userId, kind }) {
+    const db = yield* Db
+    yield* db.presenceEvent.insert({
+      userId,
+      kind,
+    })
+  }),
+  userGet: Effect.fn(function* ({ userId }) {
+    const tx = yield* Tx
+    return yield* tx.run(
       Effect.gen(function* () {
-        const from = yield* From
-        return from.user.where((row) => row.name.ne(decodeUserName("")))
-      }),
-    selfUser: () =>
-      Effect.gen(function* () {
-        const ctx = yield* ViewCtx
-        const db = yield* ReadonlyDb
-        const row = yield* db.user.id.find(
-          decodeUserId(toHexString(ctx.sender)),
+        const db = yield* Db
+        return yield* db.user.id.findOrFail(userId, (missingUserId) =>
+          UserMissingError.make({
+            userId: missingUserId,
+          }),
         )
-        return row ?? undefined
       }),
-    usersNamed: Effect.fn(function* ({ name }) {
+    )
+  }),
+  presenceEventCount: Effect.fn(function* () {
+    const tx = yield* Tx
+    return yield* tx.run(
+      Effect.gen(function* () {
+        const db = yield* Db
+        return yield* db.presenceEvent.count()
+      }),
+    )
+  }),
+  allUsers: () =>
+    Effect.gen(function* () {
       const db = yield* ReadonlyDb
-      return (yield* db.user.toArray()).filter((row) => row.name === name)
+      return yield* db.user.toArray()
     }),
-    userOfIdentity: Effect.fn(function* ({ identity }) {
+  allUsersQuery: () =>
+    Effect.gen(function* () {
+      const from = yield* From
+      return from.user.where((row) => row.name.ne(decodeUserName("")))
+    }),
+  selfUser: () =>
+    Effect.gen(function* () {
+      const ctx = yield* ViewCtx
       const db = yield* ReadonlyDb
-      const row = yield* db.user.id.find(decodeUserId(toHexString(identity)))
+      const row = yield* db.user.id.find(decodeUserId(toHexString(ctx.sender)))
       return row ?? undefined
     }),
-    privateAuditLog: () => Effect.succeed([]),
-  },
-)
+  usersNamed: Effect.fn(function* ({ name }) {
+    const db = yield* ReadonlyDb
+    return (yield* db.user.toArray()).filter((row) => row.name === name)
+  }),
+  userOfIdentity: Effect.fn(function* ({ identity }) {
+    const db = yield* ReadonlyDb
+    const row = yield* db.user.id.find(decodeUserId(toHexString(identity)))
+    return row ?? undefined
+  }),
+})

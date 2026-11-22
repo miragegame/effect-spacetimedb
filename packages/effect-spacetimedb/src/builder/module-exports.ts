@@ -1,18 +1,19 @@
 import type { ModuleAccessors } from "./declarations.ts"
-import type { AnyStdbModule } from "./handler-types.ts"
+import type { AnyModule } from "./handler-types.ts"
 import type { SpecOfModule } from "./type-utils.ts"
 
-export type ModuleExports<Module extends AnyStdbModule> = ModuleAccessors<
+export type ModuleExports<Module extends AnyModule> = ModuleAccessors<
   SpecOfModule<Module>
 >
 
-type ModuleWithAccessors<Module extends AnyStdbModule> = Module &
+export type ModuleWithAccessors<Module extends AnyModule> = Module &
   ModuleExports<Module>
 
-export const moduleExports = <const Module extends AnyStdbModule>(
+export const moduleExports = <const Module extends AnyModule>(
   module: ModuleWithAccessors<Module>,
 ): ModuleExports<Module> => ({
   Db: module.Db,
+  mounts: module.mounts,
   ReadonlyDb: module.ReadonlyDb,
   ReducerCtx: module.ReducerCtx,
   ProcedureCtx: module.ProcedureCtx,

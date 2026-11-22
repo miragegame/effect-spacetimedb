@@ -54,6 +54,26 @@ const messageFromUnknown = (cause: unknown): string => {
   )
 }
 
+const decodeErrorMessage = (error: {
+  readonly phase: StdbDecodePhase
+  readonly cause: unknown
+  readonly table?: string
+  readonly callable?: string
+  readonly op?: string
+  readonly declaredTag?: string
+}): string => {
+  const context = [
+    error.table != null ? `table=${error.table}` : undefined,
+    error.callable != null ? `callable=${error.callable}` : undefined,
+    error.op != null ? `op=${error.op}` : undefined,
+    error.declaredTag != null ? `declaredTag=${error.declaredTag}` : undefined,
+  ].filter((entry): entry is string => entry !== undefined)
+
+  return `SpaceTimeDB decode failed during ${error.phase}${
+    context.length > 0 ? ` (${context.join(", ")})` : ""
+  }: ${messageFromUnknown(error.cause)}`
+}
+
 const StdbDecodeErrorTypeId = errorTypeId("StdbDecodeError")
 
 export class StdbDecodeError extends Data.TaggedError("StdbDecodeError")<{
@@ -67,18 +87,7 @@ export class StdbDecodeError extends Data.TaggedError("StdbDecodeError")<{
   readonly [StdbDecodeErrorTypeId] = StdbDecodeErrorTypeId
   static is = hasErrorTypeId<StdbDecodeError>(StdbDecodeErrorTypeId)
 
-  override get message(): string {
-    const context = [
-      this.table != null ? `table=${this.table}` : undefined,
-      this.callable != null ? `callable=${this.callable}` : undefined,
-      this.op != null ? `op=${this.op}` : undefined,
-      this.declaredTag != null ? `declaredTag=${this.declaredTag}` : undefined,
-    ].filter((entry): entry is string => entry !== undefined)
-
-    return `SpaceTimeDB decode failed during ${this.phase}${
-      context.length > 0 ? ` (${context.join(", ")})` : ""
-    }: ${messageFromUnknown(this.cause)}`
-  }
+  override readonly message = decodeErrorMessage(this)
 }
 
 export const addDecodeContext = (

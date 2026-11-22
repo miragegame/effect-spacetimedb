@@ -1,33 +1,28 @@
-import { make as makeServer } from "../../src/server/bind.ts"
 import * as Effect from "effect/Effect"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as Stdb from "effect-spacetimedb"
 import {
-  FullModule,
-  FullModuleHttpHandlers,
+  FullStdbModule,
   type UserId,
   type UserName,
 } from "../fixtures/full-module"
-import { TestSyncRunner } from "../helpers/sync-runner"
 
-const server = makeServer({
-  module: FullModule,
-  runtime: TestSyncRunner,
-})
-type UserUpsertArgs = StdbTesting.TypeOf<
-  typeof FullModule.reducers.userUpsert.params
->
-type UserRequireArgs = StdbTesting.TypeOf<
-  typeof FullModule.reducers.userRequire.params
->
-type UserGetArgs = StdbTesting.TypeOf<
-  typeof FullModule.procedures.userGet.params
->
-type ReminderFireArgs = StdbTesting.TypeOf<
-  typeof FullModule.procedures.reminderFire.params
->
+const { From } = FullStdbModule
 
-const validRowView = server.anonymousView(
-  Effect.fn(function* () {
+const callableHandlers = {
+  userUpsert: () => Effect.void,
+  init: () => Effect.void,
+  clientConnected: () => Effect.void,
+  clientDisconnected: () => Effect.void,
+  userRequire: () => Effect.void,
+  userGet: Effect.fn(function* () {
+    return undefined
+  }),
+  reminderFire: () => Effect.void,
+}
+
+const ValidRowViewLive = Stdb.Builder.group(FullStdbModule, "FullCallables", {
+  ...callableHandlers,
+  allUsers: Effect.fn(function* () {
     return [
       {
         id: "user-1" as UserId,
@@ -35,44 +30,26 @@ const validRowView = server.anonymousView(
       },
     ]
   }),
-)
-
-const validQueryView = server.anonymousView(
-  Effect.fn(function* () {
-    const from = yield* server.from
-    return from.user
-  }),
-)
-
-const invalidView = server.handlers({
-  // @ts-expect-error allUsers must return rows or a compatible typed query
-  reducers: {
-    userUpsert: Effect.fn(function* (_args: UserUpsertArgs) {}),
-    userRequire: Effect.fn(function* (_args: UserRequireArgs) {}),
-  },
-  procedures: {
-    userGet: Effect.fn(function* (_args: UserGetArgs) {
-      return undefined
-    }),
-    reminderFire: Effect.fn(function* (_args: ReminderFireArgs) {
-      return undefined
-    }),
-  },
-  httpHandlers: FullModuleHttpHandlers,
-  views: {
-    allUsers: Effect.fn(function* () {
-      return {
-        nope: true,
-      }
-    }),
-  },
-  lifecycle: {
-    init: () => Effect.void,
-    clientConnected: () => Effect.void,
-    clientDisconnected: () => Effect.void,
-  },
 })
 
-void validRowView
-void validQueryView
-void invalidView
+const ValidQueryViewLive = Stdb.Builder.group(FullStdbModule, "FullCallables", {
+  ...callableHandlers,
+  allUsers: Effect.fn(function* () {
+    const from = yield* From
+    return from.user
+  }),
+})
+
+const InvalidViewLive = Stdb.Builder.group(FullStdbModule, "FullCallables", {
+  ...callableHandlers,
+  // @ts-expect-error allUsers must return rows or a compatible typed query
+  allUsers: Effect.fn(function* () {
+    return {
+      nope: true,
+    }
+  }),
+})
+
+void ValidRowViewLive
+void ValidQueryViewLive
+void InvalidViewLive

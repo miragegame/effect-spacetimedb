@@ -1,6 +1,6 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { typeBuilder } from "../helpers/type-builder"
 import { testArrayLength } from "../helpers/array-bounds"
 
@@ -14,11 +14,11 @@ const hasMethod = (value: unknown, method: CapabilityMethod): boolean =>
   typeof Reflect.get(value, method) === "function"
 
 const nativePrimaryKeyCapable = (
-  value: StdbTesting.ContractType.AnyValueType,
+  value: StdbInternal.ContractType.AnyValueType,
 ): boolean => hasMethod(typeBuilder(value), "primaryKey")
 
 const nativeAutoIncCapable = (
-  value: StdbTesting.ContractType.AnyValueType,
+  value: StdbInternal.ContractType.AnyValueType,
 ): boolean => {
   const builder = typeBuilder(value)
   if (!hasMethod(builder, "primaryKey")) {
@@ -37,7 +37,7 @@ const u32 = Stdb.u32()
 
 const capabilityCases: ReadonlyArray<{
   readonly label: string
-  readonly value: StdbTesting.ContractType.AnyValueType
+  readonly value: StdbInternal.ContractType.AnyValueType
 }> = [
   { label: "array", value: Stdb.array(Stdb.u8(), testArrayLength) },
   { label: "bigint", value: Stdb.bigint() },
@@ -92,11 +92,11 @@ describe("column key capability drift", () => {
   it("matches native builder primary key and auto-increment capabilities", () => {
     for (const entry of capabilityCases) {
       expect(
-        StdbTesting.ContractType.supportsPrimaryKey(entry.value),
+        StdbInternal.ContractType.supportsPrimaryKey(entry.value),
         `${entry.label} primaryKey`,
       ).toBe(nativePrimaryKeyCapable(entry.value))
       expect(
-        StdbTesting.ContractType.supportsAutoInc(entry.value),
+        StdbInternal.ContractType.supportsAutoInc(entry.value),
         `${entry.label} autoInc`,
       ).toBe(nativeAutoIncCapable(entry.value))
     }

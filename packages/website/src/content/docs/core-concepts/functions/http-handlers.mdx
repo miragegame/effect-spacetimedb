@@ -13,15 +13,15 @@ context exposes the module database identity, timestamp, HTTP request data,
 randomness, UUID helpers, and transaction-scoped DB access. It does not expose a
 caller `sender`, caller identity, or connection id.
 
-Declare routes in an `StdbHttpGroup`. Typed routes provide `request` and
+Declare routes in an `HttpGroup`. Typed routes provide `request` and
 `response` schemas; raw routes omit them and work directly with `Request` and
 `SyncResponse`.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 
-const tokenRotation = Stdb.table("token_rotation", {
+const tokenRotation = Stdb.table("tokenRotation", {
   columns: {
     userId: Stdb.string().primaryKey(),
     token: Stdb.string(),
@@ -31,31 +31,31 @@ const tokenRotation = Stdb.table("token_rotation", {
 const RotateTokenInput = Stdb.struct({ userId: Stdb.string() }).schema
 const RotateTokenOutput = Stdb.struct({ token: Stdb.string() }).schema
 
-const Webhooks = Stdb.StdbHttpGroup.make("Webhooks")
+const Webhooks = Stdb.HttpGroup.make("Webhooks")
   .prefix("/webhooks")
-  .add(Stdb.StdbHttp.post("stripe_webhook", "/stripe"))
+  .add(Stdb.Http.post("stripeWebhook", "/stripe"))
   .add(
-    Stdb.StdbHttp.post("rotate_token", "/rotate", {
+    Stdb.Http.post("rotateToken", "/rotate", {
       request: RotateTokenInput,
       response: RotateTokenOutput,
     }),
   )
 
-const Module = Stdb.StdbModule.make("app")
+const Module = Stdb.Module.make("app")
   .addTables(tokenRotation)
   .add(Webhooks)
 const { HttpTx, Db } = Module
 
-const WebhooksLive = Stdb.StdbBuilder.group(Module, "Webhooks", {
-  stripe_webhook: (request) =>
+const WebhooksLive = Stdb.Builder.group(Module, "Webhooks", {
+  stripeWebhook: (request) =>
     Effect.succeed(new Stdb.SyncResponse(request.text(), { status: 202 })),
-  rotate_token: (args) =>
+  rotateToken: (args) =>
     Effect.gen(function* () {
       const tx = yield* HttpTx
       return yield* tx.run(
         Effect.gen(function* () {
           const db = yield* Db
-          const row = yield* db.token_rotation.userId.replace({
+          const row = yield* db.tokenRotation.userId.update({
             userId: args.userId,
             token: `token:${args.userId}`,
           })
@@ -74,8 +74,8 @@ These are inbound routes the module serves. They are unrelated to the
 `[module-http]` server setting, which governs requests a module *makes* — see
 [Procedures](/core-concepts/functions/procedures).
 
-effect-spacetimedb uses `StdbHttpGroup` plus
-`StdbBuilder.group(...)` instead of exporting handler functions directly. Typed
+effect-spacetimedb uses `HttpGroup` plus
+`Builder.group(...)` instead of exporting handler functions directly. Typed
 `post`, `put`, and `patch` routes can also be projected to an Effect `HttpApi`.
 
 ## Project Typed Routes To HttpApi
@@ -84,7 +84,7 @@ Typed `post`, `put`, and `patch` routes can also be projected into a canonical
 Effect `HttpApi`. The STDB HTTP group becomes the `HttpApiClient` property key,
 and the route name becomes the typed endpoint method.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
@@ -99,14 +99,14 @@ declare const userId: string
 const RotateTokenInput = Stdb.struct({ userId: Stdb.string() }).schema
 const RotateTokenOutput = Stdb.struct({ token: Stdb.string() }).schema
 
-const Webhooks = Stdb.StdbHttpGroup.make("Webhooks").add(
-  Stdb.StdbHttp.post("rotate_token", "/rotate", {
+const Webhooks = Stdb.HttpGroup.make("Webhooks").add(
+  Stdb.Http.post("rotateToken", "/rotate", {
     request: RotateTokenInput,
     response: RotateTokenOutput,
   }),
 )
 
-const Module = Stdb.StdbModule.make("app").add(Webhooks)
+const Module = Stdb.Module.make("app").add(Webhooks)
 const api = Stdb.toHttpApi(Module)
 
 const program = Effect.gen(function* () {
@@ -117,7 +117,7 @@ const program = Effect.gen(function* () {
     ),
   })
 
-  const response = yield* client.Webhooks.rotate_token({
+  const response = yield* client.Webhooks.rotateToken({
     payload: { userId },
   })
 

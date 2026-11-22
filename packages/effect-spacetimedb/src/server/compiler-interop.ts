@@ -114,13 +114,13 @@ export type CompilerSchemaBridge = {
         ]
   ) => ModuleExport
   readonly view: (
-    options: { readonly name: string; readonly public: boolean },
+    options: { readonly name: string; readonly public: true },
     params: unknown,
     returnType: unknown,
     handler: (ctx: unknown, rawArgs: unknown) => unknown,
   ) => ModuleExport
   readonly anonymousView: (
-    options: { readonly name: string; readonly public: boolean },
+    options: { readonly name: string; readonly public: true },
     params: unknown,
     returnType: unknown,
     handler: (ctx: unknown, rawArgs: unknown) => unknown,
@@ -167,6 +167,7 @@ export type CompilerProcedureHostCtx = CompilerCallableHostCtx & {
 }
 
 export type CompilerHttpHandlerHostCtx = {
+  readonly as?: unknown
   readonly env: ServerEnvironmentReader
   readonly timestamp: ServerTimestamp
   readonly http: CompilerProcedureHostCtx["http"]
@@ -342,7 +343,7 @@ export const defineCompilerHostProcedure = (
 // empty one declares a view without arguments, as the two-argument form does.
 export const defineCompilerView = (
   schema: CompilerSchemaBridge,
-  options: { readonly name: string; readonly public: boolean },
+  options: { readonly name: string; readonly public: true },
   params: unknown,
   returnType: unknown,
   handler: (ctx: unknown, rawArgs: unknown) => unknown,
@@ -351,7 +352,7 @@ export const defineCompilerView = (
 
 export const defineCompilerHostView = (
   schema: CompilerSchemaBridge,
-  options: { readonly name: string; readonly public: boolean },
+  options: { readonly name: string; readonly public: true },
   params: unknown,
   returnType: unknown,
   handler: (ctx: CompilerSenderViewHostCtx, rawArgs: unknown) => unknown,
@@ -362,7 +363,7 @@ export const defineCompilerHostView = (
 
 export const defineCompilerAnonymousView = (
   schema: CompilerSchemaBridge,
-  options: { readonly name: string; readonly public: boolean },
+  options: { readonly name: string; readonly public: true },
   params: unknown,
   returnType: unknown,
   handler: (ctx: unknown, rawArgs: unknown) => unknown,
@@ -376,7 +377,7 @@ export const defineCompilerAnonymousView = (
 
 export const defineCompilerHostAnonymousView = (
   schema: CompilerSchemaBridge,
-  options: { readonly name: string; readonly public: boolean },
+  options: { readonly name: string; readonly public: true },
   params: unknown,
   returnType: unknown,
   handler: (ctx: CompilerAnonymousViewHostCtx, rawArgs: unknown) => unknown,
@@ -462,6 +463,7 @@ export const toCompilerHttpHandlerCtx = <Module extends AnyModuleSpec>(
 ): ServerHttpHandlerCtx<Module> =>
   ({
     env: ctx.env,
+    as: ctx.as,
     timestamp: ctx.timestamp,
     http: ctx.http,
     databaseIdentity: ctx.identity,
@@ -496,6 +498,24 @@ export const invokeCompilerSenderView = <
     toCompilerSenderViewCtx<Module>(ctx),
     args,
   )
+
+export const reportCompilerViewFailure = (
+  view: {
+    readonly reportFailure: unknown
+  },
+  ctx: CompilerSenderViewHostCtx | CompilerAnonymousViewHostCtx,
+  cause: unknown,
+): void =>
+  (view.reportFailure as (ctx: unknown, cause: unknown) => void)(ctx, cause)
+
+export const rejectCompilerViewArguments = (
+  view: {
+    readonly rejectArguments: unknown
+  },
+  ctx: CompilerSenderViewHostCtx | CompilerAnonymousViewHostCtx,
+  cause: unknown,
+): never =>
+  (view.rejectArguments as (ctx: unknown, cause: unknown) => never)(ctx, cause)
 
 export const invokeCompilerAnonymousView = <
   Module extends AnyModuleSpec,

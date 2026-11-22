@@ -14,7 +14,7 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { ConnectionId, Identity, Uuid } from "spacetimedb"
 import { testViewRowsLength } from "../helpers/array-bounds"
 import { TestLayer } from "../helpers/test-layer"
@@ -28,7 +28,7 @@ const Author = Stdb.string(
 )
 const Post = Stdb.struct({ id: Stdb.string(), authorId: Author })
 
-const postsByAuthor = Stdb.StdbFn.anonymousView("postsByAuthor", {
+const postsByAuthor = Stdb.Fn.anonymousView("postsByAuthor", {
   params: Stdb.struct({
     authorId: Author,
     published: Stdb.bool(),
@@ -42,12 +42,12 @@ const postsByAuthor = Stdb.StdbFn.anonymousView("postsByAuthor", {
   }),
   returns: Stdb.array(Post, testViewRowsLength),
 })
-const allPosts = Stdb.StdbFn.anonymousView("allPosts", {
+const allPosts = Stdb.Fn.anonymousView("allPosts", {
   returns: Stdb.array(Post, testViewRowsLength),
 })
 
-const PostsModule = Stdb.StdbModule.make("view_params", {}).add(
-  Stdb.StdbGroup.make("Views").add(postsByAuthor).add(allPosts),
+const PostsModule = Stdb.Module.make("view_params", {}).add(
+  Stdb.Group.make("Views").add(postsByAuthor).add(allPosts),
 ).spec
 
 const reviewer = Identity.fromString("ab".repeat(32))
@@ -72,18 +72,18 @@ const recordingSession = () => {
   const queries: Array<unknown> = []
   // Completes when the first subscription reaches the builder.
   const subscribed = Deferred.makeUnsafe<void>()
-  const handle: StdbTesting.NativeSubscriptionHandleLike = {
+  const handle: StdbInternal.NativeSubscriptionHandleLike = {
     isEnded: () => false,
     unsubscribe: () => undefined,
   }
-  const builder = (): StdbTesting.SubscriptionBuilderLike<
+  const builder = (): StdbInternal.SubscriptionBuilderLike<
     unknown,
-    StdbTesting.ClientQueryRoot<typeof PostsModule>
+    StdbInternal.ClientQueryRoot<typeof PostsModule>
   > => {
     let applied: (() => void) | undefined
-    const self: StdbTesting.SubscriptionBuilderLike<
+    const self: StdbInternal.SubscriptionBuilderLike<
       unknown,
-      StdbTesting.ClientQueryRoot<typeof PostsModule>
+      StdbInternal.ClientQueryRoot<typeof PostsModule>
     > = {
       onApplied: (callback) => {
         applied = callback
@@ -99,7 +99,7 @@ const recordingSession = () => {
     }
     return self
   }
-  const session = StdbTesting.ClientWs.make({
+  const session = StdbInternal.ClientWs.make({
     module: PostsModule,
     connection: {
       isActive: true,
@@ -125,7 +125,7 @@ const paramsOf = (fields: Stdb.StructFields): Stdb.AnyModuleSpec =>
     settings: {},
     tables: {},
     views: {
-      kinds: Stdb.StdbFn.anonymousView("kinds", {
+      kinds: Stdb.Fn.anonymousView("kinds", {
         params: Stdb.struct(fields),
         returns: Stdb.array(Post, testViewRowsLength),
       }).spec,

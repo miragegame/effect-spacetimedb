@@ -1,3 +1,4 @@
+import { withDeadline } from "./call-duration.ts"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -15,7 +16,7 @@ export type RecoveringConnection = Extract<
 
 /**
  * Follows a live supervised session that reconnects on its own (automatic
- * reconnect) until it ends, completing with the failure that ended it.
+ * reconnect) until it ends, failing with whatever ended it.
  *
  * Each drop publishes `recovering`. Each completed recovery (the SDK
  * reconnected and every subscription re-applied) runs the reconnect hook in a
@@ -32,11 +33,12 @@ export const followRecoveringSession = <Failure, R>(options: {
   readonly hookTimeoutMillis: number
   readonly hookTimeoutFailure: () => Failure
   readonly ended: Effect.Effect<never, Failure>
-  readonly publishLive: Effect.Effect<void>
+  /** Publishes `live`, if `isCurrent` still holds when that happens. */
+  readonly publishLive: (isCurrent: () => boolean) => Effect.Effect<void>
   readonly publishRecovering: (
     recovery: RecoveringConnection,
   ) => Effect.Effect<void>
-}): Effect.Effect<Failure, never, R | Scope.Scope> => {
+}): Effect.Effect<never, Failure, R | Scope.Scope> => {
   const state = options.connectionState
   const hook = options.reconnectHook
 
@@ -55,7 +57,7 @@ export const followRecoveringSession = <Failure, R>(options: {
   ): Effect.Effect<boolean, Failure, R> =>
     reconnectHook().pipe(
       Effect.provideService(Scope.Scope, period),
-      Effect.timeoutOrElse({
+      withDeadline({
         duration: Duration.millis(options.hookTimeoutMillis),
         orElse: () => Effect.fail(options.hookTimeoutFailure()),
       }),
@@ -83,8 +85,8 @@ export const followRecoveringSession = <Failure, R>(options: {
         ? true
         : yield* runReconnectHook(hook, period, snapshot.version)
     // A drop between the hook and the publish would show a dead socket live.
-    if (ready && !droppedSince(snapshot.version)) {
-      yield* options.publishLive
+    if (ready) {
+      yield* options.publishLive(() => !droppedSince(snapshot.version))
     }
     return yield* state
       .awaitRecoveryAfter(snapshot.version)
@@ -101,5 +103,5 @@ export const followRecoveringSession = <Failure, R>(options: {
   return Effect.raceFirst(
     state.awaitRecoveryAfter(0).pipe(Effect.flatMap(follow)),
     options.ended,
-  ).pipe(Effect.flip)
+  )
 }

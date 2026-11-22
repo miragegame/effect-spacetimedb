@@ -6,57 +6,13 @@ import type * as Tracer from "effect/Tracer"
 import type { HttpHandlerSpec } from "../contract/http-handler.ts"
 
 import { isTypedHttpHandlerSpec } from "../contract/http-handler.ts"
-import type { AnyModuleSpec } from "../contract/module.ts"
 import { Request } from "../http-primitives.ts"
 
 import { decodeEmptyHttpBody, httpWireCodec } from "../http-wire-codec.ts"
 import { HttpRequestDecodeError } from "./callable-runtime.ts"
-import {
-  assertOwnedHandler,
-  HandlerBundleOwnerSymbol,
-  HandlerOwnerSymbol,
-  type OwnedHandler,
-  type OwnedHandlerBundle,
-} from "./handler-ownership.ts"
-
-import type { CallableContextFields } from "./handler-types.ts"
-
-import {
-  type ConstrainedServerRuntimeMode,
-  provideConstrainedServerRuntime,
-} from "./runtime-layer.ts"
-
-import type { HttpHandlerCtxLike } from "./runtime-types.ts"
-
-import { hostCall } from "./services.ts"
-
-import { type SyncRunner } from "./sync-runner.ts"
-
 export const handlerSpanTraceOptions = {
   captureStackTrace: false,
 } satisfies Tracer.TraceOptions
-
-export const assertHandlerRecordOwnership = <
-  RecordType extends Record<string, unknown>,
->(
-  owner: symbol,
-  section: string,
-  record: RecordType,
-) => {
-  for (const [key, handler] of Object.entries(record)) {
-    assertOwnedHandler(owner, handler as OwnedHandler, `${section}.${key}`)
-  }
-}
-
-export const isOwnedHandler = (value: unknown): value is OwnedHandler =>
-  typeof value === "object" && value !== null && HandlerOwnerSymbol in value
-
-export const isOwnedHandlerBundle = (
-  value: unknown,
-): value is OwnedHandlerBundle =>
-  typeof value === "object" &&
-  value !== null &&
-  HandlerBundleOwnerSymbol in value
 
 export const assertKnownHandlerKey = (
   section: string,
@@ -94,31 +50,6 @@ export const decodeHttpRequest = (
   )
 }
 
-export const messageFromThrowable = (cause: unknown): string =>
-  cause instanceof Error && cause.message.length > 0
-    ? cause.message
-    : String(cause)
-
-export const logHttpHandlerBoundaryFailure = <Module extends AnyModuleSpec>(
-  runner: SyncRunner,
-  runtimeMode: ConstrainedServerRuntimeMode,
-  ctx: HttpHandlerCtxLike<Module>,
-  key: string,
-  spec: HttpHandlerSpec,
-  cause: unknown,
-): void => {
-  const route = `${spec.method.toUpperCase()} ${spec.path}`
-  runner.runSync(
-    provideConstrainedServerRuntime(
-      Effect.logError(
-        `SpaceTimeDB HTTP handler ${key} (${route}) returned 500 after an uncaught host-boundary failure: ${messageFromThrowable(cause)}`,
-      ),
-      ctx,
-      runtimeMode,
-    ),
-  )
-}
-
 export type HandlerLogKind =
   | "reducer"
   | "procedure"
@@ -149,48 +80,3 @@ export const senderLogValue = (sender: unknown): string => {
 
   return String(sender)
 }
-
-export const makeCallableContextHelpers = <
-  ContextValue extends CallableContextFields,
-  Requirements,
->(
-  context: Effect.Effect<ContextValue, never, Requirements>,
-  opPrefix: string,
-) => ({
-  sender: Effect.map(context, (ctx) => ctx.sender),
-  databaseIdentity: Effect.map(context, (ctx) => ctx.databaseIdentity),
-  /** @deprecated Use `databaseIdentity` instead. */
-  identity: Effect.map(context, (ctx) => ctx.identity),
-  timestamp: Effect.map(context, (ctx) => ctx.timestamp),
-  connectionId: Effect.map(context, (ctx) => ctx.connectionId),
-  random: Effect.map(context, (ctx) => ctx.random),
-  newUuidV4: Effect.flatMap(context, (ctx) =>
-    hostCall(`${opPrefix}.newUuidV4`, () => ctx.newUuidV4()),
-  ),
-  newUuidV7: Effect.flatMap(context, (ctx) =>
-    hostCall(`${opPrefix}.newUuidV7`, () => ctx.newUuidV7()),
-  ),
-})
-
-export const makeHttpHandlerContextHelpers = <
-  ContextValue extends {
-    readonly databaseIdentity: unknown
-    readonly timestamp: unknown
-    readonly random: unknown
-    readonly newUuidV4: () => unknown
-    readonly newUuidV7: () => unknown
-  },
-  Requirements,
->(
-  context: Effect.Effect<ContextValue, never, Requirements>,
-) => ({
-  databaseIdentity: Effect.map(context, (ctx) => ctx.databaseIdentity),
-  timestamp: Effect.map(context, (ctx) => ctx.timestamp),
-  random: Effect.map(context, (ctx) => ctx.random),
-  newUuidV4: Effect.flatMap(context, (ctx) =>
-    hostCall("httpHandlerCtx.newUuidV4", () => ctx.newUuidV4()),
-  ),
-  newUuidV7: Effect.flatMap(context, (ctx) =>
-    hostCall("httpHandlerCtx.newUuidV7", () => ctx.newUuidV7()),
-  ),
-})

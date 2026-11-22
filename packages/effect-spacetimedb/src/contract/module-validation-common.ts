@@ -1,14 +1,10 @@
-import {
-  camelCaseName,
-  isCamelCaseCanonical,
-  snakeCaseName,
-} from "./canonical-name.ts"
+import { camelCaseName } from "./canonical-name.ts"
 
 import {
   makeStdbDiagnostic,
-  StdbDiagnostic,
-  type StdbDiagnosticCode,
-  type StdbDiagnosticSeverity,
+  Diagnostic,
+  type DiagnosticCode,
+  type DiagnosticSeverity,
 } from "./diagnostic.ts"
 
 import { isLifecycleName } from "./lifecycle.ts"
@@ -17,6 +13,7 @@ import {
   findInvalidStringLiteralTag,
   findStringLiteralTagCollision,
   invalidStringLiteralTagMessage,
+  isSpaceTimeDbAsciiIdentifier,
   stringLiteralTagCollisionMessage,
 } from "./literal-tags.ts"
 
@@ -62,29 +59,32 @@ export const canonicalColumnSet = (columns: ReadonlyArray<string>): string =>
   columns.slice().sort().join("\u0000")
 
 export const diagnostic = (
-  code: StdbDiagnosticCode,
+  code: DiagnosticCode,
   path: ReadonlyArray<string | number>,
   message: string,
-  severity: StdbDiagnosticSeverity = "error",
-): StdbDiagnostic => makeStdbDiagnostic(code, path, message, severity)
+  severity: DiagnosticSeverity = "error",
+): Diagnostic => makeStdbDiagnostic(code, path, message, severity)
 
 export const pushDiagnostic = (
-  diagnostics: Array<StdbDiagnostic>,
-  code: StdbDiagnosticCode,
+  diagnostics: Array<Diagnostic>,
+  code: DiagnosticCode,
   path: ReadonlyArray<string | number>,
   message: string,
-  severity?: StdbDiagnosticSeverity,
+  severity?: DiagnosticSeverity,
 ) => {
   diagnostics.push(diagnostic(code, path, message, severity ?? "error"))
 }
 
-export const validateCamelCaseDeclaredName = (
-  diagnostics: Array<StdbDiagnostic>,
+export const validateDeclaredName = (
+  diagnostics: Array<Diagnostic>,
   path: ReadonlyArray<string | number>,
   label: string,
   name: string,
 ): void => {
-  if (isCamelCaseCanonical(name)) {
+  if (
+    isSpaceTimeDbAsciiIdentifier(name) &&
+    isSpaceTimeDbAsciiIdentifier(camelCaseName(name))
+  ) {
     return
   }
 
@@ -92,12 +92,12 @@ export const validateCamelCaseDeclaredName = (
     diagnostics,
     "NonCanonicalDeclaredName",
     path,
-    `${label} ${name} must be a camelCase canonical fixed point; use ${camelCaseName(name)}`,
+    `${label} ${name} must have a representable TypeScript accessor after case conversion`,
   )
 }
 
 export const validateCanonicalCollisions = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   path: ReadonlyArray<string | number>,
   label: string,
   names: ReadonlyArray<string>,
@@ -124,7 +124,7 @@ export const validateCanonicalCollisions = (
 }
 
 export const validateLiteralTagCollisions = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   path: ReadonlyArray<string | number>,
   values: ReadonlyArray<string | number | boolean>,
 ): void => {
@@ -161,7 +161,7 @@ export const handlerSectionLabels = {
 } as const satisfies Record<keyof ServerHandlerDefinitions, string>
 
 export const validateLifecycle = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   module: AnyModuleSpec,
 ): void => {
   for (const [key, spec] of Object.entries(module.lifecycle)) {
@@ -187,7 +187,7 @@ export const validateLifecycle = (
 }
 
 export const assertDeclaredHandlersPresent = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   section: keyof ServerHandlerDefinitions,
   expected: ReadonlyArray<string>,
   handlers: ServerHandlerDefinitions,
@@ -208,7 +208,7 @@ export const assertDeclaredHandlersPresent = (
 }
 
 export const assertValidColumnSelection = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   kind: "Index" | "Constraint",
   tableKey: string,
   name: string,
@@ -236,7 +236,7 @@ export const assertValidColumnSelection = (
 }
 
 export const validateValueType = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   value: unknown,
   path: ReadonlyArray<string | number>,
   visited: WeakSet<object> = new WeakSet<object>(),
@@ -340,7 +340,7 @@ export const validateValueType = (
 }
 
 export const validateCanonicalValueTypeNames = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   value: unknown,
   path: ReadonlyArray<string | number>,
   visited: WeakSet<object> = new WeakSet<object>(),
@@ -374,12 +374,12 @@ export const validateCanonicalValueTypeNames = (
         path,
         "Struct fields",
         fieldNames,
-        snakeCaseName,
+        camelCaseName,
       )
       for (const [fieldName, fieldType] of Object.entries(fields)) {
         const fieldPath = [...path, fieldName]
         if (includeStyle) {
-          validateCamelCaseDeclaredName(
+          validateDeclaredName(
             diagnostics,
             fieldPath,
             "Struct field",
@@ -411,12 +411,7 @@ export const validateCanonicalValueTypeNames = (
       for (const [tag, variantType] of Object.entries(variants)) {
         const variantPath = [...path, tag]
         if (includeStyle) {
-          validateCamelCaseDeclaredName(
-            diagnostics,
-            variantPath,
-            "Sum variant",
-            tag,
-          )
+          validateDeclaredName(diagnostics, variantPath, "Sum variant", tag)
         }
         validateCanonicalValueTypeNames(
           diagnostics,

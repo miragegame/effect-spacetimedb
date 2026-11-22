@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { FullModule, UserId } from "../fixtures/full-module"
 import { testArrayLength } from "../helpers/array-bounds"
 import { makeFullModuleWsConnection } from "../helpers/ws-fixtures"
@@ -17,12 +17,12 @@ const filterShape = Stdb.table("filterShape", {
     nickname: FilterString.pipe(Stdb.string, Stdb.option),
   },
 })
-const FilterShapeModule = Stdb.StdbModule.make("filter_shape", {}).addTables(
+const FilterShapeModule = Stdb.Module.make("filter_shape", {}).addTables(
   filterShape,
 ).spec
 const FilterShape = Stdb.project(FilterShapeModule)
 
-const session = StdbTesting.ClientWs.make({
+const session = StdbInternal.ClientWs.make({
   module: FullModule,
   connection: makeFullModuleWsConnection(),
 })

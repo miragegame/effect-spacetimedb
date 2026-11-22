@@ -1,4 +1,4 @@
-export { isRowTypedQuery } from "spacetimedb"
+export { isRowTypedQuery, makeQueryBuilder } from "spacetimedb"
 
 export const moduleHooks = Symbol("spacetime:sys@2.0/moduleHooks")
 const registerExport = Symbol("SpacetimeDB.registerExport")
@@ -87,10 +87,8 @@ export const CaseConversionPolicy = {
   None: "none",
 } as const
 
-// @effect-diagnostics-next-line extendsNativeError:off -- Test double of the `spacetimedb` host module's native `SenderError`; the module under test receives it through the host ABI and must see the real shape.
 export class SenderError extends Error {}
 
-// @effect-diagnostics-next-line extendsNativeError:off -- Test double of the `spacetimedb` host module's native `SpacetimeHostError`; the host-error mirroring in src/server/host-errors.ts matches it by `name`.
 export class SpacetimeHostError extends Error {
   override get name(): string {
     return "SpacetimeHostError"
@@ -240,8 +238,13 @@ class TestSchema {
 
   /** The `schema()` settings argument as the compiler passed it. */
   readonly moduleSettings: unknown
+  readonly schemaEntries: Record<string, unknown>
+  readonly schemaType = { tables: {} }
+  // The unit compiler fixture captures schema inputs. Dispatch itself runs in the standalone suite.
+  buildSubmoduleDispatch(): void {}
 
   constructor(tables: Record<string, unknown> = {}, moduleSettings?: unknown) {
+    this.schemaEntries = tables
     this.moduleSettings = moduleSettings
     for (const [accessorName, tableSchema] of Object.entries(tables)) {
       if (isTableSchema(tableSchema)) {

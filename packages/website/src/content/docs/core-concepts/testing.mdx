@@ -1,0 +1,163 @@
+---
+draft: false
+title: Testing
+description: Run a module's handlers in-process with the test harness, bindCallables and the inter-database pump.
+sidebar:
+  order: 8
+---
+
+`effect-spacetimedb/testing` runs a module without a server. The harness is an
+in-memory database behind the real Effect DB wrapper, and `bindCallables` calls
+your handlers the way the host does, so a test exercises the handlers you
+publish. For what only a real host can show, publish to a local server: see
+[Dev & Publish](/core-concepts/databases/dev-publish).
+
+## Vitest configuration
+
+```ts title="vitest.config.ts"
+import { spacetimeSysAlias } from "effect-spacetimedb/testing"
+import { defineConfig } from "vitest/config"
+
+export default defineConfig({
+  resolve: { alias: { ...spacetimeSysAlias } },
+  test: {
+    server: { deps: { inline: ["spacetimedb", "effect-spacetimedb"] } },
+  },
+})
+```
+
+`spacetimeSysAlias` points the host syscalls at a stub, and `inline` makes Vitest
+transform both packages so the alias reaches their imports. Without
+`effect-spacetimedb` in that list, Node loads it untransformed and fails with
+`Only URLs with a scheme in: file, data, and node are supported... Received
+protocol 'spacetime:'`.
+
+The stub keeps `console` and the deterministic backstops usable off-host, so
+importing or building a module entry in a test needs no running host.
+
+## Calling a handler
+
+`makeTestModuleHarness` takes the module's spec and owns one database.
+`bindCallables` takes the module and the same implementations you pass to
+`build`, which is why they live in a file of their own: a module entry may export
+nothing but its compiled output. Continuing the module from
+[Getting Started](/getting-started):
+
+```ts title="test/messages.test.ts"
+import * as Effect from "effect/Effect"
+import { bindCallables, makeTestModuleHarness } from "effect-spacetimedb/testing"
+import { expect, it } from "vitest"
+import { QuickstartModule } from "../src/contract.ts"
+import { MessageFunctionsLive } from "../src/live.ts"
+
+const callables = bindCallables(QuickstartModule, [MessageFunctionsLive])
+
+it("stores a message", async () => {
+  const harness = makeTestModuleHarness(QuickstartModule.spec, { seed: 1n })
+  const id = "ada"
+
+  callables.messageSend?.invoke(harness.makeMutationCtx(), { id, text: "Hello" })
+
+  const rows = await Effect.runPromise(harness.effectDb.message.toArray())
+  expect(rows).toEqual([{ id, text: "Hello" }])
+})
+```
+
+`bindCallables` returns a record keyed by function name, of `invoke(ctx, args)`
+functions that run in a harness transaction. It is loosely typed: with
+`noUncheckedIndexedAccess` a member may be `undefined`, and `args` is not checked
+against the contract. The context comes from the harness, one maker per kind of
+function:
+
+| Function | Context |
+| --- | --- |
+| reducer, lifecycle hook | `harness.makeMutationCtx()` |
+| procedure | `harness.makeProcedureCtx()` |
+| HTTP handler | `harness.makeHttpHandlerCtx()` |
+| sender view | `harness.makeViewCtx()` |
+| anonymous view | `harness.makeAnonymousViewCtx()` |
+
+Each takes overrides, such as `{ sender }` or `{ timestamp }`.
+
+### What a call answers
+
+A reducer returns nothing, and throws as the host would: a declared error throws
+a `SenderError`, and any other failure throws its cause. Its transaction rolls
+back either way.
+
+`invoke` hands `args` to the handler as they are, and returns a procedure's result
+without encoding it. So a test cannot reach what a host does around the handler:
+a bad argument's `SenderError` or `BadArguments` reply, or a result that fails to
+encode. Prove those on a real host.
+
+A procedure never throws. It answers with `{ ok: value }` or `{ err: string }`,
+where `err` is the encoded declared error or a fixed message. A test of an
+undeclared failure therefore reads the cause through `onDefect`, which fires once
+per failure as it does in `build`:
+
+```ts title="test/message-list.test.ts"
+import type * as Cause from "effect/Cause"
+import { bindCallables, makeTestModuleHarness } from "effect-spacetimedb/testing"
+import { expect, it } from "vitest"
+import { QuickstartModule } from "../src/contract.ts"
+import { MessageFunctionsLive } from "../src/live.ts"
+
+it("answers with the rows", () => {
+  const causes: Array<Cause.Cause<unknown>> = []
+  const callables = bindCallables(QuickstartModule, [MessageFunctionsLive], {
+    onDefect: (cause) => causes.push(cause),
+  })
+  const harness = makeTestModuleHarness(QuickstartModule.spec, { seed: 1n })
+
+  const reply = callables.messageList?.invoke(harness.makeProcedureCtx(), {})
+
+  expect(reply).toEqual({ ok: [] })
+  expect(causes).toEqual([])
+})
+```
+
+## Reading and resetting
+
+`harness.effectDb` is the module's typed database, the same `db` a handler gets,
+and its reads are Effects. `harness.db` is the raw store, which takes and returns
+native host column values.
+
+Transactions snapshot the store, roll back while preserving row identity, and
+reject nesting with `NestedTestTransactionDefect`. A rollback restores rows but
+not sequences, the uuid counter or the random stream. `harness.reset()` empties
+every table and restarts all three, for a suite that wants a fresh database per
+test without building a new harness. The `seed` option is a `bigint` and fixes
+the random stream; scheduled rows are stored without emulating the scheduler.
+
+A module that declares an environment takes its values as a publish does; see
+[Environment Variables](/core-concepts/databases/environment-variables#testing).
+A rejected environment throws `TestModuleEnvironmentDefect`.
+
+## Mounted modules
+
+Give `makeTestModuleHarness` the parent spec and pass the parent module and its implementation tuple to `bindCallables`. Invoke a mounted callable by its nested accessor or its full canonical wire name. Inspect rows through `harness.db.<mount>.<table>`. Root and library writes share the transaction, including rollback.
+
+For a native mount used by the test, supply `nativeMounts` in the harness options. For example, `{ nativeMounts: { "stockRoom.tools": parent => makeToolsAlias(parent) } }` builds a stand-in for that path on first access in a context. Its return value is the object passed to the native helper. An absent factory raises an error identifying the path when accessed. See [Submodules](/core-concepts/databases/submodules).
+
+## Inter-database calls
+
+`makeIdcPump` delivers outbox rows between harnesses in memory, one stream at a
+time, and takes `IdcPump.recording(...)` for a receiver the test does not
+simulate. `pump.drain()` delivers until nothing waits, at most 1,000 times unless
+`deliveriesMax` says otherwise, and throws a `RangeError` if rows still wait at
+that bound. See
+[Inter-Database Calls](/core-concepts/functions/inter-database-calls).
+
+## What is exported
+
+| Name | Use |
+| --- | --- |
+| `makeTestModuleHarness` | The in-memory database. Types: `TestModuleHarness`, `TestModuleRawDb`, `TestModuleRowWrite`, `OutboxTableKeys`, `TestModuleEnvironmentValues`, `TestModuleEnvironmentUpdate`. Errors: `TestModuleEnvironmentDefect`, `NestedTestTransactionDefect`. |
+| `bindCallables` | Call handlers. |
+| `makeIdcPump`, `IdcPump`, `IdcDelivery` | Deliver inter-database calls in memory. Types: `IdcPumpDatabase`, `IdcPumpLink`, `IdcPumpReceiver`, `IdcPumpRecordingReceiver`, `IdcRecordedCall`. |
+| `Expand` | The helper type a harness's module type prints with, so a test helper's declarations can name it. |
+| `spacetimeSysAlias` | The alias map above. |
+| `SpacetimeSysStub` | The stub as a namespace, for backing `env_get` with `withEnvironment`. |
+
+`effect-spacetimedb/testing/spacetime-sys` is the stub itself, for a bundler or
+test runner that takes a path rather than an alias map.

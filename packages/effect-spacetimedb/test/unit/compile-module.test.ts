@@ -1,4 +1,4 @@
-import { make as makeServer } from "../../src/server/bind.ts"
+import { makeServer } from "../helpers/module-server"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as EffectVitest from "@effect/vitest"
@@ -201,6 +201,17 @@ const findProcedureReturnType = (
   return procedure.returnType
 }
 
+const findProcedureOkType = (
+  schema: unknown,
+  sourceName: string,
+): CapturedBuilder => {
+  const ok = findProcedureReturnType(schema, sourceName).fields?.ok
+  if (ok === undefined) {
+    throw new Error(`Expected a result return on ${sourceName}`)
+  }
+  return ok
+}
+
 const requireBuilder = (
   builder: CapturedBuilder | undefined,
   message: string,
@@ -216,12 +227,9 @@ describe("compiled module exports", (it) => {
     "materializes optional callable params with option wire builders",
     () =>
       Effect.gen(function* () {
-        const ParamModule = Stdb.StdbModule.make(
-          "param_materialization",
-          {},
-        ).add(
-          Stdb.StdbGroup.make("Actions").add(
-            Stdb.StdbFn.reducer("optionalParamSet", {
+        const ParamModule = Stdb.Module.make("param_materialization", {}).add(
+          Stdb.Group.make("Actions").add(
+            Stdb.Fn.reducer("optionalParamSet", {
               params: Stdb.struct({
                 nickname: Stdb.optional(Stdb.string()),
                 status: Stdb.option(Stdb.string()),
@@ -260,11 +268,11 @@ describe("compiled module exports", (it) => {
             note: Stdb.string().optional(),
           },
         })
-        const ScheduledModule = Stdb.StdbModule.make("scheduled_params", {})
+        const ScheduledModule = Stdb.Module.make("scheduled_params", {})
           .addTables(schedule)
           .add(
-            Stdb.StdbGroup.make("Actions").add(
-              Stdb.StdbFn.scheduledProcedure("materializedScheduleFire", {
+            Stdb.Group.make("Actions").add(
+              Stdb.Fn.scheduledProcedure("materializedScheduleFire", {
                 table: schedule,
               }),
             ),
@@ -300,11 +308,11 @@ describe("compiled module exports", (it) => {
             nickname: Stdb.string().optional(),
           },
         })
-        const RowReturnModule = Stdb.StdbModule.make("row_return_identity", {})
+        const RowReturnModule = Stdb.Module.make("row_return_identity", {})
           .addTables(user)
           .add(
-            Stdb.StdbGroup.make("Actions").add(
-              Stdb.StdbFn.procedure("userGet", {
+            Stdb.Group.make("Actions").add(
+              Stdb.Fn.procedure("userGet", {
                 params: Stdb.struct({}),
                 returns: Stdb.option(user.row),
               }),
@@ -327,7 +335,7 @@ describe("compiled module exports", (it) => {
         registerCompiledModule(compiled.schema, compiled.exportGroup())
 
         const tableRow = findTableRow(compiled.schema, "user")
-        const returnType = findProcedureReturnType(compiled.schema, "user_get")
+        const returnType = findProcedureOkType(compiled.schema, "user_get")
 
         expect(tableRow.typeName).toBe("User")
         expect(returnType.kind).toBe("option")
@@ -342,14 +350,11 @@ describe("compiled module exports", (it) => {
           id: Stdb.string().primaryKey(),
         },
       })
-      const CacheResetModule = Stdb.StdbModule.make(
-        "row_return_cache_reset",
-        {},
-      )
+      const CacheResetModule = Stdb.Module.make("row_return_cache_reset", {})
         .addTables(user)
         .add(
-          Stdb.StdbGroup.make("Actions").add(
-            Stdb.StdbFn.procedure("userGet", {
+          Stdb.Group.make("Actions").add(
+            Stdb.Fn.procedure("userGet", {
               params: Stdb.struct({}),
               returns: Stdb.option(user.row),
             }),
@@ -373,8 +378,8 @@ describe("compiled module exports", (it) => {
       registerCompiledModule(second.schema, second.exportGroup())
       const rowFirst = findTableRow(first.schema, "cacheResetUser")
       const rowSecond = findTableRow(second.schema, "cacheResetUser")
-      const returnFirst = findProcedureReturnType(first.schema, "user_get")
-      const returnSecond = findProcedureReturnType(second.schema, "user_get")
+      const returnFirst = findProcedureOkType(first.schema, "user_get")
+      const returnSecond = findProcedureOkType(second.schema, "user_get")
 
       expect(returnFirst.item).toBe(rowFirst)
       expect(returnSecond.item).toBe(rowSecond)
@@ -390,7 +395,7 @@ describe("compiled module exports", (it) => {
         const compile = (
           tables: readonly [Stdb.AnyTableSpec, Stdb.AnyTableSpec],
         ) => {
-          const Module = Stdb.StdbModule.make(
+          const Module = Stdb.Module.make(
             "cross_table_row_column",
             {},
           ).addTables(...tables).spec
@@ -407,7 +412,9 @@ describe("compiled module exports", (it) => {
         const child = Stdb.table("childRowOwner", {
           columns: {
             id: Stdb.u64().primaryKey().autoInc(),
-            displayName: Stdb.string().name("display_name").default("child"),
+            displayName: Stdb.string()
+              .columnName("display_name")
+              .default("child"),
             score: Stdb.u32().index(),
           },
         })
@@ -455,15 +462,15 @@ describe("compiled module exports", (it) => {
     "rejects duplicate compiled export keys as a compiler backstop",
     () =>
       Effect.gen(function* () {
-        const BaseModule = Stdb.StdbModule.make("compiled_collision", {}).add(
-          Stdb.StdbGroup.make("Actions")
+        const BaseModule = Stdb.Module.make("compiled_collision", {}).add(
+          Stdb.Group.make("Actions")
             .add(
-              Stdb.StdbFn.reducer("alpha", {
+              Stdb.Fn.reducer("alpha", {
                 params: Stdb.struct({}),
               }),
             )
             .add(
-              Stdb.StdbFn.anonymousView("beta", {
+              Stdb.Fn.anonymousView("beta", {
                 returns: Stdb.array(
                   Stdb.struct({ id: Stdb.string() }),
                   testViewRowsLength,
@@ -510,9 +517,9 @@ describe("compiled module exports", (it) => {
 
   it.effect("uses view wire names for compiled native names and exports", () =>
     Effect.gen(function* () {
-      const ViewModule = Stdb.StdbModule.make("compiled_views", {}).add(
-        Stdb.StdbGroup.make("Views").add(
-          Stdb.StdbFn.anonymousView("activePlayers", {
+      const ViewModule = Stdb.Module.make("compiled_views", {}).add(
+        Stdb.Group.make("Views").add(
+          Stdb.Fn.anonymousView("activePlayers", {
             returns: Stdb.array(
               Stdb.struct({ id: Stdb.string() }),
               testViewRowsLength,
@@ -552,13 +559,13 @@ describe("compiled module exports", (it) => {
 
   it.effect("keeps authored view names when case conversion is disabled", () =>
     Effect.gen(function* () {
-      const ViewModule = Stdb.StdbModule.make("compiled_views_none", {
+      const ViewModule = Stdb.Module.make("compiled_views_none", {
         settings: {
           caseConversionPolicy: "none",
         },
       }).add(
-        Stdb.StdbGroup.make("Views").add(
-          Stdb.StdbFn.anonymousView("activePlayers", {
+        Stdb.Group.make("Views").add(
+          Stdb.Fn.anonymousView("activePlayers", {
             returns: Stdb.array(
               Stdb.struct({ id: Stdb.string() }),
               testViewRowsLength,
@@ -602,9 +609,9 @@ describe("compiled module exports", (it) => {
         const Author = Stdb.string(
           Schema.String.pipe(Schema.check(Schema.isMaxLength(8))),
         )
-        const ViewModule = Stdb.StdbModule.make("compiled_view_params", {}).add(
-          Stdb.StdbGroup.make("Views").add(
-            Stdb.StdbFn.anonymousView("postsByAuthor", {
+        const ViewModule = Stdb.Module.make("compiled_view_params", {}).add(
+          Stdb.Group.make("Views").add(
+            Stdb.Fn.anonymousView("postsByAuthor", {
               params: Stdb.struct({ authorId: Author, published: Stdb.bool() }),
               returns: Stdb.array(
                 Stdb.struct({ authorId: Author, published: Stdb.bool() }),
@@ -665,7 +672,7 @@ describe("compiled module exports", (it) => {
           columns: {
             id: Stdb.u64().primaryKey().autoInc(),
             displayName: Stdb.string()
-              .name("display_name")
+              .columnName("display_name")
               .default("anonymous"),
             score: Stdb.u32().default(0),
             status: Stdb.literal("active", "away").default("active"),
@@ -685,12 +692,12 @@ describe("compiled module exports", (it) => {
             note: Stdb.string().default(""),
           },
         })
-        const GoldenModule = Stdb.StdbModule.make("compiler_output_golden", {})
+        const GoldenModule = Stdb.Module.make("compiler_output_golden", {})
           .addTables(goldenUser, goldenDigest)
           .add(
-            Stdb.StdbGroup.make("Actions")
+            Stdb.Group.make("Actions")
               .add(
-                Stdb.StdbFn.reducer("touchUser", {
+                Stdb.Fn.reducer("touchUser", {
                   params: Stdb.struct({
                     userId: Stdb.u64(),
                     nickname: Stdb.string().optional(),
@@ -698,18 +705,18 @@ describe("compiled module exports", (it) => {
                 }),
               )
               .add(
-                Stdb.StdbFn.procedure("refreshUser", {
+                Stdb.Fn.procedure("refreshUser", {
                   params: Stdb.struct({ userId: Stdb.u64() }),
                   returns: Stdb.unit(),
                 }),
               )
               .add(
-                Stdb.StdbFn.scheduledProcedure("sendDigest", {
+                Stdb.Fn.scheduledProcedure("sendDigest", {
                   table: goldenDigest,
                 }),
               )
               .add(
-                Stdb.StdbFn.anonymousView("goldenUsers", {
+                Stdb.Fn.anonymousView("goldenUsers", {
                   returns: Stdb.array(
                     Stdb.struct({
                       id: Stdb.u64(),
@@ -721,8 +728,8 @@ describe("compiled module exports", (it) => {
               ),
           )
           .add(
-            Stdb.StdbHttpGroup.make("Http").add(
-              Stdb.StdbHttp.post("goldenPing", "/golden/ping"),
+            Stdb.HttpGroup.make("Http").add(
+              Stdb.Http.post("goldenPing", "/golden/ping"),
             ),
           ).spec
         const server = makeServer({
@@ -745,11 +752,9 @@ describe("compiled module exports", (it) => {
               }),
             },
             httpHandlers: {
-              goldenPing: server.httpHandler(
-                Effect.fn(function* (_req: Stdb.Request) {
-                  return new Stdb.SyncResponse("pong")
-                }),
-              ),
+              goldenPing: Effect.fn(function* (_req: Stdb.Request) {
+                return new Stdb.SyncResponse("pong")
+              }),
             },
           }),
         })
@@ -847,7 +852,15 @@ describe("compiled module exports", (it) => {
                 },
               },
               returnType: {
-                kind: "unit",
+                kind: "result",
+                fields: {
+                  ok: {
+                    kind: "unit",
+                  },
+                  err: {
+                    kind: "string",
+                  },
+                },
               },
             },
             {

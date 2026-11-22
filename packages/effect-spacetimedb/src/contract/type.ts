@@ -48,7 +48,6 @@ export type {
   NumberValueType,
   OptionValueType,
   ResultValueType,
-  StdbValueType,
   StringValueType,
   StructFieldOptions,
   StructFields,
@@ -94,16 +93,16 @@ export {
 } from "./type/metadata.ts"
 export {
   namedValueType,
-  StdbTypeNotNameableError,
+  StdbTypeNotNameableDefect,
 } from "./type/core.ts"
 export {
   type FieldOptionsAnnotationOrigin,
-  StdbFieldOptionsVersionError,
+  StdbFieldOptionsVersionDefect,
 } from "./field-options-annotation.ts"
 export {
   ReservedSatsTypeIdentifierPattern,
   SatsTypeIdentifierPattern,
-  StdbTypeIdentifierError,
+  StdbTypeIdentifierDefect,
   validateSatsTypeIdentifier,
 } from "./sats-identifier-validation.ts"
 export {

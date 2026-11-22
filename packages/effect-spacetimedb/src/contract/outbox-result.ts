@@ -27,7 +27,10 @@ export class OutboxResultHostValueDefect extends Data.TaggedError(
   "OutboxResultHostValueDefect",
 )<{
   readonly value: unknown
-}> {}
+}> {
+  override readonly message =
+    "The host settled an outbox row with a value that is neither ok nor err"
+}
 
 /**
  * Reads the host's settle outcome, `{ ok: {} }` or `{ err: message }`. The

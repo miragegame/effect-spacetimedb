@@ -1,60 +1,31 @@
 import type * as Effect from "effect/Effect"
 
-import type { ProcedureResultEnvelope } from "../callable-protocol.ts"
-
 import type * as ErrorCodec from "../contract/error.ts"
+
+import type { LifecycleName } from "../contract/lifecycle.ts"
 
 import type { AnyModuleSpec } from "../contract/module.ts"
 
-import type { StdbDecodeError } from "../decode-error.ts"
-
 import type { Request, SyncResponse } from "../http-primitives.ts"
 
-import type * as ServerContext from "./context.ts"
-
-import type { OwnedHandlerBundle } from "./handler-ownership.ts"
-
-import type { HttpHandlerHandler } from "./http-handler.ts"
-
-import type { ProcedureHandler } from "./procedure.ts"
-
-import type { ReducerHandler } from "./reducer.ts"
+import type { ProcedureHostResultEnvelope } from "./declared-errors.ts"
 
 import type {
   AnonymousViewCtxLike,
   BaseReducerCtx,
   HttpHandlerCtxLike,
   ProcedureCtxLike,
-  ServerConnectionId,
-  ServerDatabaseIdentity,
-  ServerIdentity,
-  ServerRandom,
-  ServerSender,
-  ServerTimestamp,
-  ServerUuid,
   ViewCtxLike,
 } from "./runtime-types.ts"
 
-import type { StdbHostFailure } from "./services.ts"
-
-import type { ViewHandler } from "./view.ts"
-
 import type {
   AnonymousViewAllowedRequirements,
-  CompleteHttpHandlerHandlerRecord,
-  CompleteLifecycleHandlerRecord,
-  CompleteProcedureHandlerRecord,
-  CompleteReducerHandlerRecord,
-  CompleteViewHandlerRecord,
   HttpHandlerAllowedRequirements,
   HttpHandlerErrors,
   HttpHandlerKeys,
   HttpHandlerRequestOf,
   HttpHandlerResponseOf,
-  HttpTxAllowedRequirementsFor,
-  HttpTxEffectWithoutScopedSuccess,
   HandlerRequirements,
-  LifecycleKeys,
   ModuleLifecycleKeys,
   ParamsOf,
   ProcedureAllowedRequirements,
@@ -65,41 +36,11 @@ import type {
   ReducerKeys,
   ReturnsOf,
   SenderViewAllowedRequirements,
-  TxAllowedRequirementsFor,
-  TxEffectWithoutScopedSuccess,
   ViewArgsOf,
   ViewHandlerErrors,
   ViewKeys,
   ViewSuccessOf,
 } from "./handler-types-core.ts"
-
-export type CallableContextFields = {
-  readonly sender: ServerSender
-  readonly databaseIdentity: ServerDatabaseIdentity
-  /** @deprecated Use `databaseIdentity` instead. */
-  readonly identity: ServerIdentity
-  readonly timestamp: ServerTimestamp
-  readonly connectionId: ServerConnectionId
-  readonly newUuidV4: () => ServerUuid
-  readonly newUuidV7: () => ServerUuid
-  readonly random: ServerRandom
-}
-
-export type HandlerDefinitions<
-  Module extends AnyModuleSpec,
-  RuntimeR = unknown,
-> = {
-  readonly reducers?: CompleteReducerHandlerRecord<Module, RuntimeR>
-  readonly procedures?: CompleteProcedureHandlerRecord<Module, RuntimeR>
-  readonly httpHandlers?: CompleteHttpHandlerHandlerRecord<Module, RuntimeR>
-  readonly views?: CompleteViewHandlerRecord<Module, RuntimeR>
-  readonly lifecycle?: CompleteLifecycleHandlerRecord<Module, RuntimeR>
-}
-
-export type Handlers<
-  Module extends AnyModuleSpec,
-  RuntimeR = unknown,
-> = HandlerDefinitions<Module, RuntimeR> & OwnedHandlerBundle
 
 export type SectionFor<Keys extends string, Name extends string, Record> = [
   Keys,
@@ -112,84 +53,51 @@ export type SectionFor<Keys extends string, Name extends string, Record> = [
     }
 
 export type RawReducerHandlerRecord<Module extends AnyModuleSpec, RuntimeR> = {
-  readonly [Key in ReducerKeys<Module>]:
-    | ReducerHandler<
-        ParamsOf<Module["reducers"][Key]>,
-        unknown,
-        ReducerHandlerErrors<Module["reducers"][Key]>,
-        HandlerRequirements<RuntimeR, ReducerAllowedRequirements>
-      >
-    | ((
-        args: ParamsOf<Module["reducers"][Key]>,
-      ) => Effect.Effect<
-        unknown,
-        ReducerHandlerErrors<Module["reducers"][Key]>,
-        HandlerRequirements<RuntimeR, ReducerAllowedRequirements>
-      >)
+  readonly [Key in ReducerKeys<Module>]: (
+    args: ParamsOf<Module["reducers"][Key]>,
+  ) => Effect.Effect<
+    unknown,
+    ReducerHandlerErrors<Module["reducers"][Key]>,
+    HandlerRequirements<RuntimeR, ReducerAllowedRequirements>
+  >
 }
 
 export type RawProcedureHandlerRecord<
   Module extends AnyModuleSpec,
   RuntimeR,
 > = {
-  readonly [Key in ProcedureKeys<Module>]:
-    | ProcedureHandler<
-        ParamsOf<Module["procedures"][Key]>,
-        ReturnsOf<Module["procedures"][Key]>,
-        ProcedureHandlerErrors<Module["procedures"][Key]>,
-        HandlerRequirements<RuntimeR, ProcedureAllowedRequirements>
-      >
-    | ((
-        args: ParamsOf<Module["procedures"][Key]>,
-      ) => Effect.Effect<
-        ReturnsOf<Module["procedures"][Key]>,
-        ProcedureHandlerErrors<Module["procedures"][Key]>,
-        HandlerRequirements<RuntimeR, ProcedureAllowedRequirements>
-      >)
+  readonly [Key in ProcedureKeys<Module>]: (
+    args: ParamsOf<Module["procedures"][Key]>,
+  ) => Effect.Effect<
+    ReturnsOf<Module["procedures"][Key]>,
+    ProcedureHandlerErrors<Module["procedures"][Key]>,
+    HandlerRequirements<RuntimeR, ProcedureAllowedRequirements>
+  >
 }
 
 export type RawHttpHandlerRecord<Module extends AnyModuleSpec, RuntimeR> = {
-  readonly [Key in HttpHandlerKeys<Module>]:
-    | HttpHandlerHandler<
-        HttpHandlerRequestOf<Module["httpHandlers"][Key]>,
-        HttpHandlerResponseOf<Module["httpHandlers"][Key]>,
-        HttpHandlerErrors<Module["httpHandlers"][Key]>,
-        HandlerRequirements<RuntimeR, HttpHandlerAllowedRequirements>
-      >
-    | ((
-        args: HttpHandlerRequestOf<Module["httpHandlers"][Key]>,
-      ) => Effect.Effect<
-        HttpHandlerResponseOf<Module["httpHandlers"][Key]>,
-        HttpHandlerErrors<Module["httpHandlers"][Key]>,
-        HandlerRequirements<RuntimeR, HttpHandlerAllowedRequirements>
-      >)
+  readonly [Key in HttpHandlerKeys<Module>]: (
+    args: HttpHandlerRequestOf<Module["httpHandlers"][Key]>,
+  ) => Effect.Effect<
+    HttpHandlerResponseOf<Module["httpHandlers"][Key]>,
+    HttpHandlerErrors<Module["httpHandlers"][Key]>,
+    HandlerRequirements<RuntimeR, HttpHandlerAllowedRequirements>
+  >
 }
 
 export type RawViewHandlerRecord<Module extends AnyModuleSpec, RuntimeR> = {
-  readonly [Key in ViewKeys<Module>]:
-    | ViewHandler<
-        ViewArgsOf<Module["views"][Key]>,
-        ViewSuccessOf<Module["views"][Key]>,
-        ViewHandlerErrors,
-        HandlerRequirements<
-          RuntimeR,
-          Module["views"][Key]["context"] extends "sender"
-            ? SenderViewAllowedRequirements
-            : AnonymousViewAllowedRequirements
-        >
-      >
-    | ((
-        args: ViewArgsOf<Module["views"][Key]>,
-      ) => Effect.Effect<
-        ViewSuccessOf<Module["views"][Key]>,
-        ViewHandlerErrors,
-        HandlerRequirements<
-          RuntimeR,
-          Module["views"][Key]["context"] extends "sender"
-            ? SenderViewAllowedRequirements
-            : AnonymousViewAllowedRequirements
-        >
-      >)
+  readonly [Key in ViewKeys<Module>]: (
+    args: ViewArgsOf<Module["views"][Key]>,
+  ) => Effect.Effect<
+    ViewSuccessOf<Module["views"][Key]>,
+    ViewHandlerErrors,
+    HandlerRequirements<
+      RuntimeR,
+      Module["views"][Key]["context"] extends "sender"
+        ? SenderViewAllowedRequirements
+        : AnonymousViewAllowedRequirements
+    >
+  >
 }
 
 export type RawLifecycleHandlerRecord<
@@ -232,6 +140,36 @@ export type HandlerInputDefinitions<
     RawLifecycleHandlerRecord<Module, RuntimeR>
   >
 
+/** The handlers a build plan carries, by section. */
+export type Handlers<Module extends AnyModuleSpec, RuntimeR = never> = Partial<
+  HandlerInputDefinitions<Module, RuntimeR>
+>
+
+export type ReducerHandlerRecord<
+  Module extends AnyModuleSpec,
+  RuntimeR = never,
+> = Partial<RawReducerHandlerRecord<Module, RuntimeR>>
+
+export type ProcedureHandlerRecord<
+  Module extends AnyModuleSpec,
+  RuntimeR = never,
+> = Partial<RawProcedureHandlerRecord<Module, RuntimeR>>
+
+export type HttpHandlerHandlerRecord<
+  Module extends AnyModuleSpec,
+  RuntimeR = never,
+> = Partial<RawHttpHandlerRecord<Module, RuntimeR>>
+
+export type ViewHandlerRecord<
+  Module extends AnyModuleSpec,
+  RuntimeR = never,
+> = Partial<RawViewHandlerRecord<Module, RuntimeR>>
+
+export type LifecycleHandlerRecord<
+  Module extends AnyModuleSpec,
+  RuntimeR = never,
+> = Partial<RawLifecycleHandlerRecord<Module, RuntimeR>>
+
 export type BoundReducerExport<
   Module extends AnyModuleSpec,
   Key extends ReducerKeys<Module>,
@@ -243,7 +181,26 @@ export type BoundReducerExport<
     ctx: BaseReducerCtx<Module>,
     args: ParamsOf<Module["reducers"][Key]>,
   ) => void
+  /**
+   * Ends a call whose arguments did not decode: a caller's bad arguments are a
+   * sender error, and anything else is reported and rethrown.
+   */
+  readonly rejectArguments: (
+    ctx: BaseReducerCtx<Module>,
+    cause: unknown,
+  ) => never
 }
+
+/**
+ * A scheduled procedure's reply is its unit return. Every other procedure
+ * answers with a result, whose `err` is the versioned string carrier.
+ */
+export type ProcedureReply<Returns> =
+  | ProcedureHostResultEnvelope<
+      Returns,
+      ErrorCodec.ProcedureDeclaredErrorCarrier
+    >
+  | undefined
 
 export type BoundProcedureExport<
   Module extends AnyModuleSpec,
@@ -252,15 +209,21 @@ export type BoundProcedureExport<
   readonly kind: "procedure"
   readonly key: Key
   readonly spec: Module["procedures"][Key]
+  /** Never throws: the host rebuilds the isolate when a procedure does. */
   readonly invoke: (
     ctx: ProcedureCtxLike<Module>,
     args: ParamsOf<Module["procedures"][Key]>,
-  ) =>
-    | ReturnsOf<Module["procedures"][Key]>
-    | ProcedureResultEnvelope<
-        ReturnsOf<Module["procedures"][Key]>,
-        ErrorCodec.ProcedureDeclaredErrorCarrier
-      >
+  ) => ProcedureReply<ReturnsOf<Module["procedures"][Key]>>
+  /** The reply to a call whose arguments did not decode. */
+  readonly rejectArguments: (
+    ctx: ProcedureCtxLike<Module>,
+    cause: unknown,
+  ) => ProcedureReply<ReturnsOf<Module["procedures"][Key]>>
+  /** The reply to use once a successful reply failed to encode. */
+  readonly failReply: (
+    ctx: ProcedureCtxLike<Module>,
+    cause: unknown,
+  ) => ProcedureReply<ReturnsOf<Module["procedures"][Key]>>
 }
 
 export type BoundHttpHandlerExport<
@@ -289,72 +252,33 @@ export type BoundViewExport<
       : AnonymousViewCtxLike<Module>,
     args: ViewArgsOf<Module["views"][Key]>,
   ) => ViewSuccessOf<Module["views"][Key]>
+  /**
+   * Reports a failure after `invoke`, a result that did not encode. A view has no
+   * reply, so it still throws.
+   */
+  readonly reportFailure: (
+    ctx: Module["views"][Key]["context"] extends "sender"
+      ? ViewCtxLike<Module>
+      : AnonymousViewCtxLike<Module>,
+    cause: unknown,
+  ) => void
+  /**
+   * Ends a call whose arguments did not decode by rethrowing: a view has no reply.
+   * Only a failure that is not the caller's is reported.
+   */
+  readonly rejectArguments: (
+    ctx: Module["views"][Key]["context"] extends "sender"
+      ? ViewCtxLike<Module>
+      : AnonymousViewCtxLike<Module>,
+    cause: unknown,
+  ) => never
 }
 
 export type BoundLifecycleExport<
   Module extends AnyModuleSpec,
-  Key extends LifecycleKeys,
+  Key extends LifecycleName,
 > = {
   readonly kind: "lifecycle"
   readonly key: Key
   readonly invoke: (ctx: BaseReducerCtx<Module>) => void
 }
-
-export type CallableContextEffects<Requirements> = {
-  readonly sender: Effect.Effect<ServerSender, never, Requirements>
-  readonly databaseIdentity: Effect.Effect<
-    ServerDatabaseIdentity,
-    never,
-    Requirements
-  >
-  /** @deprecated Use `databaseIdentity` instead. */
-  readonly identity: Effect.Effect<ServerIdentity, never, Requirements>
-  readonly timestamp: Effect.Effect<ServerTimestamp, never, Requirements>
-  readonly connectionId: Effect.Effect<ServerConnectionId, never, Requirements>
-  readonly random: Effect.Effect<ServerRandom, never, Requirements>
-  readonly newUuidV4: Effect.Effect<ServerUuid, StdbHostFailure, Requirements>
-  readonly newUuidV7: Effect.Effect<ServerUuid, StdbHostFailure, Requirements>
-}
-
-export type HttpHandlerContextEffects<Requirements> = {
-  readonly databaseIdentity: Effect.Effect<
-    ServerDatabaseIdentity,
-    never,
-    Requirements
-  >
-  readonly timestamp: Effect.Effect<ServerTimestamp, never, Requirements>
-  readonly random: Effect.Effect<ServerRandom, never, Requirements>
-  readonly newUuidV4: Effect.Effect<ServerUuid, StdbHostFailure, Requirements>
-  readonly newUuidV7: Effect.Effect<ServerUuid, StdbHostFailure, Requirements>
-}
-
-export type TransactionHelper<Module extends AnyModuleSpec> = <A, E, R>(
-  body: (scope: {
-    readonly ctx: ServerContext.TxCtxService<Module>
-    readonly db: ServerContext.DbService<Module>
-  }) => TxEffectWithoutScopedSuccess<Module, Effect.Effect<A, E, R>> &
-    ServerContext.EffectWithoutForbiddenRequirements<
-      TxEffectWithoutScopedSuccess<Module, Effect.Effect<A, E, R>>,
-      TxAllowedRequirementsFor<Module>
-    >,
-) => Effect.Effect<
-  A,
-  E | StdbHostFailure | StdbDecodeError,
-  | Exclude<R, TxAllowedRequirementsFor<Module>>
-  | ServerContext.ModuleScopedRequirement<Module, ServerContext.TxRunner>
->
-
-export type HttpTransactionHelper<Module extends AnyModuleSpec> = <A, E, R>(
-  body: (scope: {
-    readonly db: ServerContext.DbService<Module>
-  }) => HttpTxEffectWithoutScopedSuccess<Module, Effect.Effect<A, E, R>> &
-    ServerContext.EffectWithoutForbiddenRequirements<
-      HttpTxEffectWithoutScopedSuccess<Module, Effect.Effect<A, E, R>>,
-      HttpTxAllowedRequirementsFor<Module>
-    >,
-) => Effect.Effect<
-  A,
-  E | StdbHostFailure | StdbDecodeError,
-  | Exclude<R, HttpTxAllowedRequirementsFor<Module>>
-  | ServerContext.ModuleScopedRequirement<Module, ServerContext.HttpTxRunner>
->

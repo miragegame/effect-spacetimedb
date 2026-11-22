@@ -1,9 +1,8 @@
-import * as Cause from "effect/Cause"
+import { withDeadline } from "./call-duration.ts"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import type { Identity } from "spacetimedb"
@@ -26,20 +25,23 @@ import {
   type MismatchedGeneratedModuleDiagnostic,
   type WsAttemptCredentials,
 } from "./generated-ws-adapter.ts"
-import { attemptCredentials, liveToken } from "./ws-attempt-credentials.ts"
+import {
+  attemptCredentials,
+  credentialsInvalidation,
+  liveToken,
+  type TokenUnavailable,
+} from "./ws-attempt-credentials.ts"
 import {
   awaitReplayOnAutomaticReconnect,
   beginReportedRecovery,
   watchReconnectAttempts,
 } from "./ws-automatic-reconnect.ts"
-import { makeFromModulePlan as makeWsClient } from "./ws-client.ts"
+import { makeFromModulePlan as wsMake } from "./ws-client.ts"
 import {
   type AcquisitionState,
-  assertAutomaticReconnectBounded,
-  assertConnectTimeoutBounded,
+  wsTimeBounds,
   connectError,
   connectErrorOfReport,
-  disconnectMessage,
   invalidateDisconnected,
   knownConnection,
   WsConnectError,
@@ -63,13 +65,15 @@ export type {
   WsToken,
 } from "./generated-ws-adapter.ts"
 export {
-  generatedConnection,
+  wsGeneratedConnection,
   WsUnsupportedBuilderFeatureError,
 } from "./generated-ws-adapter.ts"
 export { GeneratedArtifactShapeError } from "./generated-artifact-shape.ts"
 export {
+  connectDurationMaxDefault,
   WsConnectError,
   WsConnectTimeoutError,
+  WsProtocolError,
 } from "./ws-resource-lifecycle.ts"
 
 export type WsBuilderConfig<
@@ -128,9 +132,8 @@ const runCallbackEffectSafely = (
   }
 }
 
-// Every WebSocket entry point (scoped, layered, supervised) builds its
-// acquisition here, so validating before the Effect is returned rejects an
-// unbounded connect when the client is constructed rather than at first use.
+// Validating before the Effect is returned rejects an unbounded connect when the
+// client is constructed rather than at first use.
 export const makeScopedFromModulePlan = <
   Module extends AnyModuleSpec,
   ErrorContext,
@@ -144,35 +147,32 @@ export const makeScopedFromModulePlan = <
     RelationContext,
     ValidationError
   >
+  readonly timeBounds?: ReturnType<typeof wsTimeBounds>
   /**
    * The acquisition's owner enables automatic-reconnect recovery itself, once
    * the session is live (a session supervisor, after connecting, subscribing
    * and setup). Otherwise the acquisition enables it when it completes.
    */
   readonly recoveryEnabledByOwner?: boolean | undefined
+  /** See `attemptCredentials`: only an owner that retains a session needs it. */
+  readonly onTokenUnavailable?: TokenUnavailable | undefined
 }) => {
-  assertConnectTimeoutBounded(options.config.connectTimeoutMillis)
-  assertAutomaticReconnectBounded(options.config.automaticReconnect)
+  const { connectMillis, automaticReconnect: nativeReconnect } =
+    options.timeBounds ?? wsTimeBounds(options.config)
   return Effect.gen(function* () {
     type AcquireError = WsConnectError | ValidationError
-    const state = yield* Ref.make<
-      AcquisitionState<Module, ErrorContext, RelationContext, ValidationError>
-    >({
-      built: undefined,
-      connected: undefined,
-      acquired: undefined,
-      failed: undefined,
-      released: false,
-    })
+    type Connection = ManagedWsConnection<Module, ErrorContext, RelationContext>
+    type Acquisition = AcquisitionState<Module, ErrorContext, RelationContext>
+    /** What leaving a stage has to do, and the stage it leaves for. */
+    type Step = readonly [Effect.Effect<void>, Acquisition]
+    const state = yield* Ref.make<Acquisition>({ stage: "idle" })
     const latch = yield* Deferred.make<
       WsSession<Module, ErrorContext, RelationContext>,
       AcquireError
     >()
     const disconnectedConnections = new WeakSet<object>()
 
-    const disconnectOnce = (
-      connection: ManagedWsConnection<Module, ErrorContext, RelationContext>,
-    ) =>
+    const disconnectOnce = (connection: Connection) =>
       Effect.suspend(() => {
         if (disconnectedConnections.has(connection as object)) {
           return Effect.void
@@ -183,13 +183,16 @@ export const makeScopedFromModulePlan = <
       })
 
     const succeedAcquire = (
-      connection: ManagedWsConnection<Module, ErrorContext, RelationContext>,
+      connection: Connection,
       identity: Identity,
       token: string,
     ) => {
-      const session = makeWsClient({
+      const session = wsMake({
         plan: options.plan,
         connection,
+        callDurationMax: options.config.callDurationMax,
+        endConnection: (message) =>
+          invalidateAndDisconnect(connection, message),
       })
 
       return Deferred.succeed(latch, {
@@ -207,12 +210,9 @@ export const makeScopedFromModulePlan = <
 
     const failForMismatch = (
       message: string,
-      primary: ManagedWsConnection<Module, ErrorContext, RelationContext>,
-      secondary: ManagedWsConnection<Module, ErrorContext, RelationContext>,
-    ): readonly [
-      Effect.Effect<void>,
-      AcquisitionState<Module, ErrorContext, RelationContext, ValidationError>,
-    ] => {
+      primary: Connection,
+      secondary: Connection,
+    ): Step => {
       const error = connectError(new Error(message))
       invalidateDisconnected(primary, error)
       return [
@@ -220,179 +220,100 @@ export const makeScopedFromModulePlan = <
           Effect.andThen(disconnectOnce(secondary)),
           Effect.andThen(failLatch(error)),
         ),
-        {
-          built: primary,
-          connected: undefined,
-          acquired: undefined,
-          failed: error,
-          released: false,
-        },
+        { stage: "failed", connection: primary },
       ]
     }
 
-    // The SDK never rejects outstanding calls when its socket closes, and a
-    // client-side disconnect may never fire `onDisconnect` at all (a silent
+    // Without automatic reconnect, the SDK leaves outstanding calls unsettled
+    // on ordinary socket loss. Its protocol-error handler settles them itself.
+    // A client-side disconnect may never fire `onDisconnect` at all (a silent
     // partition), so release invalidates the connection itself: calls still
     // in flight, and any made later through a stale handle, fail with
     // `ConnectionLostError` instead of waiting forever on a closed socket.
-    const invalidateAndDisconnect = (
-      connection: ManagedWsConnection<Module, ErrorContext, RelationContext>,
-    ) =>
+    const invalidateAndDisconnect = (connection: Connection, message: string) =>
       Effect.suspend(() => {
-        connectionStateFor(connection).invalidateFromTransport(
-          releasedConnectionMessage,
-        )
+        connectionStateFor(connection).invalidateFromTransport(message)
         return disconnectOnce(connection)
       })
 
-    const release = Ref.modify(state, (current) => {
-      if (current.released) {
-        return [Effect.void, current] as const
+    const release = Ref.modify(state, (current): Step => {
+      if (current.stage === "released") {
+        return [Effect.void, current]
       }
-
-      const connection =
-        current.failed === undefined
-          ? (current.acquired ?? current.built ?? current.connected?.connection)
-          : undefined
-
+      const connection = knownConnection(current)
       return [
-        connection != null ? invalidateAndDisconnect(connection) : Effect.void,
-        {
-          ...current,
-          released: true,
-        },
-      ] as const
+        connection != null
+          ? invalidateAndDisconnect(connection, releasedConnectionMessage)
+          : Effect.void,
+        { stage: "released", connection },
+      ]
     }).pipe(Effect.flatten)
 
-    const rememberBuiltConnection = (
-      connection: ManagedWsConnection<Module, ErrorContext, RelationContext>,
-    ) =>
-      Ref.modify(state, (current) => {
-        if (current.acquired != null) {
-          return [Effect.void, current] as const
+    const rememberBuiltConnection = (connection: Connection) =>
+      Ref.modify(state, (current): Step => {
+        switch (current.stage) {
+          case "acquired":
+            return [Effect.void, current]
+          case "released":
+          case "failed":
+            return [disconnectOnce(connection), { ...current, connection }]
+          case "connectedEarly":
+            return current.connection === connection
+              ? [
+                  succeedAcquire(connection, current.identity, current.token),
+                  { stage: "acquired", connection },
+                ]
+              : failForMismatch(
+                  "WebSocket builder returned a different connection than onConnect emitted",
+                  current.connection,
+                  connection,
+                )
+          case "idle":
+          case "built":
+            return [Effect.void, { stage: "built", connection }]
         }
-
-        if (current.released) {
-          return [
-            disconnectOnce(connection),
-            {
-              ...current,
-              built: connection,
-            },
-          ] as const
-        }
-
-        if (current.failed != null) {
-          return [
-            disconnectOnce(connection),
-            {
-              ...current,
-              built: connection,
-            },
-          ] as const
-        }
-
-        if (current.connected != null) {
-          if (current.connected.connection === connection) {
-            return [
-              succeedAcquire(
-                connection,
-                current.connected.identity,
-                current.connected.token,
-              ),
-              {
-                ...current,
-                built: connection,
-                connected: undefined,
-                acquired: connection,
-              },
-            ] as const
-          }
-
-          return failForMismatch(
-            "WebSocket builder returned a different connection than onConnect emitted",
-            current.connected.connection,
-            connection,
-          )
-        }
-
-        return [
-          Effect.void,
-          {
-            ...current,
-            built: connection,
-          },
-        ] as const
       }).pipe(Effect.flatten)
 
-    const failAcquire = (
-      error: AcquireError,
-      connection?: ManagedWsConnection<Module, ErrorContext, RelationContext>,
-    ) =>
-      Ref.modify(state, (current) => {
-        if (current.released) {
-          return [
-            connection != null ? disconnectOnce(connection) : Effect.void,
-            {
-              ...current,
-              built: current.built ?? connection,
-            },
-          ] as const
-        }
-
-        if (current.failed != null) {
-          return [
-            connection != null ? disconnectOnce(connection) : Effect.void,
-            {
-              ...current,
-              built: current.built ?? connection,
-            },
-          ] as const
-        }
-
-        const knownConnection =
-          connection ??
-          current.acquired ??
-          current.built ??
-          current.connected?.connection
-
-        if (current.acquired != null) {
-          if (WsConnectError.is(error)) {
-            invalidateDisconnected(current.acquired, error)
-          }
-          return [
-            Effect.void,
-            {
-              ...current,
-              failed: error,
-            },
-          ] as const
-        }
-
-        if (knownConnection != null) {
-          if (WsConnectError.is(error)) {
-            invalidateDisconnected(knownConnection, error)
+    const failAcquire = (error: AcquireError, connection?: Connection) =>
+      Ref.modify(state, (current): Step => {
+        switch (current.stage) {
+          case "released":
+          case "failed":
+            return [
+              connection != null ? disconnectOnce(connection) : Effect.void,
+              { ...current, connection: current.connection ?? connection },
+            ]
+          // The latch is settled, but its waiter may never own this connection:
+          // if the bound ran out as `onConnect` landed, no finalizer exists, so
+          // this is the last place that can close it.
+          case "acquired":
+            if (WsConnectError.is(error)) {
+              invalidateDisconnected(current.connection, error)
+            }
+            return [
+              disconnectOnce(current.connection),
+              { stage: "failed", connection: current.connection },
+            ]
+          case "idle":
+          case "built":
+          case "connectedEarly": {
+            const known = connection ?? knownConnection(current)
+            if (known != null && WsConnectError.is(error)) {
+              invalidateDisconnected(known, error)
+            }
+            return [
+              (known != null ? disconnectOnce(known) : Effect.void).pipe(
+                Effect.andThen(failLatch(error)),
+              ),
+              { stage: "failed", connection: known },
+            ]
           }
         }
-
-        return [
-          (knownConnection != null
-            ? disconnectOnce(knownConnection)
-            : Effect.void
-          ).pipe(Effect.andThen(failLatch(error))),
-          {
-            built: knownConnection,
-            connected: undefined,
-            acquired: undefined,
-            failed: error,
-            released: false,
-          },
-        ] as const
       }).pipe(Effect.flatten)
 
     const runCallbackEffect = (
       effect: Effect.Effect<void>,
-      connection?: ManagedWsConnection<Module, ErrorContext, RelationContext>,
+      connection?: Connection,
     ): void => {
       runCallbackEffectSafely(effect, (cause) => {
         const error = connectError(cause)
@@ -411,82 +332,44 @@ export const makeScopedFromModulePlan = <
     }
 
     const completeSuccess = (
-      connection: ManagedWsConnection<Module, ErrorContext, RelationContext>,
+      connection: Connection,
       identity: Identity,
       token: string,
     ) =>
-      Ref.modify(state, (current) => {
-        if (current.acquired != null) {
-          return [Effect.void, current] as const
-        }
-
-        if (current.released) {
-          return [
-            disconnectOnce(connection),
-            {
-              ...current,
-              connected: current.connected ?? {
-                connection,
-                identity,
-                token,
-              },
-            },
-          ] as const
-        }
-
-        if (current.failed != null) {
-          return [
-            disconnectOnce(connection),
-            {
-              ...current,
-              connected: current.connected ?? {
-                connection,
-                identity,
-                token,
-              },
-            },
-          ] as const
-        }
-
-        if (current.connected != null) {
-          return [
-            current.connected.connection === connection
-              ? Effect.void
-              : disconnectOnce(connection),
-            current,
-          ] as const
-        }
-
-        if (current.built != null) {
-          if (current.built === connection) {
+      Ref.modify(state, (current): Step => {
+        switch (current.stage) {
+          case "acquired":
+            return [Effect.void, current]
+          case "released":
+          case "failed":
             return [
-              succeedAcquire(connection, identity, token),
-              {
-                ...current,
-                connected: undefined,
-                acquired: connection,
-              },
-            ] as const
-          }
-
-          return failForMismatch(
-            "WebSocket onConnect emitted a different connection than build returned",
-            current.built,
-            connection,
-          )
+              disconnectOnce(connection),
+              { ...current, connection: current.connection ?? connection },
+            ]
+          case "connectedEarly":
+            return [
+              current.connection === connection
+                ? Effect.void
+                : disconnectOnce(connection),
+              current,
+            ]
+          case "built":
+            return current.connection === connection
+              ? [
+                  succeedAcquire(connection, identity, token),
+                  { stage: "acquired", connection },
+                ]
+              : failForMismatch(
+                  "WebSocket onConnect emitted a different connection than build returned",
+                  current.connection,
+                  connection,
+                )
+          case "idle":
+            return [
+              Effect.void,
+              { stage: "connectedEarly", connection, identity, token },
+            ]
         }
-
-        return [
-          Effect.void,
-          {
-            ...current,
-            connected: {
-              connection,
-              identity,
-              token,
-            },
-          },
-        ] as const
       }).pipe(Effect.flatten)
 
     // With automatic reconnect, a drop the SDK will retry (it reports the
@@ -538,20 +421,9 @@ export const makeScopedFromModulePlan = <
           if (Exit.isSuccess(exit) || connection == null) {
             return Effect.void
           }
-          const connectionState = connectionStateFor(connection)
-          const failure = Cause.findErrorOption(exit.cause)
-          if (Option.isSome(failure)) {
-            connectionState.invalidateForFailedCredentials(
-              `Token refresh failed: ${disconnectMessage(failure.value)}`,
-              failure.value.cause,
-            )
-          } else {
-            const defect = Cause.squash(exit.cause)
-            connectionState.invalidateForCredentialsDefect(
-              `Token refresh died: ${disconnectMessage(defect)}`,
-              defect,
-            )
-          }
+          connectionStateFor(connection).invalidateForCredentials(
+            credentialsInvalidation(exit.cause),
+          )
           return disconnectOnce(connection)
         }),
       )
@@ -583,9 +455,6 @@ export const makeScopedFromModulePlan = <
         ),
       )
 
-    let builtConnection:
-      | ManagedWsConnection<Module, ErrorContext, RelationContext>
-      | undefined
     const acquireWith = (
       credentials: WsAttemptCredentials,
     ): Effect.Effect<
@@ -593,11 +462,14 @@ export const makeScopedFromModulePlan = <
       AcquireError
     > =>
       Effect.suspend(() => {
+        // Only for a throw between build and the state hearing of the connection.
+        let built: Connection | undefined
         Result.match(
           Result.try(() => {
             let builder = configureGeneratedWsBuilder(
               options.config,
               credentials,
+              nativeReconnect,
             )
               .onConnect((connection, identity, token) => {
                 runCallbackEffect(
@@ -624,11 +496,22 @@ export const makeScopedFromModulePlan = <
                 )
               })
             if (automaticReconnect) {
-              builder = awaitReplayOnAutomaticReconnect(builder)
+              builder = awaitReplayOnAutomaticReconnect(
+                builder,
+                (connection) => {
+                  runCallbackEffect(
+                    Effect.suspend(() => {
+                      connectionStateFor(connection).beginReplay()
+                      return Effect.void
+                    }),
+                    connection,
+                  )
+                },
+              )
             }
 
             const connection = builder.build()
-            builtConnection = connection
+            built = connection
             if (options.config[GeneratedArtifactValidation] === true) {
               const shapeError = generatedArtifactShapeError(
                 options.plan,
@@ -646,7 +529,7 @@ export const makeScopedFromModulePlan = <
           {
             onFailure: (cause) =>
               connectError(cause).pipe(
-                (error) => failAcquire(error, builtConnection),
+                (error) => failAcquire(error, built),
                 runCallbackEffect,
               ),
             onSuccess: () => undefined,
@@ -656,7 +539,6 @@ export const makeScopedFromModulePlan = <
         return Deferred.await(latch)
       })
 
-    const connectTimeoutMillis = options.config.connectTimeoutMillis
     // A token Effect is evaluated for this attempt inside the connect bound;
     // with automatic reconnect it is also the SDK's refresh, run with this
     // acquisition's services.
@@ -665,46 +547,49 @@ export const makeScopedFromModulePlan = <
       automaticReconnect,
       services: acquisitionServices,
       superviseRefresh,
+      onUnavailable: options.onTokenUnavailable ?? (() => Effect.void),
     }).pipe(Effect.flatMap(acquireWith))
     const timedAcquire = acquire.pipe(
-      Effect.timeoutOrElse({
-        duration: Duration.millis(connectTimeoutMillis),
+      withDeadline({
+        duration: Duration.millis(connectMillis),
         orElse: () => {
           const error = connectError(
             new WsConnectTimeoutError({
-              timeoutMillis: connectTimeoutMillis,
+              timeoutMillis: connectMillis,
             }),
           )
-          return failAcquire(error, builtConnection).pipe(
-            Effect.andThen(Effect.fail(error)),
-          )
+          return failAcquire(error).pipe(Effect.andThen(Effect.fail(error)))
         },
       }),
     )
 
     const endRecoveringConnection =
-      (
-        connection: ManagedWsConnection<Module, ErrorContext, RelationContext>,
-      ) =>
-      (message: string) =>
+      (connection: Connection) => (message: string) =>
         Effect.suspend(() => {
           const connectionState = connectionStateFor(connection)
           if (refreshesInFlight > 0) {
-            connectionState.invalidateForFailedCredentials(
-              `Token refresh did not complete: ${message}`,
-              new WsConnectTimeoutError({
-                timeoutMillis: connectTimeoutMillis,
+            connectionState.invalidateForCredentials({
+              kind: "credentialsFailed",
+              message: `Token refresh did not complete: ${message}`,
+              cause: new WsConnectTimeoutError({
+                timeoutMillis: connectMillis,
               }),
-            )
+            })
           } else {
             connectionState.invalidateFromTransport(message)
           }
           return disconnectOnce(connection)
         })
 
-    return yield* timedAcquire.pipe(
-      Effect.onInterrupt(() => release),
-      Effect.tap(() => Effect.addFinalizer(() => release)),
+    // Masked so that nothing can interrupt between an acquired connection and the
+    // finalizer that owns it. The interrupt handler stays for a caller whose scope
+    // outlives an abandoned acquisition, which should not hold a socket until then.
+    return yield* Effect.uninterruptibleMask((restore) =>
+      restore(timedAcquire).pipe(
+        Effect.onInterrupt(() => release),
+        Effect.tap(() => Effect.addFinalizer(() => release)),
+      ),
+    ).pipe(
       Effect.tap((session) =>
         Effect.suspend(() => {
           if (!automaticReconnect) {
@@ -716,7 +601,7 @@ export const makeScopedFromModulePlan = <
           }
           return watchReconnectAttempts(
             connectionState,
-            connectTimeoutMillis,
+            connectMillis,
             endRecoveringConnection(session.connection),
           ).pipe(Effect.forkScoped, Effect.asVoid)
         }),
@@ -749,12 +634,12 @@ export const makeScoped = <
     config: options.config,
   })
 
-export const makeScopedGenerated = <
+export const makeScopedGeneratedFromModulePlan = <
   Module extends AnyModuleSpec,
   ConnectionClass extends GeneratedConnectionClassLike,
   RelationContext,
 >(options: {
-  readonly module: Module
+  readonly plan: ModulePlan<Module>
   readonly config: WsGeneratedConfig<Module, ConnectionClass, RelationContext> &
     MismatchedGeneratedModuleDiagnostic<Module, ConnectionClass>
 }) => {
@@ -768,13 +653,27 @@ export const makeScopedGenerated = <
     [GeneratedArtifactValidation]: true,
   }
 
-  return makeScoped<
+  return makeScopedFromModulePlan<
     Module,
     GeneratedErrorContextOf<ConnectionClass>,
     RelationContext,
     GeneratedArtifactShapeError
   >({
-    module: options.module,
+    plan: options.plan,
     config,
   })
 }
+
+export const makeScopedGenerated = <
+  Module extends AnyModuleSpec,
+  ConnectionClass extends GeneratedConnectionClassLike,
+  RelationContext,
+>(options: {
+  readonly module: Module
+  readonly config: WsGeneratedConfig<Module, ConnectionClass, RelationContext> &
+    MismatchedGeneratedModuleDiagnostic<Module, ConnectionClass>
+}) =>
+  makeScopedGeneratedFromModulePlan<Module, ConnectionClass, RelationContext>({
+    plan: makeModulePlan(options.module),
+    config: options.config,
+  })

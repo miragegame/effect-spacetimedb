@@ -7,8 +7,8 @@ import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
+import { project } from "effect-spacetimedb"
 import { makeDevServer } from "effect-spacetimedb/dev-server"
-import { project } from "effect-spacetimedb/testing"
 import * as ExampleGeneratedClient from "effect-spacetimedb/testing/example-client"
 import {
   ExampleModule,
@@ -290,7 +290,7 @@ class NodeSmokeRoundTripMismatch extends Data.TaggedError(
   }
 }
 
-const requiredSpacetimeVersion = "2.14.0"
+const requiredSpacetimeVersion = "2.16.1"
 const spacetimeVersionRequirement =
   `spacetimedb tool version ${requiredSpacetimeVersion}` as const
 
@@ -315,7 +315,7 @@ const program = Effect.gen(function* () {
     compression: "none",
     createWebSocket: makeSmokeWebSocket,
     databaseName: runtime.databaseName,
-    connectTimeoutMillis: smokeConnectTimeoutMillis,
+    connectDurationMax: smokeConnectTimeoutMillis,
     token: runtime.token,
     uri: runtime.baseUrl,
   })

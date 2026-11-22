@@ -29,38 +29,38 @@ import {
 import { resolveLiteralBuilder } from "./literal-utils.ts"
 import { typeInfo } from "./metadata.ts"
 
-export class UnsupportedStdbTypeError extends Data.TaggedError(
-  "UnsupportedStdbTypeError",
+export class UnsupportedStdbTypeDefect extends Data.TaggedError(
+  "UnsupportedStdbTypeDefect",
 )<{
   readonly ast: AST.AST
   readonly path: string | undefined
   readonly detail: string | undefined
 }> {
-  override get message(): string {
-    return (
-      this.detail ??
-      `unsupported Effect Schema AST ${this.ast._tag}. Use a supported Stdb.* value constructor, Stdb.string(BrandSchema) for branded strings, Stdb.literal(...) for literal unions, Stdb.option(...) for optional values, or Stdb.custom(schema, { type }) for schemas that need explicit SATS lowering`
-    )
-  }
+  override readonly message =
+    this.detail ??
+    `unsupported Effect Schema AST ${this.ast._tag}. Use a supported Stdb.* value constructor, Stdb.string(BrandSchema) for branded strings, Stdb.literal(...) for literal unions, Stdb.option(...) for optional values, or Stdb.custom(schema, { type }) for schemas that need explicit SATS lowering`
 }
 
-export class StdbTypeLoweringError extends Data.TaggedError(
-  "StdbTypeLoweringError",
+const typeLoweringMessage = (
+  failurePath: string | undefined,
+  cause: unknown,
+): string => {
+  const detail =
+    cause instanceof Error && cause.message.length > 0
+      ? cause.message
+      : String(cause)
+  const at =
+    failurePath != null && failurePath !== "" ? ` at ${failurePath}` : ""
+  return `SpaceTimeDB type lowering failed${at}: ${detail}.`
+}
+
+export class StdbTypeLoweringDefect extends Data.TaggedError(
+  "StdbTypeLoweringDefect",
 )<{
   readonly failurePath: string | undefined
   readonly cause: unknown
 }> {
-  override get message(): string {
-    const detail =
-      this.cause instanceof Error && this.cause.message.length > 0
-        ? this.cause.message
-        : String(this.cause)
-    const at =
-      this.failurePath != null && this.failurePath !== ""
-        ? ` at ${this.failurePath}`
-        : ""
-    return `SpaceTimeDB type lowering failed${at}: ${detail}.`
-  }
+  override readonly message = typeLoweringMessage(this.failurePath, this.cause)
 }
 
 export const appendPath = (
@@ -76,7 +76,7 @@ export const unsupportedStdbType = (
   path: string | undefined,
   detail?: string,
 ): never => {
-  throw new UnsupportedStdbTypeError({ ast, path, detail })
+  throw new UnsupportedStdbTypeDefect({ ast, path, detail })
 }
 
 export const cachedTypeBuilder = (
@@ -287,12 +287,12 @@ export const typeBuilderWithFactories = (
 
     return typeBuilderFromAst(value.schema.ast, factories, path)
   } catch (cause) {
-    if (cause instanceof StdbTypeLoweringError) {
+    if (cause instanceof StdbTypeLoweringDefect) {
       throw cause
     }
 
     const failurePath =
-      cause instanceof UnsupportedStdbTypeError ? (cause.path ?? path) : path
-    throw new StdbTypeLoweringError({ failurePath, cause })
+      cause instanceof UnsupportedStdbTypeDefect ? (cause.path ?? path) : path
+    throw new StdbTypeLoweringDefect({ failurePath, cause })
   }
 }

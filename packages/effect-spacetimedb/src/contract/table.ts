@@ -1,3 +1,4 @@
+import type { TableCachePolicy } from "./table-cache-policy.ts"
 import { pascalCaseName } from "./canonical-name.ts"
 import type { ColumnReferences } from "./column-reference.ts"
 import * as ColumnReference from "./column-reference.ts"
@@ -18,7 +19,7 @@ type Expand<T> = {
   readonly [K in keyof T]: T[K]
 }
 
-type ScheduledColumnName =
+export type ScheduledColumnName =
   | "scheduledId"
   | "scheduledAt"
   | "scheduled_id"
@@ -33,9 +34,11 @@ type RejectScheduledColumnCollisions<Columns> = [
         ScheduledColumnName as `scheduledTable columns cannot include reserved column ${Key}`]: never
     }
 
-type ScheduledIdValueType = Type.U64ValueType<bigint, bigint>
+export type ScheduledIdValueType = Type.U64ValueType<bigint, bigint>
 
-type ScheduledAutoColumnInputs<ScheduledId extends ScheduledIdValueType> = {
+export type ScheduledAutoColumnInputs<
+  ScheduledId extends ScheduledIdValueType,
+> = {
   readonly scheduledId: FieldType<
     ScheduledId,
     { readonly primaryKey: true; readonly autoInc: true }
@@ -43,7 +46,7 @@ type ScheduledAutoColumnInputs<ScheduledId extends ScheduledIdValueType> = {
   readonly scheduledAt: ReturnType<typeof Type.scheduleAt>
 }
 
-type ScheduledTableColumnInputs<
+export type ScheduledTableColumnInputs<
   Columns extends Type.StructFields,
   ScheduledId extends ScheduledIdValueType,
 > = Expand<Columns & ScheduledAutoColumnInputs<ScheduledId>>
@@ -62,6 +65,7 @@ export type TableSpec<
   readonly kind: "table"
   readonly name: Name
   readonly public: Public
+  readonly cachePolicy?: TableCachePolicy | undefined
   readonly event: Event
   readonly columns: Fields
   readonly row: Type.StructValueType<RowFields>
@@ -124,6 +128,7 @@ export const tableRowSource = (
 type RuntimeTableDefineOptions = {
   readonly name: string
   readonly public?: boolean
+  readonly cachePolicy?: TableCachePolicy | undefined
   readonly event?: boolean
   readonly columns: Record<string, Type.AnyValueType>
   readonly indexes?: unknown
@@ -131,16 +136,18 @@ type RuntimeTableDefineOptions = {
   readonly scheduled?: boolean
 }
 
-type PublicOf<Options extends { readonly public?: boolean }> = Options extends {
-  readonly public: infer Public extends boolean
-}
-  ? Public
-  : false
-type EventOf<Options extends { readonly event?: boolean }> = Options extends {
-  readonly event: infer Event extends boolean
-}
-  ? Event
-  : false
+export type PublicOf<Options extends { readonly public?: boolean }> =
+  Options extends {
+    readonly public: infer Public extends boolean
+  }
+    ? Public
+    : false
+export type EventOf<Options extends { readonly event?: boolean }> =
+  Options extends {
+    readonly event: infer Event extends boolean
+  }
+    ? Event
+    : false
 type IndexesOfCallback<Options> = Options extends {
   readonly indexes: (...args: never[]) => infer Indexes
 }
@@ -157,10 +164,9 @@ type ConstraintsOfCallback<Options> = Options extends {
   : readonly []
 
 type FieldIndexUnion<Fields extends Record<string, AnyFieldType>> = {
-  readonly [Key in keyof Fields & string]: Exclude<
-    FieldOptionsOf<Fields[Key]>["index"],
-    undefined
-  > extends infer Algorithm extends IndexAlgorithm
+  readonly [Key in keyof Fields & string]: FieldOptionsOf<
+    Fields[Key]
+  >["index"] extends infer Algorithm extends IndexAlgorithm
     ? [Algorithm] extends [never]
       ? never
       : IndexSpec<Key, readonly [Key], Algorithm>
@@ -333,6 +339,9 @@ export const makeTable = (options: RuntimeTableDefineOptions): AnyTableSpec => {
     name: options.name,
     public: options.public ?? false,
     event: options.event ?? false,
+    ...(options.cachePolicy === undefined
+      ? {}
+      : { cachePolicy: options.cachePolicy }),
     columns,
     row,
     indexes,
@@ -343,25 +352,33 @@ export const makeTable = (options: RuntimeTableDefineOptions): AnyTableSpec => {
   return table
 }
 
-type TableCallbackOptions<Fields extends Record<string, AnyFieldType>> = {
-  readonly public?: boolean
-  readonly event?: boolean
-  readonly scheduled?: never
-  readonly indexes?: (
-    columns: ColumnReferences<Fields>,
-  ) => ReadonlyArray<IndexSpec>
-  readonly constraints?: (
-    columns: ColumnReferences<Fields>,
-  ) => ReadonlyArray<ConstraintSpec>
-}
+export type TableStorageOptions =
+  | { readonly event?: boolean; readonly cachePolicy?: never }
+  | {
+      readonly event?: false
+      /** Storage policy for this table. Inherits the module default when omitted. */
+      readonly cachePolicy?: TableCachePolicy
+    }
 
-type TableArrayOptions<
+export type TableCallbackOptions<Fields extends Record<string, AnyFieldType>> =
+  TableStorageOptions & {
+    readonly public?: boolean
+    readonly scheduled?: never
+    readonly indexes?: (
+      columns: ColumnReferences<Fields>,
+    ) => ReadonlyArray<IndexSpec>
+    readonly constraints?: (
+      columns: ColumnReferences<Fields>,
+    ) => ReadonlyArray<ConstraintSpec>
+  }
+
+export type TableArrayOptions<
   Columns extends Type.StructFields,
   Public extends boolean | undefined,
   Event extends boolean | undefined,
   Indexes extends ReadonlyArray<IndexSpec>,
   Constraints extends ReadonlyArray<ConstraintSpec>,
-> = {
+> = TableStorageOptions & {
   readonly public?: Public
   readonly event?: Event
   readonly scheduled?: never
@@ -370,11 +387,13 @@ type TableArrayOptions<
   readonly constraints?: Constraints
 }
 
-type ScheduledTableCallbackOptions<
+export type ScheduledTableCallbackOptions<
   Fields extends Record<string, AnyFieldType>,
   ScheduledId extends ScheduledIdValueType,
 > = {
   readonly public?: boolean
+  /** Storage policy for scheduled rows. Inherits the module default when omitted. */
+  readonly cachePolicy?: TableCachePolicy
   readonly event?: never
   readonly scheduled?: never
   readonly scheduledId?: ScheduledId
@@ -386,7 +405,7 @@ type ScheduledTableCallbackOptions<
   ) => ReadonlyArray<ConstraintSpec>
 }
 
-type ScheduledTableArrayOptions<
+export type ScheduledTableArrayOptions<
   Columns extends Type.StructFields,
   Public extends boolean | undefined,
   Indexes extends ReadonlyArray<IndexSpec>,
@@ -394,6 +413,8 @@ type ScheduledTableArrayOptions<
   ScheduledId extends ScheduledIdValueType,
 > = {
   readonly public?: Public
+  /** Storage policy for scheduled rows. Inherits the module default when omitted. */
+  readonly cachePolicy?: TableCachePolicy
   readonly event?: never
   readonly scheduled?: never
   readonly scheduledId?: ScheduledId
@@ -450,42 +471,15 @@ export function table(
   name: string,
   options: Omit<RuntimeTableDefineOptions, "name">,
 ): AnyTableSpec {
-  const tableOptions: {
-    name: string
-    public?: boolean
-    event?: boolean
-    columns: Record<string, Type.AnyValueType>
-    indexes?: unknown
-    constraints?: unknown
-  } = {
+  return makeTable({
     name,
     columns: options.columns,
-  }
-
-  if (options.public === true) {
-    tableOptions.public = true
-  } else if (options.public === false) {
-    tableOptions.public = false
-  } else if (options.public === undefined) {
-    // Keep the default false value inside makeTable.
-  }
-
-  if (options.event === true) {
-    tableOptions.event = true
-  } else if (options.event === false) {
-    tableOptions.event = false
-  } else if (options.event === undefined) {
-    // Keep the default false value inside makeTable.
-  }
-
-  if (options.indexes !== undefined) {
-    tableOptions.indexes = options.indexes
-  }
-  if (options.constraints !== undefined) {
-    tableOptions.constraints = options.constraints
-  }
-
-  return makeTable(tableOptions)
+    public: options.public === true,
+    event: options.event === true,
+    cachePolicy: options.cachePolicy,
+    indexes: options.indexes,
+    constraints: options.constraints,
+  })
 }
 
 const scheduledColumns = <ScheduledId extends ScheduledIdValueType>(
@@ -498,8 +492,8 @@ const scheduledColumns = <ScheduledId extends ScheduledIdValueType>(
   }
 
   return {
-    scheduledId: idType.primaryKey().autoInc().name("scheduled_id"),
-    scheduledAt: Type.scheduleAt().name("scheduled_at"),
+    scheduledId: idType.primaryKey().autoInc().columnName("scheduled_id"),
+    scheduledAt: Type.scheduleAt().columnName("scheduled_at"),
   }
 }
 
@@ -617,6 +611,7 @@ export function scheduledTable(
     name,
     columns,
     public: options.public ?? false,
+    cachePolicy: options.cachePolicy,
     indexes: options.indexes,
     constraints: options.constraints,
     scheduled: true,

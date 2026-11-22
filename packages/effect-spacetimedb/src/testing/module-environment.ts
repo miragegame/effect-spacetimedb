@@ -13,8 +13,8 @@ import type { ServerEnvironmentReader } from "../server/runtime-types.ts"
  * read of a key the module did not declare. Messages name the key and the
  * violated clause, never the value.
  */
-export class TestModuleEnvironmentError extends Data.TaggedError(
-  "TestModuleEnvironmentError",
+export class TestModuleEnvironmentDefect extends Data.TaggedError(
+  "TestModuleEnvironmentDefect",
 )<{
   readonly key: string
   readonly reason:
@@ -67,14 +67,14 @@ const assertEnvironmentAccepted = (
 ): void => {
   for (const [key, value] of values) {
     if (textEncoder.encode(value).byteLength > valueBytesMax) {
-      throw new TestModuleEnvironmentError({ key, reason: "valueTooLong" })
+      throw new TestModuleEnvironmentDefect({ key, reason: "valueTooLong" })
     }
   }
   for (const [key, declaration] of Object.entries(declarations)) {
     const value = values.get(key)
     if (value === undefined) {
       if (!declaration.optional) {
-        throw new TestModuleEnvironmentError({
+        throw new TestModuleEnvironmentDefect({
           key,
           reason: "requiredValueMissing",
         })
@@ -82,7 +82,7 @@ const assertEnvironmentAccepted = (
       continue
     }
     if (declaration.kind === "literal" && !declaration.values.includes(value)) {
-      throw new TestModuleEnvironmentError({
+      throw new TestModuleEnvironmentDefect({
         key,
         reason: "valueOutsideDeclaration",
       })
@@ -123,7 +123,10 @@ export const makeTestModuleEnvironment = (
     environment: {
       get: (key) => {
         if (!Object.hasOwn(declarations, key)) {
-          throw new TestModuleEnvironmentError({ key, reason: "undeclaredKey" })
+          throw new TestModuleEnvironmentDefect({
+            key,
+            reason: "undeclaredKey",
+          })
         }
         return values.get(key) ?? null
       },

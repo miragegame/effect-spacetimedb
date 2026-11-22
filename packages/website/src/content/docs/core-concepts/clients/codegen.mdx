@@ -15,7 +15,7 @@ module, then run `spacetime generate` against the built bundle:
 {
   "scripts": {
     "build": "spacetime build --module-path .",
-    "generate-client": "spacetime generate --lang typescript --js-path ./dist/bundle.js --out-dir ./src/generated --yes"
+    "generate-client": "spacetime generate --lang typescript --js-path ./dist/bundle.js --out-dir ./src/module_bindings --yes"
   }
 }
 ```
@@ -29,15 +29,10 @@ the package, and the server together.
 This is the default path. In an ordinary strict TypeScript project, import the
 generated `DbConnection` and pass it directly to the Effect client:
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
-import * as StdbClient from "effect-spacetimedb/client"
+import { DbConnection } from "./module_bindings"
 
-declare const Module: Stdb.AnyStdbModule
-declare const DbConnection: StdbClient.GeneratedWsConnectionFactory<
-  typeof Module.spec,
-  unknown
->
 declare const uri: string
 declare const databaseName: string
 declare const token: string
@@ -49,7 +44,7 @@ const WsLive = Example.client.ws.layerGenerated({
   uri,
   databaseName,
   token,
-  connectTimeoutMillis: 10_000,
+  connectDurationMax: 10_000,
 })
 ```
 
@@ -107,17 +102,17 @@ hand-written facade tied to the same module contract used by the server:
 
 ```ts
 import {
-  generatedConnection,
+  wsGeneratedConnection,
   type GeneratedConnectionOf,
 } from "effect-spacetimedb/client"
 import { DbConnection as GeneratedDbConnection } from "./generated-client/index.js"
 import { Module } from "./module"
 
 export const DbConnection: GeneratedConnectionOf<typeof Module.spec> =
-  generatedConnection(Module.spec, GeneratedDbConnection)
+  wsGeneratedConnection(Module.spec, GeneratedDbConnection)
 ```
 
-Import the facade everywhere else. `generatedConnection(...)` is an identity at
+Import the facade everywhere else. `wsGeneratedConnection(...)` is an identity at
 runtime; the generated JavaScript still comes entirely from
 `spacetime generate`, so upstream retains SDK and wire compatibility. Generated
 sessions also validate that every public table, public event table, and public
@@ -131,21 +126,16 @@ stale.
 **camelCase** spelling of each relation's name, and emits a `@deprecated`
 snake_case alias wherever the two spellings differ.
 
-effect-spacetimedb resolves tables, event tables, and views alike by their
-**contract key** — the key you wrote in `addTables(...)` or the views group.
-Declared names are required to be camelCase-canonical, so the contract key is
-the generated accessor key under either name policy, and the deprecated aliases
-are never resolved. A client that exposes only the alias is treated as stale and
-fails acquisition with `GeneratedArtifactShapeError`.
-
-Only SQL and subscription text keeps the wire name. A module on the
-`snake_case` policy still queries `all_users` while its rows arrive through the
-`allUsers` accessor.
+The Effect API keeps the declared spelling for tables, columns, indexes and
+callables. For example, a table declared as `user_profile` is available as
+`session.cache.tables.user_profile`. The adapter reads `db.userProfile` from
+the generated bindings and uses `user_profile` in SQL. Choose distinct names
+for members of the same namespace after case conversion.
 
 ## Never Format A Generated Artifact
 
 Both the artifact pipeline's `--check` mode and drift checks compare generated
-files by content. A formatter run over `src/generated` or `src/generated-client`
+files by content. A formatter run over `src/module_bindings` or `src/generated-client`
 rewrites bytes the generator did not produce and turns every subsequent check
 red, with a diff that looks like real drift. Exclude the directory *and its
 contents* from your formatter — a directory-only pattern does not stop a

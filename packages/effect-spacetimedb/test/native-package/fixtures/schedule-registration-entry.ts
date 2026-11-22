@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
-import { StdbValidationError } from "../../../src/contract/module-validation.ts"
-import { make as makeServer } from "../../../src/server/bind.ts"
+import { StdbValidationDefect } from "../../../src/contract/module-validation.ts"
+import { makeServer } from "../../helpers/module-server"
 import { compileModule } from "../../helpers/compile-module"
 import { TestSyncRunner } from "../../helpers/sync-runner"
 
@@ -43,14 +43,12 @@ const digestSchedule = Stdb.scheduledTable("digestSchedule", {
   columns: { note: Stdb.string() },
 })
 
-const ScheduledModule = Stdb.StdbModule.make("schedule_registration", {})
+const ScheduledModule = Stdb.Module.make("schedule_registration", {})
   .addTables(sweepSchedule, digestSchedule)
   .add(
-    Stdb.StdbGroup.make("Jobs")
-      .add(Stdb.StdbFn.scheduledReducer("sweepPools", { table: sweepSchedule }))
-      .add(
-        Stdb.StdbFn.scheduledProcedure("sendDigest", { table: digestSchedule }),
-      ),
+    Stdb.Group.make("Jobs")
+      .add(Stdb.Fn.scheduledReducer("sweepPools", { table: sweepSchedule }))
+      .add(Stdb.Fn.scheduledProcedure("sendDigest", { table: digestSchedule })),
   ).spec
 
 /**
@@ -62,17 +60,17 @@ const buildDuplicateScheduleModule = (): unknown => {
     columns: { note: Stdb.string() },
   })
 
-  return Stdb.StdbModule.make("duplicate_schedule", {})
+  return Stdb.Module.make("duplicate_schedule", {})
     .addTables(sharedSchedule)
     .add(
-      Stdb.StdbGroup.make("Jobs")
+      Stdb.Group.make("Jobs")
         .add(
-          Stdb.StdbFn.scheduledReducer("firstTarget", {
+          Stdb.Fn.scheduledReducer("firstTarget", {
             table: sharedSchedule,
           }),
         )
         .add(
-          Stdb.StdbFn.scheduledProcedure("secondTarget", {
+          Stdb.Fn.scheduledProcedure("secondTarget", {
             table: sharedSchedule,
           }),
         ),
@@ -91,7 +89,7 @@ const failureOf = (
   try {
     run()
   } catch (cause) {
-    return cause instanceof StdbValidationError
+    return cause instanceof StdbValidationDefect
       ? {
           tag: cause._tag,
           diagnosticCodes: cause.diagnostics.map(

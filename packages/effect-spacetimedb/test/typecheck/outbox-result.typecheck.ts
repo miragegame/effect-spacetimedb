@@ -4,6 +4,7 @@ import * as Stdb from "effect-spacetimedb"
 import * as StdbServer from "effect-spacetimedb/server"
 import { build } from "effect-spacetimedb/server-compiler"
 import type { Identity } from "spacetimedb"
+import type { PublicReducerKeys } from "../../src/client/rpc.ts"
 import { IdcFixtureInbox } from "../fixtures/idc/inbox"
 import { IdcFixtureInboxInterface } from "../fixtures/idc/interface"
 import idcFixtureInboxBinding from "../fixtures/idc/remote/idc_fixture_inbox/index.js"
@@ -15,28 +16,28 @@ class SettleProbeError extends Data.TaggedError("SettleProbeError") {}
 
 const { Db } = IdcSenderModule
 
+// @ts-expect-error a settle reducer is not offered to clients
+const settleKey: PublicReducerKeys<typeof IdcSenderModule.spec> = "pingSettled"
+void settleKey
+
 // A settle handler reads the outbox row and its outcome, and may not fail.
-const SettlesLive = Stdb.StdbBuilder.group(
-  IdcSenderModule,
-  "IdcSenderSettles",
-  {
-    pingSettled: ({ row, result }) => {
-      const msgId: bigint = row.msgId
-      const requestId: string = row.requestId
-      const note: string = row.note
-      const target: Identity = row.target
-      void msgId
-      void requestId
-      void note
-      void target
-      return StdbServer.OutboxResult.$match(result, {
-        Delivered: () => Effect.void,
-        Refused: ({ message }) => Effect.logWarning(message),
-      })
-    },
-    detailsSettled: () => Effect.void,
+const SettlesLive = Stdb.Builder.group(IdcSenderModule, "IdcSenderSettles", {
+  pingSettled: ({ row, result }) => {
+    const msgId: bigint = row.msgId
+    const requestId: string = row.requestId
+    const note: string = row.note
+    const target: Identity = row.target
+    void msgId
+    void requestId
+    void note
+    void target
+    return StdbServer.OutboxResult.$match(result, {
+      Delivered: () => Effect.void,
+      Refused: ({ message }) => Effect.logWarning(message),
+    })
   },
-)
+  detailsSettled: () => Effect.void,
+})
 
 export type SettleArgs = Assert<
   IsEqual<
@@ -51,13 +52,13 @@ export type SettleErrorsAreNever = Assert<
 void build(IdcSenderModule, [IdcSenderSendsLive, SettlesLive])
 
 // @ts-expect-error a settle handler may not fail, not even with a declared error
-void Stdb.StdbBuilder.group(IdcSenderModule, "IdcSenderSettles", {
+void Stdb.Builder.group(IdcSenderModule, "IdcSenderSettles", {
   pingSettled: () => Effect.fail(new SettleProbeError()),
   detailsSettled: () => Effect.void,
 })
 
 // @ts-expect-error a failed write is a defect in a settle handler: handle it
-void Stdb.StdbBuilder.group(IdcSenderModule, "IdcSenderSettles", {
+void Stdb.Builder.group(IdcSenderModule, "IdcSenderSettles", {
   pingSettled: ({ row }) =>
     Effect.gen(function* () {
       const db = yield* Db
@@ -106,20 +107,22 @@ const inserted = db.pingOutbox.insert({
 export type InsertFailsOnlyWithBoundOrHost = Assert<
   IsEqual<
     ErrorOf<typeof inserted>,
-    StdbServer.OutboxRowTooLarge | StdbServer.DbFailure
+    | StdbServer.OutboxRowTooLargeError
+    | StdbServer.StdbUniqueAlreadyExistsError
+    | StdbServer.StdbAutoIncOverflowError
   >
 >
 // An over-size row is a typed failure the sender handles or declares.
-const UndeclaredSendsModule = Stdb.StdbModule.make("undeclared_sends", {})
+const UndeclaredSendsModule = Stdb.Module.make("undeclared_sends", {})
   .addTables(pingOutbox)
-  .add(Stdb.StdbGroup.make("Sends").add(Stdb.StdbFn.reducer("send", {})))
+  .add(Stdb.Group.make("Sends").add(Stdb.Fn.reducer("send", {})))
   .add(
-    Stdb.StdbGroup.make("Settles").add(
-      Stdb.StdbFn.outboxResult("pingSettled", { table: pingOutbox }),
+    Stdb.Group.make("Settles").add(
+      Stdb.Fn.outboxResult("pingSettled", { table: pingOutbox }),
     ),
   )
-// @ts-expect-error OutboxRowTooLarge is neither handled nor declared
-void Stdb.StdbBuilder.group(UndeclaredSendsModule, "Sends", {
+// @ts-expect-error OutboxRowTooLargeError is neither handled nor declared
+void Stdb.Builder.group(UndeclaredSendsModule, "Sends", {
   send: () =>
     Effect.gen(function* () {
       const sendsDb = yield* UndeclaredSendsModule.Db
@@ -145,7 +148,7 @@ void db.pingOutbox.clear
 void db.pingOutbox.msgId.delete
 
 void build(
-  Stdb.StdbModule.make("unsettled_outbox", {}).addTables(
+  Stdb.Module.make("unsettled_outbox", {}).addTables(
     Stdb.outboxTable("unsettledOutbox", {
       interface: IdcFixtureInboxInterface,
       reducer: "receivePing",
@@ -176,3 +179,10 @@ export type RemoteInterfaceOfNamesMake = Assert<
     typeof IdcFixtureInboxInterface
   >
 >
+
+void Stdb.outboxTable("flexibleOutbox", {
+  cachePolicy: "no_requirement",
+  interface: IdcFixtureInboxInterface,
+  reducer: "receivePing",
+  indexes: (columns) => [Stdb.index("byNote", [columns.note])],
+})

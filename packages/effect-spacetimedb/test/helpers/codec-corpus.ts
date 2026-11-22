@@ -7,16 +7,16 @@ import {
   Timestamp,
   Uuid,
 } from "spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { TreeType } from "../fixtures/recursive-types"
 import { testArrayLength } from "./array-bounds"
 
 export type CodecCorpusSample = {
-  readonly type: StdbTesting.ContractType.AnyValueType
+  readonly type: StdbInternal.ContractType.AnyValueType
   readonly value: unknown
 }
 
-const T = StdbTesting.ContractType
+const T = StdbInternal.ContractType
 
 const SimpleResult = T.result(T.string(), T.string())
 const SimpleSum = T.sum({
@@ -178,8 +178,8 @@ export const codecCorpus = {
     type: T.uuid(),
     value: new Uuid(18n),
   },
-} satisfies Record<StdbTesting.ContractType.TypeKind, CodecCorpusSample>
+} satisfies Record<StdbInternal.ContractType.TypeKind, CodecCorpusSample>
 
 export const codecCorpusEntries = Object.entries(codecCorpus) as ReadonlyArray<
-  readonly [StdbTesting.ContractType.TypeKind, CodecCorpusSample]
+  readonly [StdbInternal.ContractType.TypeKind, CodecCorpusSample]
 >

@@ -1,5 +1,5 @@
 import * as Predicate from "effect/Predicate"
-import type { StdbDiagnostic } from "./diagnostic.ts"
+import type { Diagnostic } from "./diagnostic.ts"
 import {
   declarationCountMax,
   keyBytesMax,
@@ -17,7 +17,7 @@ const utf8ByteLength = (value: string): number =>
   textEncoder.encode(value).byteLength
 
 const validateLiteralValues = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   path: ReadonlyArray<string | number>,
   key: string,
   values: unknown,
@@ -102,7 +102,7 @@ const firstKeyOverSchemaBytes = (
  * Messages name keys and limits only; declarations carry no values.
  */
 export const validateEnvironment = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   module: Pick<AnyModuleSpec, "environment">,
 ): void => {
   const environment = module.environment ?? {}

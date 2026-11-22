@@ -17,10 +17,7 @@ const rawAuditName: "raw_audit" = raw_audit.name
 void cutoverUserName
 void rawAuditName
 
-const CutoverModule = Stdb.StdbModule.make(
-  "table_builder_cutover_typecheck",
-  {},
-)
+const CutoverModule = Stdb.Module.make("table_builder_cutover_typecheck", {})
   .addTables(cutover_user)
   .addTables(raw_audit)
 
@@ -33,8 +30,8 @@ void Effect.gen(function* () {
   void db.raw_audit.id.find
 })
 
-void Stdb.StdbModule.make("old_table_shape", {
-  // @ts-expect-error StdbModule.make no longer accepts table records; use addTables.
+void Stdb.Module.make("old_table_shape", {
+  // @ts-expect-error Module.make no longer accepts table records; use addTables.
   tables: {},
 })
 
@@ -478,7 +475,7 @@ const scaleDomainC = [
   scale_72,
 ] as const
 
-const ScaleModule = Stdb.StdbModule.make("table_builder_scale_typecheck", {})
+const ScaleModule = Stdb.Module.make("table_builder_scale_typecheck", {})
   .addTables(...scaleDomainA)
   .addTables(...scaleDomainB)
   .addTables(...scaleDomainC)
@@ -489,3 +486,24 @@ void Effect.gen(function* () {
   void db.scale_36.id.find
   void db.scale_72.id.find
 })
+
+const cachePolicy: Stdb.TableCachePolicy = "required_on_disk"
+const cachedColumns = { id: Stdb.u64().primaryKey() }
+void Stdb.table("cached", {
+  columns: cachedColumns,
+  cachePolicy,
+  indexes: () => [],
+})
+void Stdb.scheduledTable("scheduled", { columns: {}, cachePolicy, indexes: [] })
+// @ts-expect-error Event rows have no storage tier.
+void Stdb.table("event", { columns: cachedColumns, event: true, cachePolicy })
+const eventWithPolicy = {
+  columns: cachedColumns,
+  event: true,
+  cachePolicy,
+  indexes: () => [],
+} as const
+// @ts-expect-error Event rows have no storage tier with callback indexes either.
+void Stdb.table("event", eventWithPolicy)
+// @ts-expect-error Only the host's storage policies are accepted.
+void Stdb.table("cached", { columns: cachedColumns, cachePolicy: "disk" })

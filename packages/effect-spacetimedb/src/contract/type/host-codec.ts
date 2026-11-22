@@ -2,7 +2,7 @@ import * as Data from "effect/Data"
 import * as Match from "effect/Match"
 import * as Schema from "effect/Schema"
 import { errorTypeId, hasErrorTypeId } from "../../error-identity.ts"
-import { pascalCaseName } from "../canonical-name.ts"
+import { camelCaseName, pascalCaseName } from "../canonical-name.ts"
 import { structFieldWireType } from "./constructors.ts"
 import type {
   AnyValueType,
@@ -26,7 +26,7 @@ import {
 } from "./predicates.ts"
 import { foldValue, type ValueFoldHandlers } from "./value-fold.ts"
 
-type StdbHostEncodeErrorFields = {
+export type StdbHostEncodeErrorFields = {
   readonly reason:
     | "ExpectedArray"
     | "ArrayLengthOutOfBounds"
@@ -46,13 +46,18 @@ type StdbHostEncodeErrorFields = {
   readonly bounds?: ArrayLengthBounds
 }
 
+const arrayLengthBoundsText = ({
+  minimum,
+  maximum,
+}: ArrayLengthBounds): string => `${minimum ?? 0}..${maximum ?? "unbounded"}`
+
 const hostEncodeErrorMessage = (error: StdbHostEncodeErrorFields): string =>
   Match.value(error.reason).pipe(
     Match.when("ExpectedArray", () => "Expected array host value"),
     Match.when("ArrayLengthOutOfBounds", () =>
       error.length === undefined || error.bounds === undefined
         ? "Host array length is outside its declared bounds"
-        : `Host array length ${error.length} is outside its declared bounds ${error.bounds.minimum}..${error.bounds.maximum}`,
+        : `Host array length ${error.length} is outside its declared bounds ${arrayLengthBoundsText(error.bounds)}`,
     ),
     Match.when("ExpectedStruct", () => "Expected struct host value"),
     Match.when("MissingStructField", () =>
@@ -85,9 +90,7 @@ export class StdbHostEncodeError extends Data.TaggedError(
   readonly [StdbHostEncodeErrorTypeId] = StdbHostEncodeErrorTypeId
   static is = hasErrorTypeId<StdbHostEncodeError>(StdbHostEncodeErrorTypeId)
 
-  override get message(): string {
-    return hostEncodeErrorMessage(this)
-  }
+  override readonly message = hostEncodeErrorMessage(this)
 }
 
 const ownVariant = (
@@ -115,7 +118,8 @@ const encodeHostArray = (
   const bounds = typeInfo(type)?.length
   if (
     bounds !== undefined &&
-    (value.length < bounds.minimum || value.length > bounds.maximum)
+    (value.length < (bounds.minimum ?? 0) ||
+      value.length > (bounds.maximum ?? Number.POSITIVE_INFINITY))
   ) {
     throw new StdbHostEncodeError({
       reason: "ArrayLengthOutOfBounds",
@@ -137,6 +141,7 @@ const encodeHostStruct = (
   fields: StructFields,
   value: unknown,
   recurse: (type: AnyValueType, value: unknown) => unknown,
+  generated: boolean,
 ): Record<string, unknown> => {
   if (!isHostRecord(value)) {
     throw new StdbHostEncodeError({ reason: "ExpectedStruct" })
@@ -154,13 +159,14 @@ const encodeHostStruct = (
       })
     }
 
+    const outputKey = generated ? camelCaseName(key) : key
     const fieldValue = value[key]
     if (fieldOptions.optional && fieldValue === undefined) {
-      encoded[key] = undefined
+      encoded[outputKey] = undefined
       continue
     }
 
-    encoded[key] = recurse(field, fieldValue)
+    encoded[outputKey] = recurse(field, fieldValue)
   }
 
   return encoded
@@ -276,7 +282,10 @@ type HostValueEncoderOverrides = Pick<
   "literal" | "sum"
 >
 
-const makeHostValueEncoder = (overrides: HostValueEncoderOverrides) =>
+const makeHostValueEncoder = (
+  overrides: HostValueEncoderOverrides,
+  generated = false,
+) =>
   foldValue<unknown>({
     absent: encodeSchema,
     array: (type, item, value, recurse) =>
@@ -289,7 +298,7 @@ const makeHostValueEncoder = (overrides: HostValueEncoderOverrides) =>
     result: (_type, members, value, recurse) =>
       encodeHostResult(members, value, recurse),
     struct: (_type, fields, value, recurse) =>
-      encodeHostStruct(fields, value, recurse),
+      encodeHostStruct(fields, value, recurse, generated),
     sum: overrides.sum,
   })
 
@@ -367,11 +376,14 @@ const encodeGeneratedClientSum = (
   }
 }
 
-export const encodeGeneratedClientValue = makeHostValueEncoder({
-  literal: encodeGeneratedClientLiteral,
-  sum: (_type, variants, value, recurse) =>
-    encodeGeneratedClientSum(variants, value, recurse),
-})
+export const encodeGeneratedClientValue = makeHostValueEncoder(
+  {
+    literal: encodeGeneratedClientLiteral,
+    sum: (_type, variants, value, recurse) =>
+      encodeGeneratedClientSum(variants, value, recurse),
+  },
+  true,
+)
 
 const normalizeHostOption = (
   item: AnyValueType,
@@ -391,8 +403,9 @@ const normalizeHostStruct = (
 
   const normalized: Record<string, unknown> = {}
   for (const [key, field] of Object.entries(fields)) {
-    if (hasOwn(value, key)) {
-      normalized[key] = recurse(structFieldWireType(field), value[key])
+    const inputKey = hasOwn(value, key) ? key : camelCaseName(key)
+    if (hasOwn(value, inputKey)) {
+      normalized[key] = recurse(structFieldWireType(field), value[inputKey])
     }
   }
   return normalized

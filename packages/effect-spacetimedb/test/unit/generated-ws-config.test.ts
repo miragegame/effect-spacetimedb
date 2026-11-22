@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as EffectVitest from "@effect/vitest"
 import { fixtureConnectTimeoutMillis } from "../helpers/transport-bounds"
 const { expect } = EffectVitest
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { FullModule } from "../fixtures/full-module"
 import { TestLayer } from "../helpers/test-layer"
 import { makeFullModuleWsConnection } from "../helpers/ws-fixtures"
@@ -16,7 +16,7 @@ describe("generated ws config", (it) => {
       Effect.gen(function* () {
         const calls: Array<string> = []
 
-        const builder: StdbTesting.GeneratedWsBuilderLike<
+        const builder: StdbInternal.GeneratedWsBuilderLike<
           typeof FullModule,
           unknown
         > = {
@@ -47,17 +47,19 @@ describe("generated ws config", (it) => {
           static builder = () => builder
         }
 
-        const config = StdbTesting.ClientGeneratedWsAdapter.generatedConfig({
+        const config = StdbInternal.ClientGeneratedWsAdapter.generatedConfig({
           DbConnection,
           uri: "ws://localhost:3000",
           databaseName: "generated-config-test",
-          connectTimeoutMillis: 1_234,
+          connectDurationMax: 1_234,
+          callDurationMax: "12 seconds",
         })
 
-        expect(config.connectTimeoutMillis).toBe(1_234)
+        expect(config.connectDurationMax).toBe(1_234)
+        expect(config.callDurationMax).toBe("12 seconds")
 
         const configured =
-          StdbTesting.ClientGeneratedWsAdapter.configureGeneratedWsBuilder(
+          StdbInternal.ClientGeneratedWsAdapter.configureGeneratedWsBuilder(
             config,
             { token: undefined, refreshToken: undefined },
           )
@@ -74,7 +76,7 @@ describe("generated ws config", (it) => {
     Effect.gen(function* () {
       const calls: Array<string> = []
 
-      const builder: StdbTesting.GeneratedWsBuilderLike<
+      const builder: StdbInternal.GeneratedWsBuilderLike<
         typeof FullModule,
         unknown
       > = {
@@ -104,18 +106,21 @@ describe("generated ws config", (it) => {
         static builder = () => builder
       }
 
-      const config = StdbTesting.ClientGeneratedWsAdapter.generatedConfig({
+      const config = StdbInternal.ClientGeneratedWsAdapter.generatedConfig({
         DbConnection,
         uri: "ws://localhost:3000",
         databaseName: "brotli-test",
-        connectTimeoutMillis: fixtureConnectTimeoutMillis,
+        connectDurationMax: fixtureConnectTimeoutMillis,
         compression: "brotli",
       })
 
-      StdbTesting.ClientGeneratedWsAdapter.configureGeneratedWsBuilder(config, {
-        token: undefined,
-        refreshToken: undefined,
-      })
+      StdbInternal.ClientGeneratedWsAdapter.configureGeneratedWsBuilder(
+        config,
+        {
+          token: undefined,
+          refreshToken: undefined,
+        },
+      )
 
       expect(calls).toEqual([
         "uri:ws://localhost:3000",

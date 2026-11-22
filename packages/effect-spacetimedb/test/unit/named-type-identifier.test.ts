@@ -1,30 +1,30 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { make as makeServer } from "../../src/server/bind.ts"
+import { makeServer } from "../helpers/module-server"
 
 const { describe, expect, it } = EffectVitest
 
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { valueSchemaFromAst } from "../../src/contract/type/schema-from-ast.ts"
 import { compileModule } from "../helpers/compile-module"
 import { TestSyncRunner } from "../helpers/sync-runner"
 import { builderTypeName, typeBuilder } from "../helpers/type-builder"
 import { testArrayLength } from "../helpers/array-bounds"
 
-const T = StdbTesting.ContractType
+const T = StdbInternal.ContractType
 
 const expectIdentifierFailure = (run: () => unknown): void => {
-  expect(run).toThrow(T.StdbTypeIdentifierError)
+  expect(run).toThrow(T.StdbTypeIdentifierDefect)
   try {
     run()
   } catch (cause) {
-    expect(cause).toBeInstanceOf(T.StdbTypeIdentifierError)
+    expect(cause).toBeInstanceOf(T.StdbTypeIdentifierDefect)
     return
   }
 
-  throw new Error("Expected StdbTypeIdentifierError")
+  throw new Error("Expected StdbTypeIdentifierDefect")
 }
 
 const expectWrappedIdentifierFailure = (run: () => unknown): void => {
@@ -33,37 +33,37 @@ const expectWrappedIdentifierFailure = (run: () => unknown): void => {
   } catch (cause) {
     expect(cause).toBeInstanceOf(Error)
     const wrappedCause = cause instanceof Error ? cause.cause : undefined
-    expect(wrappedCause).toBeInstanceOf(T.StdbTypeIdentifierError)
+    expect(wrappedCause).toBeInstanceOf(T.StdbTypeIdentifierDefect)
     return
   }
 
-  throw new Error("Expected wrapped StdbTypeIdentifierError")
+  throw new Error("Expected wrapped StdbTypeIdentifierDefect")
 }
 
 const expectNotNameableFailure = (
   run: () => unknown,
   kind: Stdb.TypeKind,
 ): void => {
-  expect(run).toThrow(T.StdbTypeNotNameableError)
+  expect(run).toThrow(T.StdbTypeNotNameableDefect)
   try {
     run()
   } catch (cause) {
-    expect(cause).toBeInstanceOf(T.StdbTypeNotNameableError)
-    if (cause instanceof T.StdbTypeNotNameableError) {
+    expect(cause).toBeInstanceOf(T.StdbTypeNotNameableDefect)
+    if (cause instanceof T.StdbTypeNotNameableDefect) {
       expect(cause.kind).toBe(kind)
     }
     return
   }
 
-  throw new Error("Expected StdbTypeNotNameableError")
+  throw new Error("Expected StdbTypeNotNameableDefect")
 }
 
 const expectDuplicateTypeName = (run: () => unknown): void => {
   try {
     run()
   } catch (cause) {
-    expect(cause).toBeInstanceOf(Stdb.StdbValidationError)
-    if (cause instanceof Stdb.StdbValidationError) {
+    expect(cause).toBeInstanceOf(Stdb.StdbValidationDefect)
+    if (cause instanceof Stdb.StdbValidationDefect) {
       expect(cause.diagnostics).toEqual([
         expect.objectContaining({ code: "DuplicateTypeName" }),
       ])
@@ -256,16 +256,16 @@ describe("semantic SATS type identifiers", () => {
     const Second = Stdb.struct({ count: Stdb.u32() }).named("SharedPayload")
     expectDuplicateTypeName(
       () =>
-        Stdb.StdbModule.make("duplicate_named_types", {}).add(
-          Stdb.StdbGroup.make("Actions")
+        Stdb.Module.make("duplicate_named_types", {}).add(
+          Stdb.Group.make("Actions")
             .add(
-              Stdb.StdbFn.procedure("first", {
+              Stdb.Fn.procedure("first", {
                 params: Stdb.struct({}),
                 returns: First,
               }),
             )
             .add(
-              Stdb.StdbFn.procedure("second", {
+              Stdb.Fn.procedure("second", {
                 params: Stdb.struct({}),
                 returns: Second,
               }),
@@ -277,19 +277,16 @@ describe("semantic SATS type identifiers", () => {
   it("allows duplicate explicit type names with identical structures in one module", () => {
     const First = Stdb.struct({ id: Stdb.string() }).named("SharedPayload")
     const Second = Stdb.struct({ id: Stdb.string() }).named("SharedPayload")
-    const Module = Stdb.StdbModule.make(
-      "duplicate_named_type_identity",
-      {},
-    ).add(
-      Stdb.StdbGroup.make("Actions")
+    const Module = Stdb.Module.make("duplicate_named_type_identity", {}).add(
+      Stdb.Group.make("Actions")
         .add(
-          Stdb.StdbFn.procedure("first", {
+          Stdb.Fn.procedure("first", {
             params: Stdb.struct({}),
             returns: First,
           }),
         )
         .add(
-          Stdb.StdbFn.procedure("second", {
+          Stdb.Fn.procedure("second", {
             params: Stdb.struct({}),
             returns: Second,
           }),
@@ -318,17 +315,17 @@ describe("semantic SATS type identifiers", () => {
   })
 
   it("keeps duplicate-name detection scoped to a single module", () => {
-    const ModuleA = Stdb.StdbModule.make("named_type_scope_a", {}).add(
-      Stdb.StdbGroup.make("Actions").add(
-        Stdb.StdbFn.procedure("readA", {
+    const ModuleA = Stdb.Module.make("named_type_scope_a", {}).add(
+      Stdb.Group.make("Actions").add(
+        Stdb.Fn.procedure("readA", {
           params: Stdb.struct({}),
           returns: Stdb.struct({ id: Stdb.string() }).named("ScopedPayload"),
         }),
       ),
     ).spec
-    const ModuleB = Stdb.StdbModule.make("named_type_scope_b", {}).add(
-      Stdb.StdbGroup.make("Actions").add(
-        Stdb.StdbFn.procedure("readB", {
+    const ModuleB = Stdb.Module.make("named_type_scope_b", {}).add(
+      Stdb.Group.make("Actions").add(
+        Stdb.Fn.procedure("readB", {
           params: Stdb.struct({}),
           returns: Stdb.struct({ count: Stdb.u32() }).named("ScopedPayload"),
         }),
@@ -376,11 +373,11 @@ describe("semantic SATS type identifiers", () => {
         id: Stdb.string(),
       },
     })
-    const Module = Stdb.StdbModule.make("named_type_table_collision", {})
+    const Module = Stdb.Module.make("named_type_table_collision", {})
       .addTables(presenceEvent)
       .add(
-        Stdb.StdbGroup.make("Actions").add(
-          Stdb.StdbFn.procedure("presenceEventRead", {
+        Stdb.Group.make("Actions").add(
+          Stdb.Fn.procedure("presenceEventRead", {
             params: Stdb.struct({}),
             returns: Stdb.struct({
               id: Stdb.string(),
@@ -414,11 +411,11 @@ describe("semantic SATS type identifiers", () => {
         id: Stdb.string(),
       },
     })
-    const Module = Stdb.StdbModule.make("table_row_return_named_once", {})
+    const Module = Stdb.Module.make("table_row_return_named_once", {})
       .addTables(presenceEvent)
       .add(
-        Stdb.StdbGroup.make("Actions").add(
-          Stdb.StdbFn.procedure("presenceEventRead", {
+        Stdb.Group.make("Actions").add(
+          Stdb.Fn.procedure("presenceEventRead", {
             params: Stdb.struct({}),
             returns: Stdb.option(presenceEvent.row),
           }),
@@ -448,15 +445,15 @@ describe("semantic SATS type identifiers", () => {
     const Other = Stdb.struct({ count: Stdb.u32() }).named("ParamOnly")
     expectDuplicateTypeName(
       () =>
-        Stdb.StdbModule.make("named_type_param_collision", {}).add(
-          Stdb.StdbGroup.make("Actions")
+        Stdb.Module.make("named_type_param_collision", {}).add(
+          Stdb.Group.make("Actions")
             .add(
-              Stdb.StdbFn.reducer("write", {
+              Stdb.Fn.reducer("write", {
                 params: Stdb.struct({ value: ParamOnly }),
               }),
             )
             .add(
-              Stdb.StdbFn.procedure("read", {
+              Stdb.Fn.procedure("read", {
                 params: Stdb.struct({}),
                 returns: Other,
               }),

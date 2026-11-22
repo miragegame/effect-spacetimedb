@@ -37,12 +37,15 @@ If two consumers subscribe to the same table or event table, they own two native
 query sets. The wrapper does not add query-key APIs or client-side
 deduplication on top of the native SDK.
 
+## Targets under a mount
+
+Subscribe through the root session or supervisor with `projected.targets.tables.stockRoom.storedItem`. Apply `.where(...)` for a filtered table, or call a parameterized target such as `projected.targets.views.stockRoom.matchingItems({ id: 1 })`. The projection resolves canonical SQL identifiers for each segment. APIs that take a key, including table refs, row streams and atoms, use the dotted accessor path such as `"stockRoom.storedItem"`. See [Submodules](/core-concepts/databases/submodules#read-and-call-from-a-client).
+
 ## Streams
 
-Persistent-table streams use bounded callback queues by default and should be
-treated as invalidation signals: re-read the authoritative session cache when a
-change arrives. Event-table streams are raw event feeds and are unbounded unless
-you opt into a bounded buffer and accept lossy overflow behavior.
+Table deltas and event-table inserts use unbounded queues by default. A slow
+consumer retains each undelivered change in memory. Snapshot streams use a
+sliding buffer of 1,024 signals because each signal reads the current cache.
 
 The session stream helper family covers the common shapes:
 
@@ -55,11 +58,11 @@ The session stream helper family covers the common shapes:
 | `streamEventTable(key, options?)` | Event-table insert feed. |
 | `streamTarget(target, options?)` | Stream a projected subscription target. |
 
-Persistent-table streams accept `{ buffer: { bufferSize, strategy } }`, where
-`strategy` is `"sliding"` or `"dropping"`. The default is a bounded sliding
-queue sized for cache invalidation signals. Event-table streams accept
-`{ buffer: { bufferSize } }`; overflowing that buffer fails the stream with
-`EventTableStreamOverflowError` rather than silently dropping events.
+Set `buffer: { bufferSize }` to cap a queue. Overflow then fails the stream
+with a subscription transport error whose cause is `TableStreamOverflowError`
+or `EventTableStreamOverflowError`. Table delta streams also accept
+`strategy: "sliding"` to discard the oldest queued change or `"dropping"` to
+discard the incoming change. A strategy alone selects a capacity of 1,024.
 
 Event tables use native delivery semantics. Every live native query set that
 covers an event can deliver that event, so subscribe once at an app state
@@ -87,14 +90,14 @@ emission still re-reads the post-apply cache and converges to current state.
 `effect-spacetimedb/client` when you are working with lower-level generated
 callbacks yourself.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as StdbClient from "effect-spacetimedb/client"
 
 declare const rawContext: unknown
 
 const decoded = StdbClient.decodeStdbEventContext(rawContext).pipe(
-  Effect.map((context): StdbClient.StdbEventContextType => context),
+  Effect.map((context): StdbClient.StdbEventContext => context),
 )
 ```
 

@@ -1,3 +1,5 @@
+import { camelCaseName } from "../contract/canonical-name.ts"
+import { quotedIdentifier } from "../member-path.ts"
 import * as Effect from "effect/Effect"
 import * as Match from "effect/Match"
 import { ConnectionId, Identity, Uuid } from "spacetimedb"
@@ -37,7 +39,7 @@ export const viewCallSql = (
       ([fieldName, field]) => {
         const kind = viewParamWireKind(field)
         return kind !== undefined && isViewParamKind(kind)
-          ? sqlLiteral(kind, Reflect.get(encoded, fieldName))
+          ? sqlLiteral(kind, Reflect.get(encoded, camelCaseName(fieldName)))
           : argsFailure(
               `View ${name} param ${fieldName} has no SQL literal (${kind ?? "unknown type"})`,
             )
@@ -55,8 +57,6 @@ const argsFailure = (message: string) =>
 // PostgreSQL syntax, which SpacetimeDB's parser uses: a quote doubles, and a
 // backslash is an ordinary character.
 const quoted = (text: string): string => `'${text.replaceAll("'", "''")}'`
-const quotedIdentifier = (name: string): string =>
-  `"${name.replaceAll('"', '""')}"`
 
 // A decimal, as upstream's query builder writes one: the host parses a
 // numeric literal, a negative one included, against the param's type at any

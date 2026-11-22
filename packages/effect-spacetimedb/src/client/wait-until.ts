@@ -1,3 +1,4 @@
+import type { MembersByPath } from "../member-path.ts"
 import * as Data from "effect/Data"
 import type * as Duration from "effect/Duration"
 import type * as Effect from "effect/Effect"
@@ -18,18 +19,16 @@ export class WaitUntilTimeoutError extends Data.TaggedError(
 
 export type WaitUntilOptions = {
   readonly timeout?: Duration.Input | undefined
-  /** Accepted for migration compatibility; waiting is event-driven. */
-  readonly interval?: Duration.Input | undefined
 }
 
 export type WaitUntil<Module extends AnyModuleSpec> = <
   Key extends PublicPersistentTableKeys<Module>,
 >(
   key: Key,
-  predicate: (row: TableRow<Module["tables"][Key]>) => boolean,
+  predicate: (row: TableRow<MembersByPath<Module, "tables">[Key]>) => boolean,
   options?: WaitUntilOptions,
 ) => Effect.Effect<
-  ReadonlyArray<TableRow<Module["tables"][Key]>>,
+  ReadonlyArray<TableRow<MembersByPath<Module, "tables">[Key]>>,
   SubscriptionFailure | StdbDecodeError | WaitUntilTimeoutError,
   Scope.Scope
 >

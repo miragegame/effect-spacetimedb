@@ -7,8 +7,8 @@ sidebar:
 ---
 
 Reducers must be deterministic. Every replica needs to reproduce the same result
-from the same logged inputs, so module code should use host-provided time and
-randomness rather than ambient JavaScript globals.
+from the same logged inputs. Use the timestamp supplied by the host and the
+SDK’s deterministic random stream.
 
 ## Reducer Randomness
 
@@ -16,7 +16,7 @@ Inside Effect-based reducers, use `Random.*` from `effect/Random`. The constrain
 runtime wires Effect randomness to the call context's deterministic random
 stream.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
 import * as Random from "effect/Random"
 
@@ -39,9 +39,9 @@ fails early.
 
 Use the call timestamp supplied by the current context instead of ambient clock
 globals. In guarded development runs, `Date.now()` and no-argument `new Date()`
-throw `ReducerWallClockNotAllowedError`; `Math.random` throws
-`ReducerGlobalRandomNotAllowedError`; suspended Effects, promises, timers, and
-microtasks throw `ReducerAsyncNotAllowedError`.
+throw `HandlerWallClockNotAllowedDefect`; `Math.random` throws
+`HandlerGlobalRandomNotAllowedDefect`; suspended Effects, promises, timers, and
+microtasks throw `HandlerAsyncNotAllowedDefect`.
 
 The Effect clock is wired to the same transaction timestamp, so `Effect.Clock`
 and `DateTime.now` are deterministic inside server handlers.
@@ -52,11 +52,8 @@ Reducer, transaction, and HTTP handler contexts expose deterministic UUID
 helpers. Use `ctx.newUuidV4()` and `ctx.newUuidV7()` when a row needs a stable
 identifier produced inside server module code.
 
-```typescript twoslash
+```typescript
 import * as Effect from "effect/Effect"
-import * as Stdb from "effect-spacetimedb"
-
-declare const Module: Stdb.AnyStdbModule
 
 const { ReducerCtx } = Module
 
@@ -71,13 +68,11 @@ const ids = Effect.gen(function* () {
 
 :::caution
 
-These helpers are not unique across transactions. SpaceTimeDB 2.14 seeds each
-call's random stream from that call's timestamp alone and restarts the UUID v7
-counter, so two transactions the host gives the same timestamp draw the same
-UUIDs, and the 32-bit seed makes repeats likely between nearby timestamps too.
-A key inserted from them can fail as a duplicate under concurrent calls. When an
-identifier must be unique across transactions, mix in state the module owns,
-such as a counter row that every mint reads and advances in its transaction.
+The SDK seeds each call’s random stream from its timestamp alone and restarts
+the UUID v7 counter for each call. In 2.16.1 four PCG32 outputs expand that
+64-bit seed to fill the whole 128-bit generator state. Two transactions given
+the same timestamp still draw the same sequence and can mint duplicate UUIDs.
+For unique keys, mint IDs from a sequence advanced inside the transaction.
 
 :::
 
@@ -86,7 +81,7 @@ such as a counter row that every mint reads and advances in its transaction.
 The constrained server runtime wires `Random.*` from `effect/Random` to the
 current SpaceTimeDB call context through `ctx.random`, so helpers such as
 `Random.next`, `Random.nextIntBetween`, and `Random.shuffle` consume the same
-deterministic stream exposed by the host.
+deterministic stream supplied by the SDK.
 
 SpaceTimeDB replaces `Math.random` in module runtimes. In guarded development
 runs, `effect-spacetimedb` also replaces it with a throwing guard so accidental
@@ -94,7 +89,7 @@ callers fail loudly in tests and CI. The runtime still installs a deterministic
 fallback as a non-semantic backstop for stray library paths, but application
 logic should not depend on it.
 
-The host random stream is deterministic and replica-reproducible. Supplying a
+The SDK random stream is deterministic and replica-reproducible. Supplying a
 developer-chosen seed makes results more reproducible, not more secret.
 
 ## Strength

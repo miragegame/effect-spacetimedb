@@ -1,8 +1,8 @@
-import { snakeCaseName } from "./canonical-name.ts"
-import { StdbDiagnostic } from "./diagnostic.ts"
+import { camelCaseName, snakeCaseName } from "./canonical-name.ts"
+import { Diagnostic } from "./diagnostic.ts"
 import type { AnyModuleSpec } from "./module.ts"
 import {
-  validateCamelCaseDeclaredName,
+  validateDeclaredName,
   validateCanonicalCollisions,
   validateCanonicalValueTypeNames,
 } from "./module-validation-common.ts"
@@ -17,12 +17,12 @@ export const isSynthesizedUniqueConstraint = (constraint: {
   constraint.name === `${constraint.columns[0]}_unique`
 
 export const validateCanonicalTableNames = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   tableKey: string,
   table: AnyTableSpec,
   completed: WeakSet<object>,
 ): void => {
-  validateCamelCaseDeclaredName(
+  validateDeclaredName(
     diagnostics,
     ["tables", tableKey, "name"],
     "Table",
@@ -35,11 +35,11 @@ export const validateCanonicalTableNames = (
     ["tables", tableKey, "columns"],
     "Table columns",
     columnNames,
-    snakeCaseName,
+    camelCaseName,
   )
   for (const [columnName, column] of Object.entries(table.columns)) {
     const columnPath = ["tables", tableKey, "columns", columnName]
-    validateCamelCaseDeclaredName(diagnostics, columnPath, "Column", columnName)
+    validateDeclaredName(diagnostics, columnPath, "Column", columnName)
     validateCanonicalValueTypeNames(
       diagnostics,
       column,
@@ -58,7 +58,7 @@ export const validateCanonicalTableNames = (
     snakeCaseName,
   )
   for (const [indexOffset, index] of table.indexes.entries()) {
-    validateCamelCaseDeclaredName(
+    validateDeclaredName(
       diagnostics,
       ["tables", tableKey, "indexes", indexOffset, "name"],
       "Index accessor",
@@ -81,7 +81,7 @@ export const validateCanonicalTableNames = (
       continue
     }
 
-    validateCamelCaseDeclaredName(
+    validateDeclaredName(
       diagnostics,
       ["tables", tableKey, "constraints", constraintOffset, "name"],
       "Constraint label",
@@ -91,7 +91,7 @@ export const validateCanonicalTableNames = (
 }
 
 export const validateCanonicalModuleNames = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   module: AnyModuleSpec,
 ): void => {
   const completed = new WeakSet<object>()
@@ -179,7 +179,7 @@ export const validateCanonicalModuleNames = (
       ...Object.values(module.tables).map((table) => table.name),
       ...Object.keys(module.views),
     ],
-    snakeCaseName,
+    camelCaseName,
   )
   validateCanonicalCollisions(
     diagnostics,
@@ -191,14 +191,14 @@ export const validateCanonicalModuleNames = (
       ...Object.keys(module.views),
       ...Object.keys(module.httpHandlers),
     ],
-    snakeCaseName,
+    camelCaseName,
   )
 
   reflect(module, {
     onTable: ({ name, spec }) =>
       validateCanonicalTableNames(diagnostics, name, spec, completed),
     onView: ({ name, spec }) => {
-      validateCamelCaseDeclaredName(diagnostics, ["views", name], "View", name)
+      validateDeclaredName(diagnostics, ["views", name], "View", name)
       validateCanonicalValueTypeNames(
         diagnostics,
         spec.returns,
@@ -209,12 +209,7 @@ export const validateCanonicalModuleNames = (
       )
     },
     onReducer: ({ name, spec }) => {
-      validateCamelCaseDeclaredName(
-        diagnostics,
-        ["reducers", name],
-        "Reducer",
-        name,
-      )
+      validateDeclaredName(diagnostics, ["reducers", name], "Reducer", name)
       validateCanonicalValueTypeNames(
         diagnostics,
         spec.params,
@@ -225,12 +220,7 @@ export const validateCanonicalModuleNames = (
       )
     },
     onProcedure: ({ name, spec }) => {
-      validateCamelCaseDeclaredName(
-        diagnostics,
-        ["procedures", name],
-        "Procedure",
-        name,
-      )
+      validateDeclaredName(diagnostics, ["procedures", name], "Procedure", name)
       validateCanonicalValueTypeNames(
         diagnostics,
         spec.params,
@@ -249,7 +239,7 @@ export const validateCanonicalModuleNames = (
       )
     },
     onHttpHandler: ({ name, spec }) => {
-      validateCamelCaseDeclaredName(
+      validateDeclaredName(
         diagnostics,
         ["httpHandlers", name],
         "HTTP handler",

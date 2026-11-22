@@ -1,4 +1,4 @@
-import { make as makeServer } from "../../src/server/bind.ts"
+import { makeServer } from "../helpers/module-server"
 import * as Effect from "effect/Effect"
 import * as EffectVitest from "@effect/vitest"
 import * as Exit from "effect/Exit"
@@ -22,12 +22,12 @@ describe("server service tags", (it) => {
         runtime: TestSyncRunner,
       })
 
-      const sameServerExit = yield* serverFirst.db.pipe(
+      const sameServerExit = yield* serverFirst.Db.pipe(
         Effect.asVoid,
         Effect.provideService(Server.Db, {}),
         Effect.exit,
       )
-      const crossServerExit = yield* serverSecond.db.pipe(
+      const crossServerExit = yield* serverSecond.Db.pipe(
         Effect.asVoid,
         Effect.provideService(Server.Db, {}),
         Effect.exit,
@@ -35,7 +35,7 @@ describe("server service tags", (it) => {
 
       expect(Exit.isSuccess(sameServerExit)).toBe(true)
       expect(Exit.isSuccess(crossServerExit)).toBe(true)
-      expect(serverFirst.db).not.toBe(serverSecond.db)
+      expect(serverFirst.Db).not.toBe(serverSecond.Db)
     }),
   )
 })

@@ -1,38 +1,24 @@
 import * as Effect from "effect/Effect"
-
 import * as Stream from "effect/Stream"
-
-import { StdbDecodeError } from "../decode-error.ts"
-
 import { identityKey } from "./host-abi-runtime.ts"
-
-import { OutboxRowTooLarge } from "../contract/outbox-table.ts"
-
+import { OutboxRowTooLargeError } from "../contract/outbox-table.ts"
 import {
   hostValueBsatnBytes,
   OutboxSelfTargetDefect,
   type OutboxSendContext,
   OutboxSendOutsideMutationDefect,
 } from "./outbox.ts"
-
-import { type StdbHostFailure } from "./services.ts"
-
 import {
   asRecord,
   callHostMethod,
-  collectIterator,
-  decodeCall,
-  decodeSync,
-  encodeCall,
+  tableCall,
+  writeCall,
   iteratorValueFirst,
-  hostCall,
   normalizeFindResult,
   streamIterator,
   wrapIteratorResult,
 } from "./db-handle-runtime.ts"
-
 import type { DbCapabilityMode } from "./db-handle-codec.ts"
-
 import type {
   LookupPlan,
   OutboxTablePlan,
@@ -41,305 +27,139 @@ import type {
   TablePlan,
 } from "./db-handle-runtime.ts"
 
+const writeRow = (
+  raw: RawRecord,
+  codec: TableCodec,
+  op: string,
+  method: "insert" | "update",
+  encoded: unknown,
+) =>
+  writeCall(codec, op, method, () =>
+    callHostMethod(raw, method, op, [encoded]),
+  ).pipe(
+    Effect.flatMap((row) =>
+      tableCall(codec.context.table, op, () => codec.decodeRow(row)),
+    ),
+  )
+
+const iteratorReads = (
+  table: string,
+  op: string,
+  open: () => unknown,
+  decode: (row: unknown) => unknown,
+) => {
+  const iterator = tableCall(table, op, open)
+  const stream = () =>
+    Stream.unwrap(
+      Effect.map(iterator, (value) => streamIterator(value, table, op, decode)),
+    )
+  return {
+    stream,
+    toArray: () => Stream.runCollect(stream()),
+    first: () =>
+      Effect.flatMap(iterator, (value) =>
+        iteratorValueFirst(value, table, op, decode),
+      ),
+    unsafe: () =>
+      tableCall(table, op, () => wrapIteratorResult(open(), table, op, decode)),
+  }
+}
+
 export const buildLookup = (
   mode: DbCapabilityMode,
   rawLookup: RawRecord,
   codec: TableCodec,
   plan: LookupPlan,
 ): Record<string, unknown> => {
-  const buildFilteredLookup = (
-    encodeLookup: (columns: ReadonlyArray<string>, value: unknown) => unknown,
-    options: { readonly deleteAll: boolean },
-  ) => {
-    const deleteMatches = Effect.fnUntraced(function* (value: unknown) {
-      const encodedValue = yield* encodeCall(
-        "args",
-        () => encodeLookup(plan.columns, value),
-        {
-          ...codec.context,
-          op: plan.op,
-        },
-      )
-
-      return yield* hostCall(`${plan.op}.delete`, () =>
-        callHostMethod(rawLookup, "delete", `${plan.op}.delete`, [
-          encodedValue,
-        ]),
-      )
-    })
-
-    return Object.freeze({
-      ...(mode === "readwrite"
-        ? {
-            delete: deleteMatches,
-            ...(options.deleteAll ? { deleteAll: deleteMatches } : {}),
-          }
-        : {}),
-      filterStream: (value: unknown) =>
-        Stream.unwrap(
-          Effect.gen(function* () {
-            const encodedValue = yield* encodeCall(
-              "args",
-              () => encodeLookup(plan.columns, value),
-              {
-                ...codec.context,
-                op: plan.op,
-              },
-            )
-
-            const iterator = yield* hostCall(`${plan.op}.filter`, () =>
-              callHostMethod(rawLookup, "filter", `${plan.op}.filter`, [
-                encodedValue,
-              ]),
-            )
-
-            return streamIterator(iterator, `${plan.op}.filter`, (row) =>
-              decodeSync(() => codec.decodeRow(row), {
-                ...codec.context,
-                op: `${plan.op}.filter`,
-              }),
-            )
-          }),
-        ),
-      filterToArray: Effect.fnUntraced(function* (value: unknown) {
-        const encodedValue = yield* encodeCall(
-          "args",
-          () => encodeLookup(plan.columns, value),
-          {
-            ...codec.context,
-            op: plan.op,
-          },
-        )
-
-        const iterator = yield* hostCall(`${plan.op}.filter`, () =>
-          callHostMethod(rawLookup, "filter", `${plan.op}.filter`, [
-            encodedValue,
-          ]),
-        )
-
-        return yield* collectIterator(iterator, `${plan.op}.filter`, (row) =>
-          decodeSync(() => codec.decodeRow(row), {
-            ...codec.context,
-            op: `${plan.op}.filter`,
-          }),
-        )
-      }),
-      unsafe: Object.freeze({
-        filter: Effect.fnUntraced(function* (value: unknown) {
-          const encodedValue = yield* encodeCall(
-            "args",
-            () => encodeLookup(plan.columns, value),
-            {
-              ...codec.context,
-              op: plan.op,
-            },
-          )
-
-          return yield* hostCall(`${plan.op}.filter`, () =>
-            wrapIteratorResult(
-              callHostMethod(rawLookup, "filter", `${plan.op}.filter`, [
-                encodedValue,
-              ]),
-              `${plan.op}.filter`,
-              (row) => codec.decodeRow(row),
-            ),
-          )
-        }),
-      }),
-    })
-  }
-
+  const table = codec.context.table
+  const encode =
+    plan.kind === "range" ? codec.encodeLookupRange : codec.encodeLookupPoint
+  const lookup = (method: string, value: unknown) =>
+    callHostMethod(rawLookup, method, `${plan.op}.${method}`, [
+      encode(plan.columns, value),
+    ])
+  const remove = (value: unknown) =>
+    tableCall(table, `${plan.op}.delete`, () => lookup("delete", value))
+  const mutation = mode === "readwrite" ? { delete: remove } : {}
   if (plan.kind === "unique") {
-    const find = Effect.fnUntraced(function* (value: unknown) {
-      const encodedValue = yield* encodeCall(
-        "args",
-        () => codec.encodeLookupPoint(plan.columns, value),
-        {
-          ...codec.context,
-          op: plan.op,
-        },
-      )
-
-      return yield* hostCall(`${plan.op}.find`, () =>
-        normalizeFindResult(
-          callHostMethod(rawLookup, "find", `${plan.op}.find`, [encodedValue]),
-        ),
-      ).pipe(
-        Effect.flatMap((row) =>
-          row === undefined
-            ? Effect.void
-            : decodeCall(() => codec.decodeRow(row), {
-                ...codec.context,
-                op: `${plan.op}.find`,
-              }),
-        ),
-      )
-    })
-    const replace = Effect.fnUntraced(function* (row: unknown) {
-      const encodedRow = yield* encodeCall("row", () => codec.encodeRow(row), {
-        ...codec.context,
-        op: `${plan.op}.update`,
+    const find = (value: unknown) =>
+      tableCall(table, `${plan.op}.find`, () => {
+        const row = normalizeFindResult(lookup("find", value))
+        return row === undefined ? undefined : codec.decodeRow(row)
       })
-
-      return yield* hostCall(`${plan.op}.update`, () =>
-        callHostMethod(rawLookup, "update", `${plan.op}.update`, [encodedRow]),
-      ).pipe(
-        Effect.flatMap((nextRow) =>
-          decodeCall(() => codec.decodeRow(nextRow), {
-            ...codec.context,
-            op: `${plan.op}.update`,
-          }),
-        ),
+    const update = (row: unknown) => {
+      const op = `${plan.op}.update`
+      return Effect.flatMap(
+        tableCall(table, op, () => codec.encodeRow(row)),
+        (encoded) => writeRow(rawLookup, codec, op, "update", encoded),
       )
-    })
-    const findOrFail = <E>(
-      value: unknown,
-      makeError: (value: unknown) => E,
-    ): Effect.Effect<unknown, E | StdbHostFailure | StdbDecodeError> =>
-      Effect.gen(function* () {
-        const row = yield* find(value)
-        if (row === undefined) {
-          return yield* Effect.fail(makeError(value))
-        }
-
-        return row
-      })
-
+    }
     return Object.freeze({
       find,
-      exists: Effect.fnUntraced(function* (value) {
-        const row = yield* find(value)
-        return row !== undefined
-      }),
-      findOrFail,
-      ...(mode === "readwrite"
-        ? {
-            delete: Effect.fnUntraced(function* (value) {
-              const encodedValue = yield* encodeCall(
-                "args",
-                () => codec.encodeLookupPoint(plan.columns, value),
-                {
-                  ...codec.context,
-                  op: plan.op,
-                },
-              )
-
-              return yield* hostCall(`${plan.op}.delete`, () =>
-                callHostMethod(rawLookup, "delete", `${plan.op}.delete`, [
-                  encodedValue,
-                ]),
-              )
-            }),
-            ...(plan.update
-              ? {
-                  replace,
-                  update: replace,
-                }
-              : {}),
-          }
-        : {}),
+      exists: (value: unknown) =>
+        Effect.map(find(value), (row) => row !== undefined),
+      findOrFail: <E>(value: unknown, makeError: (value: unknown) => E) =>
+        Effect.flatMap(find(value), (row) =>
+          row === undefined
+            ? Effect.fail(makeError(value))
+            : Effect.succeed(row),
+        ),
+      ...mutation,
+      ...(mode === "readwrite" && plan.update ? { update } : {}),
     })
   }
-
-  if (plan.kind === "point") {
-    return buildFilteredLookup(codec.encodeLookupPoint, { deleteAll: false })
-  }
-
-  if (plan.kind === "range") {
-    return buildFilteredLookup(codec.encodeLookupRange, { deleteAll: true })
-  }
-
-  const _exhaustive: never = plan
-  return _exhaustive
+  const reads = (value: unknown) =>
+    iteratorReads(
+      table,
+      `${plan.op}.filter`,
+      () => lookup("filter", value),
+      codec.decodeRow,
+    )
+  return Object.freeze({
+    ...mutation,
+    filterStream: (value: unknown) => reads(value).stream(),
+    filterToArray: (value: unknown) => reads(value).toArray(),
+    unsafe: Object.freeze({
+      filter: (value: unknown) => reads(value).unsafe(),
+    }),
+  })
 }
 
 export const buildBaseTable = (
   rawTable: RawRecord,
   plan: TablePlan,
-): Record<string, unknown> =>
-  Object.freeze({
-    count: Effect.fnUntraced(function* () {
-      return yield* hostCall(`${plan.op}.count`, () =>
+): Record<string, unknown> => {
+  const table = plan.codec.context.table
+  const op = `${plan.op}.iter`
+  const reads = iteratorReads(
+    table,
+    op,
+    () => callHostMethod(rawTable, "iter", op, []),
+    plan.codec.decodeRow,
+  )
+  return Object.freeze({
+    count: () =>
+      tableCall(table, `${plan.op}.count`, () =>
         callHostMethod(rawTable, "count", `${plan.op}.count`, []),
-      )
-    }),
-    first: Effect.fnUntraced(function* () {
-      const iterator = yield* hostCall(`${plan.op}.iter`, () =>
-        callHostMethod(rawTable, "iter", `${plan.op}.iter`, []),
-      )
-
-      return yield* iteratorValueFirst(iterator, `${plan.op}.iter`, (row) =>
-        decodeSync(() => plan.codec.decodeRow(row), {
-          ...plan.codec.context,
-          op: `${plan.op}.iter`,
-        }),
-      )
-    }),
-    stream: () =>
-      Stream.unwrap(
-        hostCall(`${plan.op}.iter`, () =>
-          callHostMethod(rawTable, "iter", `${plan.op}.iter`, []),
-        ).pipe(
-          Effect.map((iterator) =>
-            streamIterator(iterator, `${plan.op}.iter`, (row) =>
-              decodeSync(() => plan.codec.decodeRow(row), {
-                ...plan.codec.context,
-                op: `${plan.op}.iter`,
-              }),
-            ),
-          ),
-        ),
       ),
-    toArray: Effect.fnUntraced(function* () {
-      const iterator = yield* hostCall(`${plan.op}.iter`, () =>
-        callHostMethod(rawTable, "iter", `${plan.op}.iter`, []),
-      )
-
-      return yield* collectIterator(iterator, `${plan.op}.iter`, (row) =>
-        decodeSync(() => plan.codec.decodeRow(row), {
-          ...plan.codec.context,
-          op: `${plan.op}.iter`,
-        }),
-      )
-    }),
-    unsafe: Object.freeze({
-      iter: Effect.fnUntraced(function* () {
-        return yield* hostCall(`${plan.op}.iter`, () =>
-          wrapIteratorResult(
-            callHostMethod(rawTable, "iter", `${plan.op}.iter`, []),
-            `${plan.op}.iter`,
-            (row) => plan.codec.decodeRow(row),
-          ),
-        )
-      }),
-    }),
+    first: reads.first,
+    stream: reads.stream,
+    toArray: reads.toArray,
+    unsafe: Object.freeze({ iter: reads.unsafe }),
   })
+}
 
 export const buildReadwriteTable = (
   rawTable: RawRecord,
   plan: TablePlan,
 ): Record<string, unknown> => {
-  const insertOne = Effect.fnUntraced(function* (row: unknown) {
-    const encodedRow = yield* encodeCall(
-      "row",
-      () => plan.codec.encodeRow(row),
-      {
-        ...plan.codec.context,
-        op: `${plan.op}.insert`,
-      },
+  const table = plan.codec.context.table
+  const op = `${plan.op}.insert`
+  const insertOne = (row: unknown) =>
+    Effect.flatMap(
+      tableCall(table, op, () => plan.codec.encodeRow(row)),
+      (encoded) => writeRow(rawTable, plan.codec, op, "insert", encoded),
     )
-
-    return yield* hostCall(`${plan.op}.insert`, () =>
-      callHostMethod(rawTable, "insert", `${plan.op}.insert`, [encodedRow]),
-    ).pipe(
-      Effect.flatMap((nextRow) =>
-        decodeCall(() => plan.codec.decodeRow(nextRow), {
-          ...plan.codec.context,
-          op: `${plan.op}.insert`,
-        }),
-      ),
-    )
-  })
 
   const tableHandle = {
     ...buildBaseTable(rawTable, plan),
@@ -353,25 +173,16 @@ export const buildReadwriteTable = (
 
       return inserted
     }),
-    delete: Effect.fnUntraced(function* (row: unknown) {
-      const encodedRow = yield* encodeCall(
-        "row",
-        () => plan.codec.encodeRow(row),
-        {
-          ...plan.codec.context,
-          op: `${plan.op}.delete`,
-        },
-      )
-
-      return yield* hostCall(`${plan.op}.delete`, () =>
-        callHostMethod(rawTable, "delete", `${plan.op}.delete`, [encodedRow]),
-      )
-    }),
-    clear: Effect.fnUntraced(function* () {
-      return yield* hostCall(`${plan.op}.clear`, () =>
+    delete: (row: unknown) =>
+      tableCall(table, `${plan.op}.delete`, () =>
+        callHostMethod(rawTable, "delete", `${plan.op}.delete`, [
+          plan.codec.encodeRow(row),
+        ]),
+      ),
+    clear: () =>
+      tableCall(table, `${plan.op}.clear`, () =>
         callHostMethod(rawTable, "clear", `${plan.op}.clear`, []),
-      )
-    }),
+      ),
   } as Record<string, unknown>
 
   if (plan.scheduled) {
@@ -447,37 +258,31 @@ export const buildOutboxTable = (
       )
     }
 
-    const encodedRow = yield* encodeCall(
-      "row",
+    const encodedRow = yield* tableCall(
+      outbox.tableName,
+      `${plan.op}.insert`,
       () =>
         plan.codec.encodeRow({
           ...row,
           msgId: 0n,
           enqueuedAt: send.timestamp,
         }),
-      {
-        ...plan.codec.context,
-        op: `${plan.op}.insert`,
-      },
     )
     const rowBytes = hostValueBsatnBytes(outbox.row, encodedRow)
     if (rowBytes > outbox.rowBytesMax) {
-      return yield* new OutboxRowTooLarge({
+      return yield* new OutboxRowTooLargeError({
         table: outbox.tableName,
         rowBytes,
         rowBytesMax: outbox.rowBytesMax,
       })
     }
 
-    return yield* hostCall(`${plan.op}.insert`, () =>
-      callHostMethod(rawTable, "insert", `${plan.op}.insert`, [encodedRow]),
-    ).pipe(
-      Effect.flatMap((nextRow) =>
-        decodeCall(() => plan.codec.decodeRow(nextRow), {
-          ...plan.codec.context,
-          op: `${plan.op}.insert`,
-        }),
-      ),
+    return yield* writeRow(
+      rawTable,
+      plan.codec,
+      `${plan.op}.insert`,
+      "insert",
+      encodedRow,
     )
   })
 

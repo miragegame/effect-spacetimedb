@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 import { ExampleErrors } from "../errors"
-import { ResultRowsLength, String255, ThingId, thing, U64 } from "../schema"
+import { ThingId, thing, U64 } from "../schema"
 
 export const ThingPingInput = Schema.Struct({
   thingId: ThingId,
@@ -12,84 +12,84 @@ export const ThingPingOutput = Schema.Struct({
   status: Schema.Literal("ok"),
 })
 
-export const ThingFunctions = Stdb.StdbGroup.make("Things")
+export const ThingFunctions = Stdb.Group.make("Things")
   .add(
-    Stdb.StdbFn.reducer("thingSet", {
+    Stdb.Fn.reducer("thingSet", {
       params: Stdb.struct({
         thingId: Stdb.string(ThingId),
-        label: String255,
+        label: Stdb.string(),
         count: U64,
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("thingDelete", {
+    Stdb.Fn.reducer("thingDelete", {
       params: Stdb.struct({
         thingId: Stdb.string(ThingId),
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("thingNoop", {
+    Stdb.Fn.reducer("thingNoop", {
       params: Stdb.struct({}),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("thingPanic", {
+    Stdb.Fn.reducer("thingPanic", {
       params: Stdb.struct({}),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("thingClear", {
+    Stdb.Fn.reducer("thingClear", {
       params: Stdb.struct({}),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("thingForceUpdate", {
+    Stdb.Fn.reducer("thingForceUpdate", {
       params: Stdb.struct({
         thingId: Stdb.string(ThingId),
-        label: String255,
+        label: Stdb.string(),
         count: U64,
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("thingInsertThenAbort", {
+    Stdb.Fn.reducer("thingInsertThenAbort", {
       params: Stdb.struct({
         thingId: Stdb.string(ThingId),
-        label: String255,
+        label: Stdb.string(),
         count: U64,
       }),
       errors: ExampleErrors,
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("thingInsertTwiceAtomic", {
+    Stdb.Fn.reducer("thingInsertTwiceAtomic", {
       params: Stdb.struct({
         firstThingId: Stdb.string(ThingId),
-        firstLabel: String255,
+        firstLabel: Stdb.string(),
         firstCount: U64,
         secondThingId: Stdb.string(ThingId),
-        secondLabel: String255,
+        secondLabel: Stdb.string(),
         secondCount: U64,
       }),
     }),
   )
   .add(
-    Stdb.StdbFn.reducer("thingInsertTwiceThenAbort", {
+    Stdb.Fn.reducer("thingInsertTwiceThenAbort", {
       params: Stdb.struct({
         firstThingId: Stdb.string(ThingId),
-        firstLabel: String255,
+        firstLabel: Stdb.string(),
         firstCount: U64,
         secondThingId: Stdb.string(ThingId),
-        secondLabel: String255,
+        secondLabel: Stdb.string(),
         secondCount: U64,
       }),
       errors: ExampleErrors,
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("thingGet", {
+    Stdb.Fn.procedure("thingGet", {
       params: Stdb.struct({
         thingId: Stdb.string(ThingId),
       }),
@@ -97,61 +97,61 @@ export const ThingFunctions = Stdb.StdbGroup.make("Things")
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("thingCount", {
+    Stdb.Fn.procedure("thingCount", {
       params: Stdb.struct({}),
       returns: U64,
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("thingList", {
+    Stdb.Fn.procedure("thingList", {
       params: Stdb.struct({}),
-      returns: Stdb.array(thing.row, ResultRowsLength),
+      returns: Stdb.array(thing.row),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("thingByCountExact", {
+    Stdb.Fn.procedure("thingByCountExact", {
       params: Stdb.struct({
         count: U64,
       }),
-      returns: Stdb.array(thing.row, ResultRowsLength),
+      returns: Stdb.array(thing.row),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("thingByCountRange", {
+    Stdb.Fn.procedure("thingByCountRange", {
       params: Stdb.struct({
         lo: U64,
         hi: U64,
       }),
-      returns: Stdb.array(thing.row, ResultRowsLength),
+      returns: Stdb.array(thing.row),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("thingByCountRangeExclusive", {
+    Stdb.Fn.procedure("thingByCountRangeExclusive", {
       params: Stdb.struct({
         lo: U64,
         hi: U64,
       }),
-      returns: Stdb.array(thing.row, ResultRowsLength),
+      returns: Stdb.array(thing.row),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("thingInsertTwiceInTx", {
+    Stdb.Fn.procedure("thingInsertTwiceInTx", {
       params: Stdb.struct({
         firstThingId: Stdb.string(ThingId),
-        firstLabel: String255,
+        firstLabel: Stdb.string(),
         firstCount: U64,
         secondThingId: Stdb.string(ThingId),
-        secondLabel: String255,
+        secondLabel: Stdb.string(),
         secondCount: U64,
       }),
       returns: Stdb.unit(),
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("thingInsertInTxThenAbort", {
+    Stdb.Fn.procedure("thingInsertInTxThenAbort", {
       params: Stdb.struct({
         thingId: Stdb.string(ThingId),
-        label: String255,
+        label: Stdb.string(),
         count: U64,
       }),
       returns: Stdb.unit(),
@@ -159,23 +159,23 @@ export const ThingFunctions = Stdb.StdbGroup.make("Things")
     }),
   )
   .add(
-    Stdb.StdbFn.procedure("thingOutcome", {
+    Stdb.Fn.procedure("thingOutcome", {
       params: Stdb.struct({
         thingId: Stdb.string(ThingId),
       }),
-      returns: Stdb.result(thing.row, String255),
+      returns: Stdb.result(thing.row, Stdb.string()),
     }),
   )
   .add(
-    Stdb.StdbFn.anonymousView("allThings", {
-      returns: Stdb.array(thing.row, ResultRowsLength),
+    Stdb.Fn.anonymousView("allThings", {
+      returns: Stdb.array(thing.row),
     }),
   )
 
-export const ThingRoutes = Stdb.StdbHttpGroup.make("ThingHttp")
+export const ThingRoutes = Stdb.HttpGroup.make("ThingHttp")
   .prefix("/things")
   .add(
-    Stdb.StdbHttp.post("thingPing", "/ping", {
+    Stdb.Http.post("thingPing", "/ping", {
       request: ThingPingInput,
       response: ThingPingOutput,
     }),

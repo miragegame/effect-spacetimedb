@@ -11,7 +11,7 @@ import { makeModuleLifecycle } from "effect-spacetimedb/dev-server"
 
 const { describe, expect, live } = EffectVitest
 
-import type { NativeSubscriptionHandleLike } from "effect-spacetimedb/testing"
+import type { NativeSubscriptionHandleLike } from "effect-spacetimedb/testing/internal"
 import {
   exampleBundlePath,
   packageRoot,

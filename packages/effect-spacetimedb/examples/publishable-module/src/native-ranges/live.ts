@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
 import { Db, ExampleModule, Tx } from "../module"
 
-export const NativeRangeFunctionsLive = Stdb.StdbBuilder.group(
+export const NativeRangeFunctionsLive = Stdb.Builder.group(
   ExampleModule,
   "NativeRanges",
   {

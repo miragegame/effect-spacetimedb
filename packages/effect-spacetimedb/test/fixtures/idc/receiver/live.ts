@@ -30,7 +30,7 @@ const recordPing = Effect.fn(function* (
   yield* db.pingLog.insert({ id: 0n, sender: ctx.sender, note, labels })
 })
 
-export const IdcFixtureInboxLive = Stdb.StdbBuilder.group(
+export const IdcFixtureInboxLive = Stdb.Builder.group(
   IdcReceiverModule,
   "IdcFixtureInbox",
   {

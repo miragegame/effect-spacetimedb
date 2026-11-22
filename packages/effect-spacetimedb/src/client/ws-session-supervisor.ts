@@ -1,13 +1,13 @@
+import { withDeadline } from "./call-duration.ts"
 import * as Cause from "effect/Cause"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
-import * as Schedule from "effect/Schedule"
 import * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import * as AsyncResult from "effect/reactivity/AsyncResult"
+import type * as AsyncResult from "effect/reactivity/AsyncResult"
 import type { AnyModuleSpec } from "../contract/module.ts"
 import { errorTypeId, hasErrorTypeId } from "../error-identity.ts"
 import type { ModulePlan } from "../module-plan.ts"
@@ -20,6 +20,7 @@ import {
 import {
   type ConnectionInvalidation,
   connectionStateFor,
+  type RevokingInvalidation,
 } from "./connection-state.ts"
 import { GeneratedArtifactShapeError } from "./generated-artifact-shape.ts"
 import {
@@ -28,6 +29,7 @@ import {
   type MismatchedGeneratedModuleDiagnostic,
   WsUnsupportedBuilderFeatureError,
 } from "./generated-ws-adapter.ts"
+import type { TokenUnavailable } from "./ws-attempt-credentials.ts"
 import {
   GeneratedArtifactValidation,
   generated,
@@ -36,129 +38,64 @@ import {
   type WsBuilderConfig,
   type WsGeneratedConfig,
 } from "./ws-resource.ts"
-import type { SubscriptionFailure } from "./ws-subscription.ts"
 import {
+  invalidationRevokesRows,
+  SubscriptionInvalidatedError,
+  type SubscriptionFailure,
+} from "./ws-subscription.ts"
+import {
+  wsTimeBounds,
   WsConnectError,
   WsConnectTimeoutError,
+  WsProtocolError,
 } from "./ws-resource-lifecycle.ts"
+import { recheckOnPageResume } from "./ws-page-resume.ts"
 import type { WsSession } from "./ws-session-tag.ts"
 import {
   followRecoveringSession,
   type RecoveringConnection,
 } from "./ws-supervised-recovery.ts"
+import { makeSupervisedRows } from "./ws-supervised-rows.ts"
+import {
+  backoffBounds,
+  makeSupervisorBackoff,
+  type WsSessionBackoffPolicy,
+} from "./ws-supervisor-backoff.ts"
+import {
+  type SupervisorEvent,
+  supervise,
+  supervisorStart,
+  type WsSessionSupervisorPhase,
+} from "./ws-supervisor-state.ts"
 
-export const reconnectDelayMillisFirstDefault = 250
-export const reconnectDelayMillisMaxDefault = 30_000
+export {
+  reconnectDelayFirstDefault,
+  reconnectDelayMaxDefault,
+  stabilityWindowDefault,
+} from "./ws-supervisor-backoff.ts"
+export type { WsSessionSupervisorPhase } from "./ws-supervisor-state.ts"
 
-/**
- * Page events after which a browser may have torn a socket down without
- * delivering `onclose`: the page became visible again, regained focus, came
- * back online, or was restored from the back-forward cache. The SDK's own
- * connection manager re-checks its sockets on the same events.
- */
-const pageResumeEventTypes = [
-  "visibilitychange",
-  "focus",
-  "online",
-  "pageshow",
-] as const
+const anotherIdentityMessage =
+  "The session's replacement connected under a different identity"
 
-/**
- * Re-checks a live session's socket whenever the page resumes, for as long as
- * the enclosing scope lives. Reading the session's liveness invalidates a
- * socket that closed without its close event, so the supervisor reconnects
- * at once instead of publishing a dead session as live until the next call.
- * Outside a page (Bun, Node) none of these events fires.
- */
-const recheckOnPageResume = (
-  check: () => void,
-): Effect.Effect<void, never, Scope.Scope> =>
-  Effect.acquireRelease(
-    Effect.suspend(() => {
-      if (typeof globalThis.addEventListener !== "function") {
-        return Effect.succeed(false)
-      }
-      for (const type of pageResumeEventTypes) {
-        globalThis.addEventListener(type, check)
-      }
-      return Effect.succeed(true)
-    }),
-    (registered) =>
-      Effect.suspend(() => {
-        if (registered) {
-          for (const type of pageResumeEventTypes) {
-            globalThis.removeEventListener(type, check)
-          }
-        }
-        return Effect.void
-      }),
-  ).pipe(Effect.asVoid)
-
-const WsSessionSupervisorDefectErrorTypeId = errorTypeId(
-  "WsSessionSupervisorDefectError",
+const WsSessionSupervisorFatalErrorTypeId = errorTypeId(
+  "WsSessionSupervisorFatalError",
 )
-export class WsSessionSupervisorDefectError extends Data.TaggedError(
-  "WsSessionSupervisorDefectError",
+export class WsSessionSupervisorFatalError extends Data.TaggedError(
+  "WsSessionSupervisorFatalError",
 )<{
   readonly cause: Cause.Cause<unknown>
 }> {
-  readonly [WsSessionSupervisorDefectErrorTypeId] =
-    WsSessionSupervisorDefectErrorTypeId
-  static is = hasErrorTypeId<WsSessionSupervisorDefectError>(
-    WsSessionSupervisorDefectErrorTypeId,
+  readonly [WsSessionSupervisorFatalErrorTypeId] =
+    WsSessionSupervisorFatalErrorTypeId
+  static is = hasErrorTypeId<WsSessionSupervisorFatalError>(
+    WsSessionSupervisorFatalErrorTypeId,
   )
 }
 
-export type WsSessionSupervisorPolicy<Failure> = {
-  readonly reconnectDelayMillisFirst?: number | undefined
-  readonly reconnectDelayMillisMax?: number | undefined
-  readonly reconnectJitter?: boolean | undefined
+export type WsSessionSupervisorPolicy<Failure> = WsSessionBackoffPolicy & {
   readonly isRetryable?: ((failure: Failure) => boolean) | undefined
 }
-
-/**
- * Where a supervisor is. `attempt` counts the supervisor's own activations.
- *
- * - `connecting`: the first activation is in progress.
- * - `live`: the current session is connected and set up.
- * - `recovering`: automatic reconnect only. The live session's socket
- *   dropped and the SDK is reconnecting it on its own, then replaying its
- *   subscriptions; the session is retained (published as waiting) and its
- *   cache stays readable, while its calls fail with `CallNotSentError`.
- *   `reconnectAttempt` and `reconnectDelayMillis` are the SDK's next
- *   scheduled attempt (`0` and `0` for a socket found closed before the SDK
- *   noticed, and a zero delay while the replay runs); `reason` is the error
- *   that ended the previous socket or attempt, or names the replay.
- * - `reconnecting`: the session ended (or an activation failed) and the
- *   supervisor is building a replacement after its own backoff.
- * - `fatal`: retrying cannot help; the supervisor stopped.
- */
-export type WsSessionSupervisorPhase<Failure> =
-  | {
-      readonly status: "connecting"
-      readonly attempt: number
-    }
-  | {
-      readonly status: "live"
-      readonly attempt: number
-    }
-  | {
-      readonly status: "recovering"
-      readonly attempt: number
-      readonly reconnectAttempt: number
-      readonly reconnectDelayMillis: number
-      readonly reason: string
-    }
-  | {
-      readonly status: "reconnecting"
-      readonly attempt: number
-      readonly failure: Failure
-    }
-  | {
-      readonly status: "fatal"
-      readonly attempt: number
-      readonly failure: Failure
-    }
 
 export type WsSessionSupervisorHandle<Session, Failure> = {
   readonly session: SubscriptionRef.SubscriptionRef<
@@ -181,13 +118,13 @@ export type WsSessionSupervisor<
 
 export type WsSessionSupervisorFailure<ValidationError, SetupError> =
   | ConnectionLostError
-  | WsSessionSupervisorDefectError
+  | WsSessionSupervisorFatalError
   | WsConnectError
   | ValidationError
   | SubscriptionFailure
   | SetupError
 
-type SessionSetup<
+export type SessionSetup<
   Module extends AnyModuleSpec,
   ErrorContext,
   RelationContext,
@@ -204,10 +141,18 @@ type SupervisorOptions<
   AcquireError,
   SetupError,
   SetupR,
-> = WsSessionSupervisorPolicy<
-  ConnectionLostError | AcquireError | SubscriptionFailure | SetupError
-> & {
-  readonly acquire: Effect.Effect<
+> = {
+  readonly backoff: ReturnType<typeof backoffBounds>
+  readonly isRetryable: (
+    failure:
+      | ConnectionLostError
+      | AcquireError
+      | SubscriptionFailure
+      | SetupError,
+  ) => boolean
+  readonly acquire: (
+    onTokenUnavailable: TokenUnavailable,
+  ) => Effect.Effect<
     WsSession<Module, ErrorContext, RelationContext>,
     AcquireError,
     Scope.Scope
@@ -231,53 +176,6 @@ type SupervisorOptions<
     | SessionSetup<Module, ErrorContext, RelationContext, SetupError, SetupR>
     | undefined
 }
-
-const reconnectSchedule = (options: {
-  readonly reconnectDelayMillisFirst: number
-  readonly reconnectDelayMillisMax: number
-  readonly reconnectJitter: boolean
-}) => {
-  const exponential = Schedule.exponential(
-    Duration.millis(options.reconnectDelayMillisFirst),
-  )
-  const withJitter = options.reconnectJitter
-    ? exponential.pipe(Schedule.jittered)
-    : exponential
-  return withJitter.pipe(
-    Schedule.modifyDelay(({ duration }) =>
-      Effect.succeed(
-        Duration.min(
-          duration,
-          Duration.millis(options.reconnectDelayMillisMax),
-        ),
-      ),
-    ),
-  )
-}
-
-const publishRetryingSession = <Session, Failure>(
-  ref: SubscriptionRef.SubscriptionRef<
-    AsyncResult.AsyncResult<Session, Failure>
-  >,
-  failure: Failure,
-) =>
-  SubscriptionRef.update(ref, (current) =>
-    AsyncResult.isSuccess(current)
-      ? AsyncResult.waiting(current)
-      : AsyncResult.failWithPrevious(failure, {
-          previous: Option.some(current),
-          waiting: true,
-        }),
-  )
-
-const recoveringPhase = (attempt: number, recovery: RecoveringConnection) =>
-  ({
-    status: "recovering",
-    attempt,
-    reconnectAttempt: recovery.reconnectAttempt,
-    reconnectDelayMillis: recovery.reconnectDelayMillis,
-    reason: recovery.reason,
-  }) as const
 
 /**
  * Throws a `TypeError` when a reconnect hook is configured for a connection
@@ -316,7 +214,7 @@ const makeWithAcquire = <
     ErrorContext,
     RelationContext,
     | ConnectionLostError
-    | WsSessionSupervisorDefectError
+    | WsSessionSupervisorFatalError
     | AcquireError
     | SubscriptionFailure
     | SetupError
@@ -330,108 +228,151 @@ const makeWithAcquire = <
       | AcquireError
       | SubscriptionFailure
       | SetupError
-    type Failure = AttemptFailure | WsSessionSupervisorDefectError
+    type Failure = AttemptFailure | WsSessionSupervisorFatalError
     type Session = WsSession<Module, ErrorContext, RelationContext>
 
-    const session = yield* SubscriptionRef.make<
-      AsyncResult.AsyncResult<Session, Failure>
-    >(AsyncResult.initial<Session, Failure>(true))
-    const phase = yield* SubscriptionRef.make<
-      WsSessionSupervisorPhase<Failure>
-    >({ status: "connecting", attempt: 1 })
-    const attemptRef = yield* Ref.make(0)
-    const failureLastRef = yield* Ref.make<AttemptFailure | undefined>(
-      undefined,
-    )
-    const failureAfterLiveRef = yield* Ref.make<Option.Option<AttemptFailure>>(
-      Option.none(),
-    )
+    const start = supervisorStart<Session, Failure>()
+    const session = yield* SubscriptionRef.make(start.session)
+    const phase = yield* SubscriptionRef.make(start.phase)
+    const stateRef = yield* Ref.make(start)
+    const rows = makeSupervisedRows()
     const subscriptionTargets = [...(options.subscriptionTargets ?? [])]
-    const reconnectDelayMillisFirst = Math.max(
-      1,
-      options.reconnectDelayMillisFirst ?? reconnectDelayMillisFirstDefault,
-    )
-    const reconnectDelayMillisMax = Math.max(
-      reconnectDelayMillisFirst,
-      options.reconnectDelayMillisMax ?? reconnectDelayMillisMaxDefault,
-    )
-    const schedule = reconnectSchedule({
-      reconnectDelayMillisFirst,
-      reconnectDelayMillisMax,
-      reconnectJitter: options.reconnectJitter ?? true,
-    })
+    const backoff = yield* makeSupervisorBackoff(options.backoff)
     const isRetryable = options.isRetryable ?? (() => true)
 
-    const publishFailure = Effect.fn(function* (failure: AttemptFailure) {
-      const attempt = yield* Ref.get(attemptRef)
-      yield* Ref.set(failureLastRef, failure)
-      yield* publishRetryingSession(session, failure)
-      yield* SubscriptionRef.set(phase, {
-        status: "reconnecting",
-        attempt,
-        failure,
-      })
+    // Publishing happens one event at a time and always finishes, so the refs
+    // cannot end up behind the state, and an event that waited its turn is judged
+    // when its turn comes. Token refreshes get here on fibers of their own.
+    const publishing = yield* Semaphore.make(1)
+    const inOrder = <E, R>(step: Effect.Effect<void, E, R>) =>
+      publishing.withPermit(step).pipe(Effect.uninterruptible)
+
+    // Both refs are views of the state, so nothing else writes them. The session
+    // goes first, so a reader that sees `live` finds the session there.
+    const apply = Effect.fn(function* (
+      event: SupervisorEvent<Session, Failure>,
+    ) {
+      const before = yield* Ref.get(stateRef)
+      const after = supervise(before, event)
+      yield* Ref.set(stateRef, after)
+      if (after.session !== before.session) {
+        yield* SubscriptionRef.set(session, after.session)
+      }
+      if (after.phase !== before.phase) {
+        yield* SubscriptionRef.set(phase, after.phase)
+      }
     })
 
-    const publishLive = Effect.fn(function* (
-      current: Session,
-      attempt: number,
-    ) {
-      yield* Ref.set(failureLastRef, undefined)
-      yield* SubscriptionRef.set(session, AsyncResult.success(current))
-      yield* SubscriptionRef.set(phase, { status: "live", attempt })
-    })
+    const publish = (event: SupervisorEvent<Session, Failure>) =>
+      inOrder(apply(event))
 
-    // The session stays published (as waiting, like a supervisor reconnect
-    // retains its previous session) while the SDK recovers its connection.
-    const publishRecovering = Effect.fn(function* (
-      current: Session,
-      attempt: number,
-      recovery: RecoveringConnection,
-    ) {
-      yield* SubscriptionRef.set(
-        session,
-        AsyncResult.waiting(AsyncResult.success(current)),
+    // Whatever else ended an attempt, its connection outlived the end: watching
+    // for a revocation stops when another failure wins, and the connection stays
+    // up until its scope has closed. An attempt only fails after that close, so
+    // the answer here is final, and a revocation nobody heard still takes the rows.
+    const applyUnheardRevocation = (failure: Failure) =>
+      Effect.suspend(() =>
+        rows.isRevoked()
+          ? apply({ kind: "rowsRevoked", ending: Cause.fail(failure) })
+          : Effect.void,
       )
-      yield* SubscriptionRef.set(phase, recoveringPhase(attempt, recovery))
-    })
+
+    const publishFailure = (failure: AttemptFailure) =>
+      inOrder(
+        backoff.liveEnded.pipe(
+          Effect.andThen(applyUnheardRevocation(failure)),
+          Effect.andThen(apply({ kind: "attemptFailed", failure })),
+        ),
+      )
+
+    // Whether the session is still fit to show is asked here, in turn. Asked any
+    // earlier, a revocation could land after the answer and be undone by this.
+    const publishLive = (current: Session, isCurrent: () => boolean) =>
+      inOrder(
+        Effect.suspend(() =>
+          isCurrent()
+            ? backoff.liveBegan.pipe(
+                Effect.andThen(apply({ kind: "live", session: current })),
+              )
+            : Effect.void,
+        ),
+      )
+
+    const publishRecovering = (recovery: RecoveringConnection) =>
+      inOrder(
+        backoff.liveEnded.pipe(
+          Effect.andThen(apply({ kind: "recovering", recovery })),
+        ),
+      )
 
     // How a session's terminal invalidation ends its attempt. A token
     // refresh that died is a defect, like one during acquisition: the
     // supervisor parks fatal rather than retry it.
     const endedBy = (
       invalidation: ConnectionInvalidation,
-    ): Effect.Effect<never, AttemptFailure> => {
+    ): Cause.Cause<AttemptFailure> => {
       switch (invalidation.kind) {
         case "identityChanged":
-          return Effect.fail(
+          return Cause.fail(
             options.connectFailure(
               new ConnectionIdentityChangedError({ raw: invalidation.message }),
             ),
           )
+        case "protocolError":
         case "credentialsFailed":
-          return Effect.fail(options.connectFailure(invalidation.cause))
+          return Cause.fail(options.connectFailure(invalidation.cause))
         case "credentialsDefect":
-          return Effect.die(invalidation.defect)
+          return Cause.die(invalidation.defect)
         case "lost":
-          return Effect.fail(
+          return Cause.fail(
             new ConnectionLostError({ raw: invalidation.message }),
           )
       }
     }
 
+    const failSession = (
+      invalidation: ConnectionInvalidation,
+      ending: Cause.Cause<AttemptFailure>,
+    ): Effect.Effect<never, AttemptFailure> =>
+      invalidationRevokesRows(invalidation.kind)
+        ? publish({ kind: "rowsRevoked", ending }).pipe(
+            Effect.andThen(Effect.failCause(ending)),
+          )
+        : Effect.failCause(ending)
+
+    // What vouched for a retained session, which only lost its socket, is gone: a
+    // token a replacement could not get, or a replacement that is someone else. A
+    // signed-out user and a passing failure of the token source look the same
+    // from here, so the rows go, from every session a reader may still hold them
+    // from. Those connections have already ended, so their refs need telling.
+    const revokeRows = Effect.fn(function* (
+      invalidation: RevokingInvalidation,
+      ending: Cause.Cause<AttemptFailure>,
+    ) {
+      rows.revoke(invalidation)
+      yield* publish({ kind: "rowsRevoked", ending })
+    })
+    const acquire = options.acquire((invalidation) =>
+      revokeRows(invalidation, endedBy(invalidation)),
+    )
+
+    // Only the identity decides whether a replacement inherits what came before.
+    // A different one is no failure of the replacement, which starts clean: a
+    // client with no token gets a new identity on every connection. So the session
+    // signal reports what happened to the old session, a lost connection, and
+    // `ConnectionIdentityChangedError` keeps meaning a supervisor that parked.
+    const adoptSession = Effect.fn(function* (acquired: Session) {
+      if (rows.belongToAnother(acquired.identity)) {
+        yield* revokeRows(
+          { kind: "identityChanged", message: anotherIdentityMessage },
+          Cause.fail(new ConnectionLostError({ raw: anotherIdentityMessage })),
+        )
+      }
+      rows.adopt(acquired.identity, connectionStateFor(acquired.connection))
+    })
+
     const runAttempt = Effect.gen(function* () {
-      const attempt = yield* Ref.getAndUpdate(
-        attemptRef,
-        (current) => current + 1,
-      ).pipe(Effect.map((current) => current + 1))
-      const failureLast = yield* Ref.get(failureLastRef)
-      yield* SubscriptionRef.set(
-        phase,
-        failureLast === undefined
-          ? { status: "connecting", attempt }
-          : { status: "reconnecting", attempt, failure: failureLast },
-      )
+      yield* publish({ kind: "attemptStarted" })
 
       // A subscription target the server ends after it applied (an automatic
       // reconnect's replay refused it) ends the session: it would otherwise
@@ -446,16 +387,21 @@ const makeWithAcquire = <
             )
           })
       const endedFailure = (invalidation: ConnectionInvalidation) =>
-        targetFailure === undefined
-          ? endedBy(invalidation)
-          : Effect.fail(targetFailure)
+        failSession(
+          invalidation,
+          targetFailure === undefined
+            ? endedBy(invalidation)
+            : Cause.fail(targetFailure),
+        )
       const failOnInvalidationOf = (current: Session) =>
         current.awaitInvalidation().pipe(Effect.flatMap(endedFailure))
 
       const attemptScope = yield* Scope.make()
       return yield* Effect.gen(function* () {
         const current = yield* Effect.gen(function* () {
-          const acquired = yield* options.acquire
+          const acquired = yield* acquire
+          // The attempt's bound must not fall between revoking and withdrawing.
+          yield* adoptSession(acquired).pipe(Effect.uninterruptible)
           yield* Effect.forEach(
             subscriptionTargets,
             subscribeTarget(acquired),
@@ -478,11 +424,11 @@ const makeWithAcquire = <
             if (options.automaticReconnect) {
               connectionStateFor(acquired.connection).enableRecovery()
             }
-            yield* publishLive(acquired, attempt)
+            yield* publishLive(acquired, () => !acquired.isInvalidated())
           }).pipe(Effect.raceFirst(failOnInvalidation))
           return acquired
         }).pipe(
-          Effect.timeoutOrElse({
+          withDeadline({
             duration: Duration.millis(options.activationTimeoutMillis),
             orElse: () => Effect.fail(options.activationTimeoutFailure()),
           }),
@@ -500,61 +446,37 @@ const makeWithAcquire = <
             hookTimeoutMillis: options.activationTimeoutMillis,
             hookTimeoutFailure: options.activationTimeoutFailure,
             ended: failOnInvalidationOf(current),
-            publishLive: publishLive(current, attempt),
-            publishRecovering: (recovery) =>
-              publishRecovering(current, attempt, recovery),
+            publishLive: (isCurrent) => publishLive(current, isCurrent),
+            publishRecovering,
           })
         }
         yield* recheckOnPageResume(() => {
           current.isInvalidated()
         })
-        const invalidation = yield* current.awaitInvalidation()
-        return yield* Effect.flip(endedFailure(invalidation))
+        return yield* current
+          .awaitInvalidation()
+          .pipe(Effect.flatMap(endedFailure))
       }).pipe(
         Effect.provideService(Scope.Scope, attemptScope),
         Effect.onExit((exit) => Scope.close(attemptScope, exit)),
       )
-    }).pipe(Effect.tap(publishFailure), Effect.tapError(publishFailure))
+    }).pipe(Effect.tapError(publishFailure))
 
-    const runRetryEpoch = Ref.getAndSet(
-      failureAfterLiveRef,
-      Option.none(),
-    ).pipe(
-      Effect.flatMap(
-        Option.match({
-          onNone: () => runAttempt,
-          onSome: (failure) => Effect.fail(failure),
-        }),
-      ),
-      Effect.retry({ schedule, while: isRetryable }),
-      Effect.tap((failure) =>
-        Ref.set(failureAfterLiveRef, Option.some(failure)),
-      ),
-    )
+    const publishFatal = (failure: Failure) =>
+      inOrder(
+        applyUnheardRevocation(failure).pipe(
+          Effect.andThen(apply({ kind: "parked", failure })),
+        ),
+      ).pipe(Effect.andThen(Effect.never))
 
-    const publishFatal = Effect.fn(function* (failure: Failure) {
-      const attempt = yield* Ref.get(attemptRef)
-      const previous = yield* SubscriptionRef.get(session)
-      yield* SubscriptionRef.set(
-        session,
-        AsyncResult.failWithPrevious(failure, {
-          previous: Option.some(previous),
-        }),
-      )
-      yield* SubscriptionRef.set(phase, {
-        status: "fatal",
-        attempt,
-        failure,
-      })
-      return yield* Effect.never
-    })
-
-    const run = runRetryEpoch.pipe(
-      Effect.forever,
+    // An attempt only ever ends in failure, a live session's end included, so
+    // one retry spans the supervisor's life and its schedule every session.
+    const run = runAttempt.pipe(
+      Effect.retry({ schedule: backoff.schedule, while: isRetryable }),
       Effect.catch(publishFatal),
       Effect.catchCause((cause) =>
         Cause.hasDies(cause)
-          ? publishFatal(new WsSessionSupervisorDefectError({ cause }))
+          ? publishFatal(new WsSessionSupervisorFatalError({ cause }))
           : Effect.failCause(cause),
       ),
     )
@@ -574,8 +496,12 @@ const makeWithAcquire = <
 export const wsSupervisorIsRetryableDefault = (failure: unknown): boolean =>
   !GeneratedArtifactShapeError.is(failure) &&
   !(
+    SubscriptionInvalidatedError.is(failure) && failure.kind === "protocolError"
+  ) &&
+  !(
     WsConnectError.is(failure) &&
-    (WsUnsupportedBuilderFeatureError.is(failure.cause) ||
+    (WsProtocolError.is(failure.cause) ||
+      WsUnsupportedBuilderFeatureError.is(failure.cause) ||
       ConnectionIdentityChangedError.is(failure.cause))
   )
 
@@ -614,6 +540,8 @@ export const makeSupervisorFromModulePlan = <
 }) => {
   const automaticReconnect = options.config.automaticReconnect !== undefined
   assertReconnectHookReachable(options.onAutomaticReconnect, automaticReconnect)
+  const backoff = backoffBounds(options.policy)
+  const timeBounds = wsTimeBounds(options.config)
   return makeWithAcquire<
     Module,
     ErrorContext,
@@ -622,24 +550,27 @@ export const makeSupervisorFromModulePlan = <
     SetupError,
     SetupR
   >({
-    acquire: makeScopedFromModulePlan<Module, ErrorContext, RelationContext>({
-      plan: options.plan,
-      config: options.config,
-      recoveryEnabledByOwner: true,
-    }),
+    acquire: (onTokenUnavailable) =>
+      makeScopedFromModulePlan<Module, ErrorContext, RelationContext>({
+        plan: options.plan,
+        config: options.config,
+        timeBounds,
+        recoveryEnabledByOwner: true,
+        onTokenUnavailable,
+      }),
     activationTimeoutFailure: () =>
       new WsConnectError({
         cause: new WsConnectTimeoutError({
-          timeoutMillis: options.config.connectTimeoutMillis,
+          timeoutMillis: timeBounds.connectMillis,
         }),
       }),
-    activationTimeoutMillis: options.config.connectTimeoutMillis,
+    activationTimeoutMillis: timeBounds.connectMillis,
     connectFailure: connectFailureOf,
     automaticReconnect,
     subscriptionTargets: options.subscriptionTargets,
     setup: options.setup,
     onAutomaticReconnect: options.onAutomaticReconnect,
-    ...options.policy,
+    backoff,
     isRetryable: options.policy?.isRetryable ?? wsSupervisorIsRetryableDefault,
   })
 }
@@ -718,6 +649,8 @@ export const makeSupervisorGenerated = <
 }) => {
   const automaticReconnect = options.config.automaticReconnect !== undefined
   assertReconnectHookReachable(options.onAutomaticReconnect, automaticReconnect)
+  const backoff = backoffBounds(options.policy)
+  const timeBounds = wsTimeBounds(options.config)
   const config: InternalWsBuilderConfig<
     Module,
     GeneratedErrorContextOf<ConnectionClass>,
@@ -727,6 +660,7 @@ export const makeSupervisorGenerated = <
     ...generated(options.config),
     [GeneratedArtifactValidation]: true,
   }
+  const plan = makeModulePlan(options.module)
   return makeWithAcquire<
     Module,
     GeneratedErrorContextOf<ConnectionClass>,
@@ -735,29 +669,32 @@ export const makeSupervisorGenerated = <
     SetupError,
     SetupR
   >({
-    acquire: makeScopedFromModulePlan<
-      Module,
-      GeneratedErrorContextOf<ConnectionClass>,
-      RelationContext,
-      GeneratedArtifactShapeError
-    >({
-      plan: makeModulePlan(options.module),
-      config,
-      recoveryEnabledByOwner: true,
-    }),
+    acquire: (onTokenUnavailable) =>
+      makeScopedFromModulePlan<
+        Module,
+        GeneratedErrorContextOf<ConnectionClass>,
+        RelationContext,
+        GeneratedArtifactShapeError
+      >({
+        plan,
+        config,
+        timeBounds,
+        recoveryEnabledByOwner: true,
+        onTokenUnavailable,
+      }),
     activationTimeoutFailure: () =>
       new WsConnectError({
         cause: new WsConnectTimeoutError({
-          timeoutMillis: options.config.connectTimeoutMillis,
+          timeoutMillis: timeBounds.connectMillis,
         }),
       }),
-    activationTimeoutMillis: options.config.connectTimeoutMillis,
+    activationTimeoutMillis: timeBounds.connectMillis,
     connectFailure: connectFailureOf,
     automaticReconnect,
     subscriptionTargets: options.subscriptionTargets,
     setup: options.setup,
     onAutomaticReconnect: options.onAutomaticReconnect,
-    ...options.policy,
+    backoff,
     isRetryable: options.policy?.isRetryable ?? wsSupervisorIsRetryableDefault,
   })
 }

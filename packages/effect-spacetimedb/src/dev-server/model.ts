@@ -104,6 +104,10 @@ export type DevServerOptions = {
   readonly binaries?: SpacetimeBinarySource
   readonly versionRequirement?: string
   readonly logDir?: string
+  /**
+   * Where the CLI and standalone run, and so what a relative `bundlePath` is
+   * relative to. Defaults to `process.cwd()`.
+   */
   readonly cwd?: string
   readonly clear?: {
     readonly publishFirst?: ClearMode | undefined

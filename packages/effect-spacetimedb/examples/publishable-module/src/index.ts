@@ -6,6 +6,7 @@ import { MembershipFunctionsLive } from "./memberships/live"
 import { ExampleModule } from "./module"
 import { NativeRangeFunctionsLive } from "./native-ranges/live"
 import { ScheduleFunctionsLive } from "./schedules/live"
+import { SerialEntryFunctionsLive } from "./serial-entries/live"
 import { ThingFunctionsLive, ThingRoutesLive } from "./things/live"
 import { UserFunctionsLive } from "./users/live"
 import { WebhookRoutesLive } from "./webhooks/live"
@@ -19,6 +20,7 @@ const compiled = build(
     LifecycleFunctionsLive,
     MembershipFunctionsLive,
     NativeRangeFunctionsLive,
+    SerialEntryFunctionsLive,
     ThingFunctionsLive,
     ScheduleFunctionsLive,
     ThingRoutesLive,

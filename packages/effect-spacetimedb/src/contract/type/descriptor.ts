@@ -77,7 +77,7 @@ export type StdbCustomDescriptor = {
   readonly item?: AnyValueType
 }
 
-export type StdbTypeDescriptor =
+export type TypeDescriptor =
   | StdbPrimitiveDescriptor
   | StdbStructDescriptor
   | StdbArrayDescriptor
@@ -106,7 +106,7 @@ const requiredMetadata = <Key extends "item" | "length" | "lazy" | "values">(
   return value as NonNullable<ValueTypeInfo[Key]>
 }
 
-const descriptorFromInfo = (info: ValueTypeInfo): StdbTypeDescriptor => {
+const descriptorFromInfo = (info: ValueTypeInfo): TypeDescriptor => {
   switch (info.kind) {
     case "struct":
       return {
@@ -195,9 +195,7 @@ const descriptorFromInfo = (info: ValueTypeInfo): StdbTypeDescriptor => {
   }
 }
 
-export const describe = (
-  value: AnyValueType,
-): StdbTypeDescriptor | undefined => {
+export const describe = (value: AnyValueType): TypeDescriptor | undefined => {
   const info = typeInfo(value)
   return info != null ? descriptorFromInfo(info) : undefined
 }

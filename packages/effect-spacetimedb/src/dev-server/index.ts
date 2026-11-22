@@ -357,7 +357,7 @@ export const makeDevServer: (options: DevServerOptions) => DevServerEffect =
   Effect.fn(function* (options: DevServerOptions) {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const cwd = options.cwd ?? os.tmpdir()
+    const cwd = options.cwd ?? globalThis.process.cwd()
     const binaries = yield* resolveBinaries(options.binaries, cwd)
     yield* assertVersionRequirement(binaries, options.versionRequirement, cwd)
     const port = yield* reservePort

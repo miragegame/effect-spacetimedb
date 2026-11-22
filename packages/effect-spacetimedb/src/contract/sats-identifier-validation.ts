@@ -1,27 +1,15 @@
 import * as Data from "effect/Data"
-import * as Match from "effect/Match"
 
-export class StdbTypeIdentifierError extends Data.TaggedError(
-  "StdbTypeIdentifierError",
+export class StdbTypeIdentifierDefect extends Data.TaggedError(
+  "StdbTypeIdentifierDefect",
 )<{
   readonly identifier: string
   readonly reason: "invalid" | "reserved"
 }> {
-  override get message(): string {
-    return Match.value(this.reason).pipe(
-      Match.when(
-        "reserved",
-        () =>
-          `SATS type identifier ${this.identifier} is reserved for generated types`,
-      ),
-      Match.when(
-        "invalid",
-        () =>
-          `SATS type identifier ${this.identifier} must be a valid SATS type identifier`,
-      ),
-      Match.exhaustive,
-    )
-  }
+  override readonly message =
+    this.reason === "reserved"
+      ? `SATS type identifier ${this.identifier} is reserved for generated types`
+      : `SATS type identifier ${this.identifier} must be a valid SATS type identifier`
 }
 
 export const SatsTypeIdentifierPattern = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -112,7 +100,7 @@ const GeneratedClientReservedIdentifiers = new Set(["params", "returnType"])
 
 export const validateSatsTypeIdentifier = (identifier: string): void => {
   if (!SatsTypeIdentifierPattern.test(identifier)) {
-    throw new StdbTypeIdentifierError({ identifier, reason: "invalid" })
+    throw new StdbTypeIdentifierDefect({ identifier, reason: "invalid" })
   }
 
   if (
@@ -121,6 +109,6 @@ export const validateSatsTypeIdentifier = (identifier: string): void => {
     GeneratedClientReservedIdentifiers.has(identifier) ||
     GeneratedClientHelperIdentifierPattern.test(identifier)
   ) {
-    throw new StdbTypeIdentifierError({ identifier, reason: "reserved" })
+    throw new StdbTypeIdentifierDefect({ identifier, reason: "reserved" })
   }
 }

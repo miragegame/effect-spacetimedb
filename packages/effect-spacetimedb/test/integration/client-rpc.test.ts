@@ -6,7 +6,7 @@ import * as EffectVitest from "@effect/vitest"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Stdb from "effect-spacetimedb"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import * as Schema from "effect/Schema"
 import { fixtureCallDurationMax } from "../helpers/transport-bounds"
 const { expect } = EffectVitest
@@ -62,12 +62,12 @@ const expectSameExit = (
 }
 
 const makeHttpClient = () =>
-  StdbTesting.ClientHttp.make({
+  StdbInternal.ClientHttp.make({
     module: FullModule,
     ...HttpConfig,
   })
 
-const makeWsClient = (options?: {
+const wsMake = (options?: {
   readonly callReducerWithParams?: (
     reducerName: string,
     paramsType: unknown,
@@ -80,7 +80,7 @@ const makeWsClient = (options?: {
     returnType: unknown,
   ) => Promise<unknown>
 }) =>
-  StdbTesting.ClientWs.make({
+  StdbInternal.ClientWs.make({
     module: FullModule,
     connection: noopWsConnection,
     transport: {
@@ -146,7 +146,7 @@ describe("shared client rpc", (it) => {
     () =>
       Effect.gen(function* () {
         const http = makeHttpClient()
-        const ws = makeWsClient()
+        const ws = wsMake()
 
         expect(Object.keys(http.reducers)).toEqual([
           "userRequire",
@@ -161,25 +161,32 @@ describe("shared client rpc", (it) => {
           "reducers",
           "procedures",
           "httpHandlers",
-          "FullCallables",
-          "FullHttp",
+          "groups",
         ])
-        expect(Object.keys(http.FullCallables.reducers)).toEqual([
+        expect(Object.keys(http.groups.FullCallables.reducers)).toEqual([
           "userRequire",
           "userUpsert",
         ])
-        expect(Object.keys(http.FullCallables.procedures)).toEqual(["userGet"])
-        expect(Object.keys(http.FullCallables.httpHandlers)).toEqual([])
-        expect(Object.keys(http.FullHttp.reducers)).toEqual([])
-        expect(Object.keys(http.FullHttp.procedures)).toEqual([])
-        expect(Object.keys(http.FullHttp.httpHandlers)).toEqual([
+        expect(Object.keys(http.groups.FullCallables.procedures)).toEqual([
+          "userGet",
+        ])
+        expect(Object.keys(http.groups.FullCallables.httpHandlers)).toEqual([])
+        expect(Object.keys(http.groups.FullHttp.reducers)).toEqual([])
+        expect(Object.keys(http.groups.FullHttp.procedures)).toEqual([])
+        expect(Object.keys(http.groups.FullHttp.httpHandlers)).toEqual([
           "rotateToken",
           "stripeWebhook",
         ])
         expect(Object.keys(ws.reducers)).toEqual(["userRequire", "userUpsert"])
         expect(Object.keys(ws.procedures)).toEqual(["userGet"])
-        expect(Object.hasOwn(ws, "FullCallables")).toBe(false)
-        expect(Object.hasOwn(ws, "FullHttp")).toBe(false)
+        expect(Object.keys(ws.groups)).toEqual(["FullCallables"])
+        expect(ws.groups.FullCallables).toBe(ws.groups.FullCallables)
+        expect(ws.groups.FullCallables.procedures.userGet).toBe(
+          ws.procedures.userGet,
+        )
+        expect(ws.groups.FullCallables.reducers.userUpsert.raw).toBe(
+          ws.reducers.userUpsert.raw,
+        )
       }),
   )
 
@@ -190,19 +197,21 @@ describe("shared client rpc", (it) => {
         const http = makeHttpClient()
 
         expect(Object.getPrototypeOf(http)).toBeNull()
-        expect(http.FullCallables).toBe(http.FullCallables)
-        expect(Object.getPrototypeOf(http.FullCallables)).toBeNull()
-        expect(Object.getPrototypeOf(http.FullCallables.reducers)).toBeNull()
-        expect(http.FullCallables.reducers.userRequire).toBe(
+        expect(http.groups.FullCallables).toBe(http.groups.FullCallables)
+        expect(Object.getPrototypeOf(http.groups.FullCallables)).toBeNull()
+        expect(
+          Object.getPrototypeOf(http.groups.FullCallables.reducers),
+        ).toBeNull()
+        expect(http.groups.FullCallables.reducers.userRequire).toBe(
           http.reducers.userRequire,
         )
-        expect(http.FullCallables.reducers.userRequire.raw).toBe(
+        expect(http.groups.FullCallables.reducers.userRequire.raw).toBe(
           http.reducers.userRequire.raw,
         )
-        expect(http.FullCallables.procedures.userGet).toBe(
+        expect(http.groups.FullCallables.procedures.userGet).toBe(
           http.procedures.userGet,
         )
-        expect(http.FullHttp.httpHandlers.rotateToken).toBe(
+        expect(http.groups.FullHttp.httpHandlers.rotateToken).toBe(
           http.httpHandlers.rotateToken,
         )
 
@@ -211,7 +220,9 @@ describe("shared client rpc", (it) => {
           ["reducers", "procedures", "httpHandlers"] as const,
           (kind) => {
             const groupedKeys = new Set(
-              groupIds.flatMap((groupId) => Object.keys(http[groupId][kind])),
+              groupIds.flatMap((groupId) =>
+                Object.keys(http.groups[groupId][kind]),
+              ),
             )
             expect([...groupedKeys].sort()).toEqual(
               Object.keys(http[kind]).sort(),
@@ -235,7 +246,7 @@ describe("shared client rpc", (it) => {
       expect(Object.keys(group.procedures)).toEqual(["userGet"])
 
       const encoded = Schema.encodeSync(
-        StdbTesting.procedureEnvelope(
+        StdbInternal.procedureEnvelope(
           FullModule.procedures.userGet.returns,
           FullModule.procedures.userGet.errors!,
         ).schema,
@@ -263,7 +274,7 @@ describe("shared client rpc", (it) => {
           procedureGroups: {},
           httpGroups: {},
         } as const
-        const http = StdbTesting.ClientHttp.make({
+        const http = StdbInternal.ClientHttp.make({
           module: HandDefinedModule,
           ...HttpConfig,
         })
@@ -272,6 +283,7 @@ describe("shared client rpc", (it) => {
           "reducers",
           "procedures",
           "httpHandlers",
+          "groups",
         ])
         expect(Object.keys(http.reducers)).toEqual([
           "userRequire",
@@ -285,45 +297,40 @@ describe("shared client rpc", (it) => {
       }),
   )
 
-  it.effect(
-    "keeps reserved group keys ahead of constructed framework keys",
-    () =>
-      Effect.gen(function* () {
-        const ZeroGroupModule = {
-          ...FullModule,
-          name: "reserved_key_drift_guard",
-          reducerGroups: {},
-          procedureGroups: {},
-          httpGroups: {},
-        } as const
-        const http = StdbTesting.ClientHttp.make({
-          module: ZeroGroupModule,
-          ...HttpConfig,
-        })
-        const ws = makeWsClient()
-        const reserved = new Set(Stdb.RESERVED_GROUP_CLIENT_KEYS)
-
-        yield* Effect.forEach(
-          [...Object.keys(http), ...Object.keys(ws)],
-          (key) => {
-            expect(reserved.has(key), key).toBe(true)
-            return Effect.void
-          },
-          { discard: true },
-        )
-      }),
-  )
+  it("separates group names from session and transport members", () => {
+    const module = {
+      ...FullModule,
+      reducerGroups: { userUpsert: "cache", userRequire: "groups" },
+      procedureGroups: { userGet: "identity" },
+    } as const
+    const ws = StdbInternal.ClientWs.make<typeof module, unknown, unknown>({
+      module,
+      connection: {
+        db: noopWsConnection.db,
+        subscriptionBuilder: () => {
+          throw new Error("Unexpected subscription")
+        },
+      },
+      transport: noopWsTransport,
+    })
+    const http = StdbInternal.ClientHttp.make({ module, ...HttpConfig })
+    expect(ws.groups.cache.reducers.userUpsert).toBe(ws.reducers.userUpsert)
+    expect(ws.groups.groups.reducers.userRequire).toBe(ws.reducers.userRequire)
+    expect(http.groups.identity.procedures.userGet).toBe(
+      http.procedures.userGet,
+    )
+  })
 
   it.effect(
     "shares declared procedure domain-error lowering across http and ws",
     () =>
       Effect.gen(function* () {
-        const encoded = yield* StdbTesting.ContractError.encodeString(
+        const encoded = yield* StdbInternal.ContractError.encodeString(
           ExampleErrors,
           UserMissing.make({ userId: "missing" as never }),
         )
         const encodedEnvelope = Schema.encodeSync(
-          StdbTesting.procedureEnvelope(
+          StdbInternal.procedureEnvelope(
             FullModule.procedures.userGet.returns,
             FullModule.procedures.userGet.errors!,
           ).schema,
@@ -335,7 +342,7 @@ describe("shared client rpc", (it) => {
         expect(typeof encoded).toBe("string")
 
         const http = makeHttpClient()
-        const ws = makeWsClient({
+        const ws = wsMake({
           callProcedureWithParams: () => Promise.resolve(encodedEnvelope),
         })
 
@@ -362,13 +369,13 @@ describe("shared client rpc", (it) => {
     "shares declared reducer domain-error lowering across http and ws",
     () =>
       Effect.gen(function* () {
-        const encoded = yield* StdbTesting.ContractError.encodeString(
+        const encoded = yield* StdbInternal.ContractError.encodeString(
           ExampleErrors,
           UserMissing.make({ userId: "missing" as never }),
         )
 
         const http = makeHttpClient()
-        const ws = makeWsClient({
+        const ws = wsMake({
           callReducerWithParams: () => Promise.reject(new SenderError(encoded)),
         })
 
@@ -397,7 +404,7 @@ describe("shared client rpc", (it) => {
     () =>
       Effect.gen(function* () {
         const http = makeHttpClient()
-        const ws = makeWsClient()
+        const ws = wsMake()
 
         const httpExit = yield* runHttpExit(
           http.reducers.userUpsert({
@@ -422,7 +429,7 @@ describe("shared client rpc", (it) => {
     () =>
       Effect.gen(function* () {
         const http = makeHttpClient()
-        const ws = makeWsClient()
+        const ws = wsMake()
 
         const httpExit = yield* runHttpExit(
           http.procedures.userGet({
@@ -443,7 +450,7 @@ describe("shared client rpc", (it) => {
   it.effect("shares raw reducer rejection lowering across http and ws", () =>
     Effect.gen(function* () {
       const http = makeHttpClient()
-      const ws = makeWsClient({
+      const ws = wsMake({
         callReducerWithParams: () => Promise.reject("transport boom"),
       })
 
@@ -472,7 +479,7 @@ describe("shared client rpc", (it) => {
     () =>
       Effect.gen(function* () {
         const http = makeHttpClient()
-        const ws = makeWsClient({
+        const ws = wsMake({
           callReducerWithParams: () => Promise.reject(new SocketBoomError()),
         })
 
@@ -494,13 +501,13 @@ describe("shared client rpc", (it) => {
         if (Exit.isFailure(httpExit)) {
           expect(
             Option.getOrUndefined(Cause.findErrorOption(httpExit.cause)),
-          ).toBeInstanceOf(StdbTesting.TransportError)
+          ).toBeInstanceOf(StdbInternal.TransportError)
         }
 
         if (Exit.isFailure(wsExit)) {
           expect(
             Option.getOrUndefined(Cause.findErrorOption(wsExit.cause)),
-          ).toBeInstanceOf(StdbTesting.TransportError)
+          ).toBeInstanceOf(StdbInternal.TransportError)
         }
       }),
   )
@@ -510,7 +517,7 @@ describe("shared client rpc", (it) => {
     () =>
       Effect.gen(function* () {
         const http = makeHttpClient()
-        const ws = makeWsClient({
+        const ws = wsMake({
           callProcedureWithParams: () =>
             Promise.reject("not-a-declared-domain-error"),
         })
@@ -546,7 +553,7 @@ describe("shared client rpc", (it) => {
           },
         )
         const http = makeHttpClient()
-        const ws = makeWsClient({
+        const ws = wsMake({
           callReducerWithParams: () =>
             Promise.reject(new SenderError(encodedUnknown)),
         })
@@ -591,7 +598,7 @@ describe("shared client rpc", (it) => {
           userId: "user-1",
         })
         const http = makeHttpClient()
-        const ws = makeWsClient({
+        const ws = wsMake({
           callReducerWithParams: () =>
             Promise.reject(new SenderError(legacyTaggedJson)),
         })
@@ -636,7 +643,7 @@ describe("shared client rpc", (it) => {
         const encodedMalformed =
           encodeMalformedDeclaredErrorEnvelope("UserMissing")
         const http = makeHttpClient()
-        const ws = makeWsClient({
+        const ws = wsMake({
           callReducerWithParams: () =>
             Promise.reject(new SenderError(encodedMalformed)),
         })
@@ -661,7 +668,7 @@ describe("shared client rpc", (it) => {
         if (Exit.isFailure(httpExit)) {
           expect(
             Option.getOrUndefined(Cause.findErrorOption(httpExit.cause)),
-          ).toBeInstanceOf(StdbTesting.StdbDecodeError)
+          ).toBeInstanceOf(StdbInternal.StdbDecodeError)
           expect(
             Option.getOrUndefined(Cause.findErrorOption(httpExit.cause)),
           ).toMatchObject({
@@ -681,7 +688,7 @@ describe("shared client rpc", (it) => {
           "UserMissing",
         )
         const http = makeHttpClient()
-        const ws = makeWsClient({
+        const ws = wsMake({
           callReducerWithParams: () =>
             Promise.reject(new SenderError(encodedMismatch)),
         })
@@ -725,7 +732,7 @@ describe("shared client rpc", (it) => {
           },
         )
         const encodedEnvelope = Schema.encodeSync(
-          StdbTesting.procedureEnvelope(
+          StdbInternal.procedureEnvelope(
             FullModule.procedures.userGet.returns,
             FullModule.procedures.userGet.errors!,
           ).schema,
@@ -734,7 +741,7 @@ describe("shared client rpc", (it) => {
           value: encodedUnknown,
         })
         const http = makeHttpClient()
-        const ws = makeWsClient({
+        const ws = wsMake({
           callProcedureWithParams: () => Promise.resolve(encodedEnvelope),
         })
 
@@ -773,7 +780,7 @@ describe("shared client rpc", (it) => {
         const encodedMalformed =
           encodeMalformedDeclaredErrorEnvelope("UserMissing")
         const encodedEnvelope = Schema.encodeSync(
-          StdbTesting.procedureEnvelope(
+          StdbInternal.procedureEnvelope(
             FullModule.procedures.userGet.returns,
             FullModule.procedures.userGet.errors!,
           ).schema,
@@ -782,7 +789,7 @@ describe("shared client rpc", (it) => {
           value: encodedMalformed,
         })
         const http = makeHttpClient()
-        const ws = makeWsClient({
+        const ws = wsMake({
           callProcedureWithParams: () => Promise.resolve(encodedEnvelope),
         })
 
@@ -805,7 +812,7 @@ describe("shared client rpc", (it) => {
         if (Exit.isFailure(httpExit)) {
           expect(
             Option.getOrUndefined(Cause.findErrorOption(httpExit.cause)),
-          ).toBeInstanceOf(StdbTesting.StdbDecodeError)
+          ).toBeInstanceOf(StdbInternal.StdbDecodeError)
           expect(
             Option.getOrUndefined(Cause.findErrorOption(httpExit.cause)),
           ).toMatchObject({
@@ -825,7 +832,7 @@ describe("shared client rpc", (it) => {
           "UserMissing",
         )
         const encodedEnvelope = Schema.encodeSync(
-          StdbTesting.procedureEnvelope(
+          StdbInternal.procedureEnvelope(
             FullModule.procedures.userGet.returns,
             FullModule.procedures.userGet.errors!,
           ).schema,
@@ -834,7 +841,7 @@ describe("shared client rpc", (it) => {
           value: encodedMismatch,
         })
         const http = makeHttpClient()
-        const ws = makeWsClient({
+        const ws = wsMake({
           callProcedureWithParams: () => Promise.resolve(encodedEnvelope),
         })
 
@@ -875,7 +882,7 @@ describe("shared client rpc", (it) => {
             userId: "user-1",
           },
         )
-        const ws = makeWsClient({
+        const ws = wsMake({
           callProcedureWithParams: () =>
             Promise.reject(new SenderError(encodedUnknown)),
         })
@@ -903,7 +910,7 @@ describe("shared client rpc", (it) => {
     "adds callable context to ws callable argument decode failures",
     () =>
       Effect.gen(function* () {
-        const ws = makeWsClient({
+        const ws = wsMake({
           callProcedureWithParams: (_name, _paramsType, params) =>
             Promise.resolve(params),
         })
@@ -922,7 +929,7 @@ describe("shared client rpc", (it) => {
           const failure = Option.getOrUndefined(
             reducerExit.cause.pipe(Cause.findErrorOption),
           )
-          expect(failure).toBeInstanceOf(StdbTesting.StdbDecodeError)
+          expect(failure).toBeInstanceOf(StdbInternal.StdbDecodeError)
           expect(String(failure)).toContain("callable=user_require")
           expect(String(failure)).toContain("op=encodeArgs")
         }
@@ -931,7 +938,7 @@ describe("shared client rpc", (it) => {
           const failure = Option.getOrUndefined(
             procedureExit.cause.pipe(Cause.findErrorOption),
           )
-          expect(failure).toBeInstanceOf(StdbTesting.StdbDecodeError)
+          expect(failure).toBeInstanceOf(StdbInternal.StdbDecodeError)
           expect(String(failure)).toContain("callable=user_get")
           expect(String(failure)).toContain("op=encodeArgs")
         }

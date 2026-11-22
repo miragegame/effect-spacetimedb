@@ -12,6 +12,7 @@ import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as TestClock from "effect/testing/TestClock"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
+import * as Atom from "effect/reactivity/Atom"
 import * as AtomRegistry from "effect/reactivity/AtomRegistry"
 import { Identity } from "spacetimedb"
 
@@ -19,20 +20,31 @@ const { describe, expect, it } = EffectVitest
 
 import * as Stdb from "effect-spacetimedb"
 import {
-  canonicalRowKey,
-  canonicalTableGroupKey,
-  canonicalTableKey,
-  canonicalValueKey,
-  connectAndSubscribe,
+  wsConnectAndSubscribe,
+  SubscriptionInvalidatedError,
+  type ConnectionInvalidationKind,
   subscribeRowRef as subscribeRawRowRef,
   type RowRefValue,
 } from "effect-spacetimedb/client"
 import {
-  rowAtomFamily,
-  tableAtomFamily,
-  tableGroupAtomFamily,
+  canonicalRowKey,
+  canonicalTableGroupKey,
+  canonicalTableKey,
+  canonicalValueKey,
+  subscribeSnapshotRef,
+} from "effect-spacetimedb/testing/internal"
+import {
+  wsRowAtomFamily,
+  wsTableAtomFamily,
+  wsTableGroupAtomFamily,
+  wsTableGroupSnapshotAtom,
 } from "effect-spacetimedb/client/atom"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
+import {
+  connectionStateFor,
+  type WsConnectionState,
+} from "../../src/client/connection-state.ts"
+import { failureOver } from "../../src/client/table-ref.ts"
 import { FullModule, UserId, UserName } from "../fixtures/full-module"
 import type { SdkEventContext } from "../helpers/sdk-event-oracle"
 import {
@@ -58,10 +70,12 @@ type UnknownEventContext = {
   }
 }
 type EventContext = SdkEventContext | UnknownEventContext
-type UserRow = StdbTesting.TableRow<typeof FullModule.tables.user>
-type PresenceRow = StdbTesting.TableRow<typeof FullModule.tables.presenceEvent>
-type RawUserRow = StdbTesting.ClientWs.WsTableRow<typeof FullModule.tables.user>
-type RawPresenceRow = StdbTesting.ClientWs.WsTableRow<
+type UserRow = StdbInternal.TableRow<typeof FullModule.tables.user>
+type PresenceRow = StdbInternal.TableRow<typeof FullModule.tables.presenceEvent>
+type RawUserRow = StdbInternal.ClientWs.WsTableRow<
+  typeof FullModule.tables.user
+>
+type RawPresenceRow = StdbInternal.ClientWs.WsTableRow<
   typeof FullModule.tables.presenceEvent
 >
 const decodeUserId = Schema.decodeUnknownSync(UserId)
@@ -98,14 +112,14 @@ const groupFriend = Stdb.table("groupFriend", {
     name: Stdb.string(UserName),
   },
 })
-const GroupModule = Stdb.StdbModule.make("grouped", {}).addTables(
+const GroupModule = Stdb.Module.make("grouped", {}).addTables(
   groupUser,
   groupFriend,
 ).spec
-type RawGroupUserRow = StdbTesting.ClientWs.WsTableRow<
+type RawGroupUserRow = StdbInternal.ClientWs.WsTableRow<
   typeof GroupModule.tables.groupUser
 >
-type RawGroupFriendRow = StdbTesting.ClientWs.WsTableRow<
+type RawGroupFriendRow = StdbInternal.ClientWs.WsTableRow<
   typeof GroupModule.tables.groupFriend
 >
 const rawGroupUserRow = (id: string, name: string): RawGroupUserRow =>
@@ -184,6 +198,8 @@ const awaitRefState = <A>(
     Stream.runHead,
     Effect.map(Option.getOrThrow),
   )
+const errorOf = <A, E>(result: AsyncResult.AsyncResult<A, E>) =>
+  AsyncResult.error(result).pipe(Option.getOrUndefined)
 const takeFromQueueUntil = <A>(
   queue: Queue.Queue<A>,
   predicate: (value: A) => boolean,
@@ -264,7 +280,7 @@ const makeClient = (
   const connection = makeConnection(userRelation, eventRelation)
   return {
     ...connection,
-    client: StdbTesting.ClientWs.make({
+    client: StdbInternal.ClientWs.make({
       module: FullModule,
       connection: connection.connection,
     }),
@@ -277,7 +293,7 @@ const collectBlockedUserInsertIds = Effect.fn(function* (params: {
   >
   readonly applySubscription: () => void
   readonly awaitSubscribeCalls: (count: 1) => Effect.Effect<void>
-  readonly streamOptions?: StdbTesting.ClientWs.WsStreamOptions
+  readonly streamOptions?: StdbInternal.ClientWs.WsStreamOptions
   readonly rows: ReadonlyArray<{
     readonly id: string
     readonly name: string
@@ -323,7 +339,7 @@ const collectBlockedUserInsertIds = Effect.fn(function* (params: {
           reducerContext("userUpsert"),
           rawUserRow(row.id, row.name),
         ),
-      catch: (cause) => new StdbTesting.SubscriptionTransportError({ cause }),
+      catch: (cause) => new StdbInternal.SubscriptionTransportError({ cause }),
     }),
   )
   yield* Deferred.succeed(releaseFirstChange, undefined)
@@ -333,6 +349,15 @@ const collectBlockedUserInsertIds = Effect.fn(function* (params: {
   )
 })
 
+// The SDK delivers an entire batch before returning control to the consumer.
+const emitInsertBatch = <Row>(
+  relation: { readonly emitInsert: (context: EventContext, row: Row) => void },
+  context: EventContext,
+  rows: ReadonlyArray<Row>,
+): void => {
+  for (const row of rows) relation.emitInsert(context, row)
+}
+
 const collectBlockedUserOverflowExit = Effect.fn(function* (params: {
   readonly client: ReturnType<typeof makeClient>["client"]
   readonly userRelation: ReturnType<
@@ -340,7 +365,7 @@ const collectBlockedUserOverflowExit = Effect.fn(function* (params: {
   >
   readonly applySubscription: () => void
   readonly awaitSubscribeCalls: (count: 1) => Effect.Effect<void>
-  readonly streamOptions?: StdbTesting.ClientWs.WsStreamOptions
+  readonly streamOptions?: StdbInternal.ClientWs.WsStreamOptions
   readonly eventCount: number
 }) {
   const firstChangeSeen = yield* Deferred.make<void>()
@@ -391,7 +416,7 @@ const collectBlockedPresenceEventOverflowExit = Effect.fn(function* (params: {
     readonly userId: string
     readonly kind: "joined" | "left"
   }>
-  readonly streamOptions?: StdbTesting.ClientWs.WsStreamOptions
+  readonly streamOptions?: StdbInternal.ClientWs.WsStreamOptions
   readonly subscriptionMessage?: string
 }) {
   const firstEventSeen = yield* Deferred.make<void>()
@@ -432,7 +457,7 @@ const collectBlockedPresenceEventOverflowExit = Effect.fn(function* (params: {
           reducerContext("presenceEmit"),
           rawPresenceRow(row.userId, row.kind),
         ),
-      catch: (cause) => new StdbTesting.SubscriptionTransportError({ cause }),
+      catch: (cause) => new StdbInternal.SubscriptionTransportError({ cause }),
     }),
   )
   yield* Deferred.succeed(releaseFirstEvent, undefined)
@@ -449,12 +474,12 @@ const expectEventTableOverflowFailure = (
   }
 
   const failure = exit.cause.pipe(Cause.findErrorOption, Option.getOrUndefined)
-  expect(failure).toBeInstanceOf(StdbTesting.SubscriptionTransportError)
-  if (failure instanceof StdbTesting.SubscriptionTransportError) {
+  expect(failure).toBeInstanceOf(StdbInternal.SubscriptionTransportError)
+  if (failure instanceof StdbInternal.SubscriptionTransportError) {
     expect(failure.cause).toBeInstanceOf(
-      StdbTesting.EventTableStreamOverflowError,
+      StdbInternal.EventTableStreamOverflowError,
     )
-    if (failure.cause instanceof StdbTesting.EventTableStreamOverflowError) {
+    if (failure.cause instanceof StdbInternal.EventTableStreamOverflowError) {
       expect(failure.cause.bufferSize).toBe(bufferSize)
     }
   }
@@ -469,10 +494,10 @@ const expectTableOverflowFailure = (
     throw new Error("Expected table overflow failure")
   }
   const failure = exit.cause.pipe(Cause.findErrorOption, Option.getOrUndefined)
-  expect(failure).toBeInstanceOf(StdbTesting.SubscriptionTransportError)
-  if (failure instanceof StdbTesting.SubscriptionTransportError) {
-    expect(failure.cause).toBeInstanceOf(StdbTesting.TableStreamOverflowError)
-    if (failure.cause instanceof StdbTesting.TableStreamOverflowError) {
+  expect(failure).toBeInstanceOf(StdbInternal.SubscriptionTransportError)
+  if (failure instanceof StdbInternal.SubscriptionTransportError) {
+    expect(failure.cause).toBeInstanceOf(StdbInternal.TableStreamOverflowError)
+    if (failure.cause instanceof StdbInternal.TableStreamOverflowError) {
       expect(failure.cause.bufferSize).toBe(bufferSize)
     }
   }
@@ -585,6 +610,349 @@ describe("relation streams", () => {
 
         expect(AsyncResult.isFailure(SubscriptionRef.getUnsafe(ref))).toBe(true)
       }).pipe(Effect.scoped),
+  )
+  it.effect("table, row and group refs keep their rows when invalidated", () =>
+    Effect.gen(function* () {
+      const userRelation = makeSnapshotRelation<RawUserRow, EventContext>([])
+      const eventRelation = makeRelation<RawPresenceRow, EventContext>()
+      const { client, connection, applySubscription, awaitSubscribeCalls } =
+        makeClient(userRelation.handle, eventRelation.handle)
+      const tableRef = yield* client.subscribeTableRef("user")
+      const rowRef = yield* client.subscribeRowRef(
+        "user",
+        decodeUserId("user-1"),
+      )
+      const groupRef = yield* client.subscribeTableGroupRef(["user"] as const)
+
+      yield* awaitSubscribeCalls(1)
+      userRelation.replaceRows([rawUserRow("user-1", "Ada")])
+      applySubscription()
+      yield* Effect.all([
+        awaitRefState(tableRef, AsyncResult.isSuccess),
+        awaitRefState(rowRef, AsyncResult.isSuccess),
+        awaitRefState(groupRef, AsyncResult.isSuccess),
+      ])
+
+      connectionStateFor(connection).invalidateFromTransport("socket dropped")
+      const [table, row, group] = yield* Effect.all([
+        awaitRefState(tableRef, AsyncResult.isFailure),
+        awaitRefState(rowRef, AsyncResult.isFailure),
+        awaitRefState(groupRef, AsyncResult.isFailure),
+      ])
+
+      const ada = { id: "user-1", name: "Ada" }
+      expect(AsyncResult.value(table)).toEqual(Option.some([ada]))
+      expect(AsyncResult.value(row)).toEqual(Option.some(Option.some(ada)))
+      expect(AsyncResult.value(group)).toEqual(Option.some({ user: [ada] }))
+      expect(errorOf(table)).toBeInstanceOf(SubscriptionInvalidatedError)
+      expect(errorOf(row)).toBeInstanceOf(SubscriptionInvalidatedError)
+      expect(errorOf(group)).toBeInstanceOf(SubscriptionInvalidatedError)
+    }).pipe(Effect.scoped),
+  )
+  it.effect(
+    "snapshot atoms keep their rows when the session is invalidated",
+    () =>
+      Effect.gen(function* () {
+        const userRelation = makeSnapshotRelation<RawUserRow, EventContext>([])
+        const eventRelation = makeRelation<RawPresenceRow, EventContext>()
+        const { client, connection, applySubscription, awaitSubscribeCalls } =
+          makeClient(userRelation.handle, eventRelation.handle)
+        const registry = AtomRegistry.make()
+        yield* Effect.addFinalizer(() => Effect.succeed(registry.dispose()))
+        const snapshots = wsTableGroupSnapshotAtom(
+          Atom.make(AsyncResult.success<typeof client, never>(client)),
+          ["user"] as const,
+        )
+        const results =
+          yield* Queue.unbounded<AsyncResult.AsyncResult<unknown, unknown>>()
+        const unsubscribe = registry.subscribe(
+          snapshots,
+          (result) => {
+            Queue.offerUnsafe(results, result)
+          },
+          { immediate: true },
+        )
+        yield* Effect.addFinalizer(() => Effect.succeed(unsubscribe()))
+
+        yield* awaitSubscribeCalls(1)
+        userRelation.replaceRows([rawUserRow("user-1", "Ada")])
+        applySubscription()
+        yield* takeFromQueueUntil(results, AsyncResult.isSuccess)
+
+        connectionStateFor(connection).invalidateFromTransport("socket dropped")
+        const failed = yield* takeFromQueueUntil(results, AsyncResult.isFailure)
+
+        expect(errorOf(failed)).toBeInstanceOf(SubscriptionInvalidatedError)
+        expect(AsyncResult.value(failed)).toEqual(
+          Option.some({ user: [{ id: "user-1", name: "Ada" }] }),
+        )
+      }).pipe(Effect.scoped),
+  )
+  describe("when a connection ends in a way that revokes its rows", () => {
+    const ends = [
+      {
+        kind: "identityChanged",
+        end: (state: WsConnectionState) =>
+          state.invalidateForIdentityChange("identity changed"),
+      },
+      {
+        kind: "credentialsFailed",
+        end: (state: WsConnectionState) =>
+          state.invalidateForCredentials({
+            kind: "credentialsFailed",
+            message: "token failed",
+            cause: "no token",
+          }),
+      },
+      {
+        kind: "credentialsDefect",
+        end: (state: WsConnectionState) =>
+          state.invalidateForCredentials({
+            kind: "credentialsDefect",
+            message: "token died",
+            defect: "corrupt",
+          }),
+      },
+    ] as const
+
+    const expectRevoked = <A, E>(
+      result: AsyncResult.AsyncResult<A, E>,
+      kind: ConnectionInvalidationKind,
+    ) => {
+      expect(AsyncResult.value(result)).toEqual(Option.none())
+      expect(errorOf(result)).toMatchObject({
+        _tag: "SubscriptionInvalidatedError",
+        kind,
+      })
+    }
+
+    for (const { kind, end } of ends) {
+      it.effect(`${kind} takes the rows from table, row and group refs`, () =>
+        Effect.gen(function* () {
+          const userRelation = makeSnapshotRelation<RawUserRow, EventContext>(
+            [],
+          )
+          const eventRelation = makeRelation<RawPresenceRow, EventContext>()
+          const { client, connection, applySubscription, awaitSubscribeCalls } =
+            makeClient(userRelation.handle, eventRelation.handle)
+          const tableRef = yield* client.subscribeTableRef("user")
+          const rowRef = yield* client.subscribeRowRef(
+            "user",
+            decodeUserId("user-1"),
+          )
+          const groupRef = yield* client.subscribeTableGroupRef([
+            "user",
+          ] as const)
+
+          yield* awaitSubscribeCalls(1)
+          userRelation.replaceRows([rawUserRow("user-1", "Ada")])
+          applySubscription()
+          yield* Effect.all([
+            awaitRefState(tableRef, AsyncResult.isSuccess),
+            awaitRefState(rowRef, AsyncResult.isSuccess),
+            awaitRefState(groupRef, AsyncResult.isSuccess),
+          ])
+
+          end(connectionStateFor(connection))
+          const [table, row, group] = yield* Effect.all([
+            awaitRefState(tableRef, AsyncResult.isFailure),
+            awaitRefState(rowRef, AsyncResult.isFailure),
+            awaitRefState(groupRef, AsyncResult.isFailure),
+          ])
+
+          expectRevoked(table, kind)
+          expectRevoked(row, kind)
+          expectRevoked(group, kind)
+        }).pipe(Effect.scoped),
+      )
+    }
+
+    it.effect("a loss revoked later takes the rows as well", () =>
+      Effect.gen(function* () {
+        const userRelation = makeSnapshotRelation<RawUserRow, EventContext>([])
+        const eventRelation = makeRelation<RawPresenceRow, EventContext>()
+        const { client, connection, applySubscription, awaitSubscribeCalls } =
+          makeClient(userRelation.handle, eventRelation.handle)
+        const tableRef = yield* client.subscribeTableRef("user")
+        const rowRef = yield* client.subscribeRowRef(
+          "user",
+          decodeUserId("user-1"),
+        )
+        const groupRef = yield* client.subscribeTableGroupRef(["user"] as const)
+
+        yield* awaitSubscribeCalls(1)
+        userRelation.replaceRows([rawUserRow("user-1", "Ada")])
+        applySubscription()
+        yield* Effect.all([
+          awaitRefState(tableRef, AsyncResult.isSuccess),
+          awaitRefState(rowRef, AsyncResult.isSuccess),
+          awaitRefState(groupRef, AsyncResult.isSuccess),
+        ])
+
+        const state = connectionStateFor(connection)
+        state.invalidateFromTransport("socket dropped")
+        const [lostTable, lostRow, lostGroup] = yield* Effect.all([
+          awaitRefState(tableRef, AsyncResult.isFailure),
+          awaitRefState(rowRef, AsyncResult.isFailure),
+          awaitRefState(groupRef, AsyncResult.isFailure),
+        ])
+        expect(Option.isSome(AsyncResult.value(lostTable))).toBe(true)
+        expect(Option.isSome(AsyncResult.value(lostRow))).toBe(true)
+        expect(Option.isSome(AsyncResult.value(lostGroup))).toBe(true)
+        expect(state.isRevoked()).toBe(false)
+
+        state.rowLineage().revoke({
+          kind: "credentialsFailed",
+          message: "no token",
+          cause: "no token",
+        })
+        const noRows = <A, E>(result: AsyncResult.AsyncResult<A, E>) =>
+          result.pipe(AsyncResult.value, Option.isNone)
+        const [table, row, group] = yield* Effect.all([
+          awaitRefState(tableRef, noRows),
+          awaitRefState(rowRef, noRows),
+          awaitRefState(groupRef, noRows),
+        ])
+
+        expectRevoked(table, "credentialsFailed")
+        expectRevoked(row, "credentialsFailed")
+        expectRevoked(group, "credentialsFailed")
+        expect(state.isRevoked()).toBe(true)
+      }).pipe(Effect.scoped),
+    )
+
+    it.effect("the rows leave the table, row and group atoms", () =>
+      Effect.gen(function* () {
+        const userRelation = makeSnapshotRelation<RawUserRow, EventContext>([])
+        const eventRelation = makeRelation<RawPresenceRow, EventContext>()
+        const { client, connection, applySubscription, awaitSubscribeCalls } =
+          makeClient(userRelation.handle, eventRelation.handle)
+        const registry = AtomRegistry.make()
+        yield* Effect.addFinalizer(() => Effect.succeed(registry.dispose()))
+        const session = Atom.make(
+          AsyncResult.success<typeof client, never>(client),
+        )
+        const watch = Effect.fn(function* (
+          atom: Atom.Atom<AsyncResult.AsyncResult<unknown, unknown>>,
+        ) {
+          const results =
+            yield* Queue.unbounded<AsyncResult.AsyncResult<unknown, unknown>>()
+          const unsubscribe = registry.subscribe(
+            atom,
+            (result) => {
+              Queue.offerUnsafe(results, result)
+            },
+            { immediate: true },
+          )
+          yield* Effect.addFinalizer(() => Effect.succeed(unsubscribe()))
+          return results
+        })
+        const watched = yield* Effect.forEach(
+          [
+            wsTableGroupSnapshotAtom(session, ["user"] as const),
+            wsTableAtomFamily(client)("user"),
+            wsRowAtomFamily(client)("user", decodeUserId("user-1")),
+          ],
+          watch,
+        )
+
+        yield* awaitSubscribeCalls(1)
+        userRelation.replaceRows([rawUserRow("user-1", "Ada")])
+        applySubscription()
+        yield* Effect.forEach(watched, (results) =>
+          takeFromQueueUntil(results, AsyncResult.isSuccess),
+        )
+
+        connectionStateFor(connection).invalidateForIdentityChange(
+          "identity changed",
+        )
+        const failed = yield* Effect.forEach(watched, (results) =>
+          takeFromQueueUntil(results, AsyncResult.isFailure),
+        )
+
+        expect(failed.map((result) => AsyncResult.value(result))).toEqual(
+          failed.map(() => Option.none()),
+        )
+      }).pipe(Effect.scoped),
+    )
+
+    it.effect("a ref that had already failed loses the rows it kept", () =>
+      Effect.gen(function* () {
+        const userRelation = makeSnapshotRelation<RawUserRow, EventContext>([])
+        const eventRelation = makeRelation<RawPresenceRow, EventContext>()
+        const {
+          client,
+          connection,
+          applySubscription,
+          awaitSubscribeCalls,
+          failSubscription,
+        } = makeClient(userRelation.handle, eventRelation.handle)
+        const tableRef = yield* client.subscribeTableRef("user")
+        const groupRef = yield* client.subscribeTableGroupRef(["user"] as const)
+
+        yield* awaitSubscribeCalls(1)
+        userRelation.replaceRows([rawUserRow("user-1", "Ada")])
+        applySubscription()
+        yield* Effect.all([
+          awaitRefState(tableRef, AsyncResult.isSuccess),
+          awaitRefState(groupRef, AsyncResult.isSuccess),
+        ])
+
+        failSubscription("rejected", new Error("rejected"))
+        const failed = yield* awaitRefState(tableRef, AsyncResult.isFailure)
+        expect(Option.isSome(AsyncResult.value(failed))).toBe(true)
+        yield* awaitRefState(groupRef, AsyncResult.isFailure)
+
+        connectionStateFor(connection).invalidateForIdentityChange(
+          "identity changed",
+        )
+        const noRows = (result: AsyncResult.AsyncResult<unknown, unknown>) =>
+          result.pipe(AsyncResult.value, Option.isNone)
+        yield* Effect.all([
+          awaitRefState(tableRef, noRows),
+          awaitRefState(groupRef, noRows),
+        ])
+      }).pipe(Effect.scoped),
+    )
+
+    it("a later failure does not bring the rows back", () => {
+      const revoked = failureOver(
+        AsyncResult.success<string, unknown>("rows"),
+        Cause.fail(
+          new SubscriptionInvalidatedError({
+            raw: "identity changed",
+            kind: "identityChanged",
+          }),
+        ),
+      )
+
+      expect(AsyncResult.value(revoked)).toEqual(Option.none())
+      expect(
+        AsyncResult.value(failureOver(revoked, Cause.fail("read failed"))),
+      ).toEqual(Option.none())
+    })
+  })
+  it.effect("a failed snapshot read keeps the last snapshot", () =>
+    Effect.gen(function* () {
+      let readsLeft = 1
+      const signals = yield* Queue.unbounded<"applied" | "changed">()
+      const ref = yield* subscribeSnapshotRef({
+        readSnapshot: Effect.suspend(() => {
+          readsLeft = readsLeft - 1
+          return readsLeft >= 0
+            ? Effect.succeed("first")
+            : Effect.fail("unreadable")
+        }),
+        signals: Stream.fromQueue(signals),
+      })
+
+      Queue.offerUnsafe(signals, "applied")
+      yield* awaitRefState(ref, AsyncResult.isSuccess)
+      Queue.offerUnsafe(signals, "changed")
+      const failed = yield* awaitRefState(ref, AsyncResult.isFailure)
+
+      expect(AsyncResult.value(failed)).toEqual(Option.some("first"))
+    }).pipe(Effect.scoped),
   )
   it.effect("row refs publish predicate defects as failures", () =>
     Effect.gen(function* () {
@@ -747,9 +1115,9 @@ describe("relation streams", () => {
     const userRelation = makeSnapshotRelation<RawUserRow, EventContext>([])
     const eventRelation = makeRelation<RawPresenceRow, EventContext>()
     const { client } = makeClient(userRelation.handle, eventRelation.handle)
-    const rows = rowAtomFamily<typeof FullModule>(client)
-    const tables = tableAtomFamily<typeof FullModule>(client)
-    const groupClient = StdbTesting.ClientWs.make({
+    const rows = wsRowAtomFamily<typeof FullModule>(client)
+    const tables = wsTableAtomFamily<typeof FullModule>(client)
+    const groupClient = StdbInternal.ClientWs.make({
       module: GroupModule,
       connection: {
         db: {
@@ -769,16 +1137,16 @@ describe("relation streams", () => {
         }),
       },
     })
-    const groups = tableGroupAtomFamily<typeof GroupModule>(groupClient)
+    const groups = wsTableGroupAtomFamily<typeof GroupModule>(groupClient)
 
     expect(rows("user", decodeUserId("user-1"))).toBe(
       rows("user", decodeUserId("user-1")),
     )
     expect(tables("user")).toBe(
-      tableAtomFamily<typeof FullModule>(client)("user"),
+      wsTableAtomFamily<typeof FullModule>(client)("user"),
     )
     expect(groups(["groupFriend", "groupUser"] as const)).toBe(
-      tableGroupAtomFamily<typeof GroupModule>(groupClient)([
+      wsTableGroupAtomFamily<typeof GroupModule>(groupClient)([
         "groupUser",
         "groupFriend",
         "groupUser",
@@ -795,7 +1163,7 @@ describe("relation streams", () => {
       )
       const registry = AtomRegistry.make()
       yield* Effect.addFinalizer(() => Effect.succeed(registry.dispose()))
-      const rows = rowAtomFamily<typeof FullModule>(client)
+      const rows = wsRowAtomFamily<typeof FullModule>(client)
       const rowAValues: Array<RowRefValue<UserRow>> = []
       const rowBValues: Array<RowRefValue<UserRow>> = []
       const rowAQueue = yield* Queue.unbounded<RowRefValue<UserRow>>()
@@ -948,7 +1316,6 @@ describe("relation streams", () => {
       const waiting = yield* client
         .waitUntil("user", (row) => row.id === "user-2", {
           timeout: "1 second",
-          interval: "1 millis",
         })
         .pipe(Effect.forkScoped)
 
@@ -990,14 +1357,14 @@ describe("relation streams", () => {
       yield* TestClock.adjust("20 millis")
       const error = yield* Fiber.join(waiting).pipe(Effect.flip)
 
-      expect(error).toBeInstanceOf(StdbTesting.WaitUntilTimeoutError)
-      if (error instanceof StdbTesting.WaitUntilTimeoutError) {
+      expect(error).toBeInstanceOf(StdbInternal.WaitUntilTimeoutError)
+      if (error instanceof StdbInternal.WaitUntilTimeoutError) {
         expect(error.snapshotSizeLast).toBe(2)
         expect(error.table).toBe("user")
       }
     }).pipe(Effect.scoped),
   )
-  it.effect("connectAndSubscribe acquires each target before returning", () =>
+  it.effect("wsConnectAndSubscribe acquires each target before returning", () =>
     Effect.gen(function* () {
       const userRelation = makeSnapshotRelation<RawUserRow, EventContext>([])
       const eventRelation = makeRelation<RawPresenceRow, EventContext>()
@@ -1026,7 +1393,7 @@ describe("relation streams", () => {
         disconnect: () => undefined,
         subscriptionBuilder: () => builder,
       }
-      const client = StdbTesting.ClientWs.make({
+      const client = StdbInternal.ClientWs.make({
         module: FullModule,
         connection,
       })
@@ -1037,7 +1404,7 @@ describe("relation streams", () => {
         token: "token",
       }
 
-      const connected = yield* connectAndSubscribe(Effect.succeed(session), [
+      const connected = yield* wsConnectAndSubscribe(Effect.succeed(session), [
         Full.targets.tables.user,
       ])
 
@@ -1219,7 +1586,7 @@ describe("relation streams", () => {
             }
           },
         }
-        const client = StdbTesting.ClientWs.make({
+        const client = StdbInternal.ClientWs.make({
           module: GroupModule,
           connection: {
             db: {
@@ -1422,7 +1789,7 @@ describe("relation streams", () => {
             })
           },
           catch: (cause) =>
-            new StdbTesting.SubscriptionTransportError({ cause }),
+            new StdbInternal.SubscriptionTransportError({ cause }),
         })
 
         yield* Deferred.await(secondSnapshotSeen)
@@ -1457,7 +1824,7 @@ describe("relation streams", () => {
           },
         }),
       }
-      const client = StdbTesting.ClientWs.make({
+      const client = StdbInternal.ClientWs.make({
         module: FullModule,
         connection,
       })
@@ -1471,7 +1838,7 @@ describe("relation streams", () => {
           Cause.findErrorOption,
           Option.getOrUndefined,
         )
-        expect(failure).toBeInstanceOf(StdbTesting.SubscriptionTransportError)
+        expect(failure).toBeInstanceOf(StdbInternal.SubscriptionTransportError)
       }
     }).pipe(Effect.scoped),
   )
@@ -1486,7 +1853,7 @@ describe("relation streams", () => {
           eventRelation.handle,
         )
         const changeDeferred =
-          yield* Deferred.make<StdbTesting.TableChange<UserRow>>()
+          yield* Deferred.make<StdbInternal.TableChange<UserRow>>()
         yield* client.streamTable("user").pipe(
           Stream.runForEach((change) =>
             Deferred.succeed(changeDeferred, change).pipe(Effect.asVoid),
@@ -1515,7 +1882,7 @@ describe("relation streams", () => {
       const subscribeStarted = yield* Queue.unbounded<void>()
       const unsubscribed = new Set<number>()
       let subscribeCalls = 0
-      const client = StdbTesting.ClientWs.make({
+      const client = StdbInternal.ClientWs.make({
         module: FullModule,
         connection: {
           db: makeFullModuleWsDb<EventContext>(),
@@ -1595,7 +1962,7 @@ describe("relation streams", () => {
             }
           },
         }
-        const connection: StdbTesting.WsConnectionLike<
+        const connection: StdbInternal.WsConnectionLike<
           typeof FullModule,
           unknown,
           EventContext
@@ -1603,7 +1970,7 @@ describe("relation streams", () => {
           db: makeFullModuleWsDb<EventContext>(),
           subscriptionBuilder: () => staleBuilder,
         }
-        const client = StdbTesting.ClientWs.make({
+        const client = StdbInternal.ClientWs.make({
           module: FullModule,
           connection,
         })
@@ -1799,52 +2166,55 @@ describe("relation streams", () => {
         ).toEqual(["user-0", "user-1", "user-2"])
       }).pipe(Effect.scoped),
   )
-  it.effect("fails on overflow when no custom table buffer is supplied", () =>
+  it.effect("delivers every insert in a large initial subscription", () =>
     Effect.gen(function* () {
-      const userRelation = makeRelation<RawUserRow, EventContext>()
-      const eventRelation = makeRelation<RawPresenceRow, EventContext>()
-      const { client, applySubscription, awaitSubscribeCalls } = makeClient(
-        userRelation.handle,
-        eventRelation.handle,
+      const rows = Array.from({ length: 2049 }, (_, i) =>
+        rawUserRow(`user-${i}`, "Ada"),
       )
-      expectTableOverflowFailure(
-        yield* collectBlockedUserOverflowExit({
-          client,
-          userRelation,
-          applySubscription,
-          awaitSubscribeCalls,
-          eventCount: 1026,
-        }),
-        1024,
+      const users = makeSnapshotRelation<RawUserRow, EventContext>(rows)
+      const events = makeRelation<RawPresenceRow, EventContext>()
+      const { client, awaitSubscribeCalls, applySubscription } = makeClient(
+        users.handle,
+        events.handle,
       )
+      const fiber = yield* client
+        .streamTable("user")
+        .pipe(Stream.take(rows.length), Stream.runCollect, Effect.forkScoped)
+      yield* awaitSubscribeCalls(1)
+      const context = subscribeAppliedContext()
+      emitInsertBatch(users, context, rows)
+      applySubscription()
+      expect(
+        (yield* Fiber.join(fiber)).map((change) =>
+          Predicate.isTagged(change, "Insert") ? change.row.id : undefined,
+        ),
+      ).toEqual(rows.map((row) => row.id))
     }).pipe(Effect.scoped),
   )
-  it.effect(
-    "streamEventTable fails fast when the default event buffer overflows",
-    () =>
-      Effect.gen(function* () {
-        const userRelation = makeRelation<RawUserRow, EventContext>()
-        const eventRelation = makeRelation<RawPresenceRow, EventContext>()
-        const { client, applySubscription, awaitSubscribeCalls } = makeClient(
-          userRelation.handle,
-          eventRelation.handle,
-        )
-        const rows = Array.from({ length: 1027 }, (_, index) => ({
-          userId: `user-${index}`,
-          kind: index % 2 === 0 ? ("joined" as const) : ("left" as const),
-        }))
-
-        expectEventTableOverflowFailure(
-          yield* collectBlockedPresenceEventOverflowExit({
-            client,
-            eventRelation,
-            applySubscription,
-            awaitSubscribeCalls,
-            rows,
-          }),
-          1024,
-        )
-      }).pipe(Effect.scoped),
+  it.effect("delivers an entire event burst with no configured capacity", () =>
+    Effect.gen(function* () {
+      const users = makeRelation<RawUserRow, EventContext>()
+      const events = makeRelation<RawPresenceRow, EventContext>()
+      const { client, awaitSubscribeCalls, applySubscription } = makeClient(
+        users.handle,
+        events.handle,
+      )
+      const ids = Array.from({ length: 2049 }, (_, i) => `user-${i}`)
+      const fiber = yield* client
+        .streamEventTable("presenceEvent")
+        .pipe(Stream.take(ids.length), Stream.runCollect, Effect.forkScoped)
+      yield* awaitSubscribeCalls(1)
+      applySubscription()
+      const context = reducerContext("presenceEmit")
+      emitInsertBatch(
+        events,
+        context,
+        ids.map((id) => rawPresenceRow(id, "joined")),
+      )
+      expect(
+        (yield* Fiber.join(fiber)).map((event) => event.row.userId),
+      ).toEqual(ids)
+    }).pipe(Effect.scoped),
   )
   it.effect("uses capacity-only fail-fast buffering for event streams", () =>
     Effect.gen(function* () {
@@ -1888,7 +2258,7 @@ describe("relation streams", () => {
         )
         const changeDeferred =
           yield* Deferred.make<
-            StdbTesting.TableChangeWithContext<UserRow, EventContext>
+            StdbInternal.TableChangeWithContext<UserRow, EventContext>
           >()
         yield* client.streamTableWithContext("user").pipe(
           Stream.runForEach((change) =>
@@ -1917,28 +2287,28 @@ describe("relation streams", () => {
     const timestamp = StableTimestamp
     const error = new Error("subscription failed")
     const reducerErrorBytes = new Uint8Array([1, 2, 3])
-    const decodedReducerOk = StdbTesting.decodeStdbEventContextSync(
+    const decodedReducerOk = StdbInternal.decodeStdbEventContextSync(
       sdkReducerContext({
         outcome: reducerOk(new Uint8Array([9])),
         reducer: reducerInfo("userUpsert"),
         timestamp,
       }),
     )
-    const decodedReducerErr = StdbTesting.decodeStdbEventContextSync(
+    const decodedReducerErr = StdbInternal.decodeStdbEventContextSync(
       sdkReducerContext({
         outcome: reducerErr(reducerErrorBytes),
         reducer: reducerInfo("userUpsert"),
         timestamp,
       }),
     )
-    const decodedReducerInternalError = StdbTesting.decodeStdbEventContextSync(
+    const decodedReducerInternalError = StdbInternal.decodeStdbEventContextSync(
       sdkReducerContext({
         outcome: reducerInternalError("reducer rejected"),
         reducer: reducerInfo("userUpsert"),
         timestamp,
       }),
     )
-    const decodedReducerOkEmpty = StdbTesting.decodeStdbEventContextSync(
+    const decodedReducerOkEmpty = StdbInternal.decodeStdbEventContextSync(
       sdkReducerContext({
         outcome: reducerOkEmpty(),
         reducer: reducerInfo("userUpsert"),
@@ -1947,49 +2317,49 @@ describe("relation streams", () => {
     )
 
     expect(decodedReducerOk).toEqual(
-      StdbTesting.StdbEventContext.Reducer({
+      StdbInternal.StdbEventContext.Reducer({
         reducer: "userUpsert",
         timestamp,
-        outcome: StdbTesting.StdbReducerOutcome.Ok(),
+        outcome: StdbInternal.StdbReducerOutcome.Ok(),
       }),
     )
     expect(decodedReducerErr).toEqual(
-      StdbTesting.StdbEventContext.Reducer({
+      StdbInternal.StdbEventContext.Reducer({
         reducer: "userUpsert",
         timestamp,
-        outcome: StdbTesting.StdbReducerOutcome.Err({
+        outcome: StdbInternal.StdbReducerOutcome.Err({
           error: reducerErrorBytes,
         }),
       }),
     )
     expect(decodedReducerInternalError).toEqual(
-      StdbTesting.StdbEventContext.Reducer({
+      StdbInternal.StdbEventContext.Reducer({
         reducer: "userUpsert",
         timestamp,
-        outcome: StdbTesting.StdbReducerOutcome.InternalError({
+        outcome: StdbInternal.StdbReducerOutcome.InternalError({
           message: "reducer rejected",
         }),
       }),
     )
     expect(decodedReducerOkEmpty).toEqual(
-      StdbTesting.StdbEventContext.Reducer({
+      StdbInternal.StdbEventContext.Reducer({
         reducer: "userUpsert",
         timestamp,
-        outcome: StdbTesting.StdbReducerOutcome.OkEmpty(),
+        outcome: StdbInternal.StdbReducerOutcome.OkEmpty(),
       }),
     )
     expect(
-      StdbTesting.decodeStdbEventContextSync(subscribeAppliedContext()),
-    ).toEqual(StdbTesting.StdbEventContext.SubscribeApplied())
+      StdbInternal.decodeStdbEventContextSync(subscribeAppliedContext()),
+    ).toEqual(StdbInternal.StdbEventContext.SubscribeApplied())
     expect(
-      StdbTesting.decodeStdbEventContextSync(unsubscribeAppliedContext()),
-    ).toEqual(StdbTesting.StdbEventContext.UnsubscribeApplied())
+      StdbInternal.decodeStdbEventContextSync(unsubscribeAppliedContext()),
+    ).toEqual(StdbInternal.StdbEventContext.UnsubscribeApplied())
     expect(
-      StdbTesting.decodeStdbEventContextSync(transactionContext()),
-    ).toEqual(StdbTesting.StdbEventContext.Transaction())
-    expect(StdbTesting.decodeStdbEventContextSync(errorContext(error))).toEqual(
-      StdbTesting.StdbEventContext.Error({ error }),
-    )
+      StdbInternal.decodeStdbEventContextSync(transactionContext()),
+    ).toEqual(StdbInternal.StdbEventContext.Transaction())
+    expect(
+      StdbInternal.decodeStdbEventContextSync(errorContext(error)),
+    ).toEqual(StdbInternal.StdbEventContext.Error({ error }))
   })
   it.effect("streamTableEvents decodes generated reducer context", () =>
     Effect.gen(function* () {
@@ -2000,7 +2370,7 @@ describe("relation streams", () => {
         eventRelation.handle,
       )
       const changeDeferred =
-        yield* Deferred.make<StdbTesting.StdbTableChangeEvent<UserRow>>()
+        yield* Deferred.make<StdbInternal.StdbTableChangeEvent<UserRow>>()
 
       yield* client.streamTableEvents("user").pipe(
         Stream.runForEach((change) =>
@@ -2029,10 +2399,10 @@ describe("relation streams", () => {
           id: "user-3",
           name: "Katherine",
         },
-        context: StdbTesting.StdbEventContext.Reducer({
+        context: StdbInternal.StdbEventContext.Reducer({
           reducer: "userUpsert",
           timestamp: StableTimestamp,
-          outcome: StdbTesting.StdbReducerOutcome.Ok(),
+          outcome: StdbInternal.StdbReducerOutcome.Ok(),
         }),
       })
     }).pipe(Effect.scoped),
@@ -2072,8 +2442,8 @@ describe("relation streams", () => {
             Cause.findErrorOption,
             Option.getOrUndefined,
           )
-          expect(failure).toBeInstanceOf(StdbTesting.StdbDecodeError)
-          if (failure instanceof StdbTesting.StdbDecodeError) {
+          expect(failure).toBeInstanceOf(StdbInternal.StdbDecodeError)
+          if (failure instanceof StdbInternal.StdbDecodeError) {
             expect(failure.table).toBe("user")
             expect(failure.op).toBe("eventContext")
           }
@@ -2090,7 +2460,7 @@ describe("relation streams", () => {
       )
       const eventDeferred =
         yield* Deferred.make<
-          StdbTesting.InsertEvent<PresenceRow, EventContext>
+          StdbInternal.InsertEvent<PresenceRow, EventContext>
         >()
       yield* client.streamEventTable("presenceEvent").pipe(
         Stream.runForEach((event) =>
@@ -2126,7 +2496,7 @@ describe("relation streams", () => {
       )
       const eventDeferred =
         yield* Deferred.make<
-          StdbTesting.InsertEvent<PresenceRow, EventContext>
+          StdbInternal.InsertEvent<PresenceRow, EventContext>
         >()
       yield* client.streamTarget(Full.targets.eventTables.presenceEvent).pipe(
         Stream.runForEach((event) =>
@@ -2180,7 +2550,7 @@ describe("relation streams", () => {
         if (Exit.isFailure(exit)) {
           expect(
             Option.getOrUndefined(Cause.findErrorOption(exit.cause)),
-          ).toBeInstanceOf(StdbTesting.SubscriptionRejectedError)
+          ).toBeInstanceOf(StdbInternal.SubscriptionRejectedError)
         }
         expect(client.isInvalidated()).toBe(false)
       }).pipe(Effect.scoped),
@@ -2189,7 +2559,7 @@ describe("relation streams", () => {
     "surfaces relation registration failures as SubscriptionTransportError",
     () =>
       Effect.gen(function* () {
-        const client = StdbTesting.ClientWs.make({
+        const client = StdbInternal.ClientWs.make({
           module: FullModule,
           connection: {
             db: makeFullModuleWsDb<EventContext>({
@@ -2226,7 +2596,7 @@ describe("relation streams", () => {
         if (Exit.isFailure(exit)) {
           expect(
             Option.getOrUndefined(Cause.findErrorOption(exit.cause)),
-          ).toBeInstanceOf(StdbTesting.SubscriptionTransportError)
+          ).toBeInstanceOf(StdbInternal.SubscriptionTransportError)
         }
       }),
   )
@@ -2235,7 +2605,7 @@ describe("relation streams", () => {
     () =>
       Effect.gen(function* () {
         const appliedRegistered = Deferred.makeUnsafe<() => void>()
-        const client = StdbTesting.ClientWs.make({
+        const client = StdbInternal.ClientWs.make({
           module: FullModule,
           connection: {
             db: makeFullModuleWsDb<EventContext>({
@@ -2288,7 +2658,7 @@ describe("relation streams", () => {
     Effect.gen(function* () {
       const appliedRegistered = Deferred.makeUnsafe<() => void>()
       let unsubscribed = false
-      const client = StdbTesting.ClientWs.make({
+      const client = StdbInternal.ClientWs.make({
         module: FullModule,
         connection: {
           db: makeFullModuleWsDb<EventContext>(),

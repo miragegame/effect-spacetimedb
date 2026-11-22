@@ -52,7 +52,6 @@ type ModuleFromSectionsSpec<
 const EmptyParams = Stdb.struct({})
 
 type ReducerOptions = {
-  readonly public?: boolean
   readonly params?: Stdb.StructLikeValueType
   readonly errors?: Stdb.AnyErrorDefinition
 }
@@ -71,33 +70,18 @@ type ReducerErrorsOf<Options extends ReducerOptions | undefined> =
     ? Errors
     : undefined
 
-type PublicOf<Options extends { readonly public?: boolean } | undefined> =
-  Options extends { readonly public: infer Public extends boolean }
-    ? Public
-    : true
-
 export const rawReducerSpec = <
   const Options extends ReducerOptions | undefined = undefined,
 >(
   options: Options = undefined as Options,
-): Stdb.ReducerSpec<
-  ReducerParamsOf<Options>,
-  ReducerErrorsOf<Options>,
-  PublicOf<Options>
-> =>
+): Stdb.ReducerSpec<ReducerParamsOf<Options>, ReducerErrorsOf<Options>> =>
   ({
     kind: "reducer",
-    public: options?.public ?? true,
     params: options?.params ?? EmptyParams,
     ...(options?.errors === undefined ? {} : { errors: options.errors }),
-  }) as Stdb.ReducerSpec<
-    ReducerParamsOf<Options>,
-    ReducerErrorsOf<Options>,
-    PublicOf<Options>
-  >
+  }) as Stdb.ReducerSpec<ReducerParamsOf<Options>, ReducerErrorsOf<Options>>
 
 type ProcedureOptions = {
-  readonly public?: boolean
   readonly params?: Stdb.StructLikeValueType
   readonly returns: Stdb.AnyValueType
   readonly errors?: Stdb.AnyErrorDefinition
@@ -126,20 +110,17 @@ export const rawProcedureSpec = <const Options extends ProcedureOptions>(
 ): Stdb.ProcedureSpec<
   ProcedureParamsOf<Options>,
   ProcedureReturnsOf<Options>,
-  ProcedureErrorsOf<Options>,
-  PublicOf<Options>
+  ProcedureErrorsOf<Options>
 > =>
   ({
     kind: "procedure",
-    public: options.public ?? true,
     params: options.params ?? EmptyParams,
     returns: options.returns,
     ...(options.errors === undefined ? {} : { errors: options.errors }),
   }) as unknown as Stdb.ProcedureSpec<
     ProcedureParamsOf<Options>,
     ProcedureReturnsOf<Options>,
-    ProcedureErrorsOf<Options>,
-    PublicOf<Options>
+    ProcedureErrorsOf<Options>
   >
 
 export function rawHttpHandlerSpec<
@@ -277,20 +258,20 @@ export const moduleFromSections = <
   const tables = Object.values(
     options.tables ?? {},
   ) as ReadonlyArray<Stdb.AnyTableSpec>
-  let module: Stdb.StdbModule<
+  let module: Stdb.Module<
     string,
     Record<string, Stdb.AnyTableSpec>,
-    | Stdb.StdbGroup<string, Stdb.AnyCallableDecl>
-    | Stdb.StdbHttpGroup<string, Stdb.AnyHttpRouteDecl>,
+    | Stdb.Group<string, Stdb.AnyCallableDecl>
+    | Stdb.HttpGroup<string, Stdb.AnyHttpRouteDecl>,
     string
-  > = Stdb.StdbModule.make(options.name, {
+  > = Stdb.Module.make(options.name, {
     ...(options.settings === undefined ? {} : { settings: options.settings }),
   }).addTables(...tables)
 
   const callableDecls = callableDeclsFromSections(options)
   if (callableDecls.length > 0) {
     module = module.add(
-      Stdb.StdbGroup.make("Callables").add(
+      Stdb.Group.make("Callables").add(
         ...(callableDecls as [
           Stdb.AnyCallableDecl,
           ...ReadonlyArray<Stdb.AnyCallableDecl>,
@@ -312,7 +293,7 @@ export const moduleFromSections = <
   })) as ReadonlyArray<Stdb.AnyHttpRouteDecl>
   if (httpDecls.length > 0) {
     module = module.add(
-      Stdb.StdbHttpGroup.make("Http").add(
+      Stdb.HttpGroup.make("Http").add(
         ...(httpDecls as [
           (typeof httpDecls)[number],
           ...ReadonlyArray<(typeof httpDecls)[number]>,

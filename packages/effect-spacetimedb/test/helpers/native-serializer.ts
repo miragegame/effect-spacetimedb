@@ -1,9 +1,9 @@
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import * as SpacetimeDB from "spacetimedb"
 import { typeBuilder } from "./type-builder"
 
 type NativeSerializableType = Parameters<
-  typeof StdbTesting.ContractType.typeBuilderWithFactories
+  typeof StdbInternal.ContractType.typeBuilderWithFactories
 >[0]
 
 export const algebraicTypeOf = (

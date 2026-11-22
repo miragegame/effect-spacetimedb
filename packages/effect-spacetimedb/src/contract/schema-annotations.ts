@@ -3,9 +3,13 @@ import * as Schema from "effect/Schema"
 
 export type SchemaAnnotationId = string | symbol
 
-export const StdbTypeAnnotationId = Symbol.for("effect-spacetimedb/StdbType")
+// Schema symbols share this registry prefix across published copies.
+export const schemaRegistryKey = (name: string) =>
+  `effect-spacetimedb/Stdb${name}`
+
+export const StdbTypeAnnotationId = Symbol.for(schemaRegistryKey("Type"))
 export const StdbTypeInfoAnnotationId = Symbol.for(
-  "effect-spacetimedb/StdbTypeInfo",
+  schemaRegistryKey("TypeInfo"),
 )
 // The field-options annotation keys, their payload schema and their version
 // boundary live in `./field-options-annotation.ts`.

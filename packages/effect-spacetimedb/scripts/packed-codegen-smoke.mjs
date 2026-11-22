@@ -254,6 +254,74 @@ if (!existsSync("unrelated/keep.txt")) {
     cwd: consumerDir,
     env: smokeEnvironment,
   })
+
+  // Emit a consumer library using only the installed archive and its peers.
+  runCommand(
+    "npm",
+    [
+      "install",
+      "--no-audit",
+      "--no-fund",
+      "--no-package-lock",
+      "--save-exact",
+      exactDependency("@types/node"),
+      exactDependency("typescript"),
+    ],
+    { cwd: consumerDir },
+  )
+  cpSync(
+    path.join(packageRoot, "test/fixtures/packed-consumer.ts"),
+    path.join(consumerDir, "packed-consumer.ts"),
+  )
+  runCommand(
+    process.execPath,
+    [
+      path.join(consumerDir, "node_modules", "typescript", "bin", "tsc"),
+      "--declaration",
+      "--emitDeclarationOnly",
+      "--outDir",
+      "consumer-types",
+      "--strict",
+      "--skipLibCheck",
+      "--target",
+      "es2022",
+      "--module",
+      "esnext",
+      "--moduleResolution",
+      "bundler",
+      "--types",
+      "node",
+      "packed-consumer.ts",
+    ],
+    { cwd: consumerDir },
+  )
+
+  // Also reject emitters that produce an inaccessible import instead of a diagnostic.
+  const declaration = readFileSync(
+    path.join(consumerDir, "consumer-types", "packed-consumer.d.ts"),
+    "utf8",
+  )
+  const publicEntries = new Set(
+    Object.keys(packageJson.publishConfig.exports).map((key) =>
+      key.replace(/^\./, packageJson.name),
+    ),
+  )
+  for (const [, specifier] of declaration.matchAll(
+    /(?:from |import\()["']([^"']+)["']/g,
+  )) {
+    if (
+      specifier.startsWith(".") ||
+      path.isAbsolute(specifier) ||
+      specifier.includes("node_modules/") ||
+      (specifier.startsWith(packageJson.name + "/") &&
+        !publicEntries.has(specifier))
+    ) {
+      throw new Error(
+        `Consumer declaration refers to an inaccessible module: ${specifier}`,
+      )
+    }
+  }
+
   process.stdout.write(
     `Packed codegen smoke passed under ${process.version} with isolated documented dependencies.\n`,
   )

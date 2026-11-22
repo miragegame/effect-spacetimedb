@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as ParseResult from "../../schema-parse.ts"
 import { transformOrFail } from "../../schema-transform.ts"
-import { makeStdbDiagnostic, StdbValidationError } from "../diagnostic.ts"
+import { makeStdbDiagnostic, StdbValidationDefect } from "../diagnostic.ts"
 import {
   findInvalidStringLiteralTag,
   findStringLiteralTagCollision,
@@ -171,7 +171,7 @@ export const bytesFromUnknown = narrowSchema<Uint8Array, Uint8Array>(
         )
       }
 
-      return Effect.fail(new ParseResult.Unexpected(value))
+      return Effect.fail(ParseResult.invalidValueIssue(value))
     },
     encode: (value) => Effect.succeed(value),
   }),
@@ -184,7 +184,7 @@ export const assertUniqueStringLiteralVariantTags = <
 ): void => {
   const invalid = findInvalidStringLiteralTag(values)
   if (invalid !== undefined) {
-    throw new StdbValidationError({
+    throw new StdbValidationDefect({
       diagnostics: [
         makeStdbDiagnostic(
           "InvalidLiteralTag",
@@ -197,7 +197,7 @@ export const assertUniqueStringLiteralVariantTags = <
 
   const collision = findStringLiteralTagCollision(values)
   if (collision !== undefined) {
-    throw new StdbValidationError({
+    throw new StdbValidationDefect({
       diagnostics: [
         makeStdbDiagnostic(
           "LiteralTagCollision",
@@ -270,7 +270,7 @@ export const stringLiteralSchema = <const Values extends StringLiteralTuple>(
         const decoded = tagToLiteral.get(value.tag)
 
         if (decoded === undefined) {
-          return Effect.fail(new ParseResult.Unexpected(value))
+          return Effect.fail(ParseResult.invalidValueIssue(value))
         }
 
         if (
@@ -278,7 +278,7 @@ export const stringLiteralSchema = <const Values extends StringLiteralTuple>(
           value.value !== undefined &&
           !isUnitWireValue(value.value)
         ) {
-          return Effect.fail(new ParseResult.Unexpected(value))
+          return Effect.fail(ParseResult.invalidValueIssue(value))
         }
 
         return Effect.succeed(decoded)
@@ -290,7 +290,7 @@ export const stringLiteralSchema = <const Values extends StringLiteralTuple>(
           ? Effect.succeed({
               tag: variantTag,
             } as StringLiteralEncoded<Values>)
-          : Effect.fail(new ParseResult.Unexpected(value))
+          : Effect.fail(ParseResult.invalidValueIssue(value))
       },
     },
   )
@@ -326,7 +326,7 @@ export const nativeValueSchema = <A>(
       decode: (value) => {
         const decoded = decode(value)
         return decoded === undefined
-          ? Effect.fail(new ParseResult.Unexpected(value))
+          ? Effect.fail(ParseResult.invalidValueIssue(value))
           : Effect.succeed(decoded)
       },
       encode: (value) => Effect.succeed(value),
@@ -517,7 +517,6 @@ export function f32<A, Encoded extends number>(
 export function f32<A, Encoded extends number>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<number | A, number | Encoded> {
-  // @effect-diagnostics-next-line schemaNumber:off -- SpaceTimeDB f32 values preserve native float NaN/Infinity; HTTP JSON rejects non-finite at encoding.
   const schema = resolvePrimitiveSchema(domain, Schema.Number)
 
   return attachStdbType(schema, (factories) => factories.f32(), {
@@ -534,7 +533,6 @@ export function f64<A, Encoded extends number>(
 export function f64<A, Encoded extends number>(
   domain?: Schema.Codec<A, Encoded, never, never>,
 ): ValueType<number | A, number | Encoded> {
-  // @effect-diagnostics-next-line schemaNumber:off -- SpaceTimeDB f64 values preserve native float NaN/Infinity; HTTP JSON rejects non-finite at encoding.
   const schema = resolvePrimitiveSchema(domain, Schema.Number)
 
   return attachStdbType(schema, (factories) => factories.f64(), {

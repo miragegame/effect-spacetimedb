@@ -5,6 +5,7 @@ import * as Stdb from "effect-spacetimedb"
 import { databaseCaller, OutboxResult } from "effect-spacetimedb/server"
 import { build } from "effect-spacetimedb/server-compiler"
 import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { Identity } from "spacetimedb"
 import { outboxResultFromHost } from "../../src/contract/outbox-result"
 import { IdcFixtureInboxBinding } from "../fixtures/idc/binding"
@@ -127,7 +128,7 @@ describe("outbox results", () => {
     const { harness, row } = withPendingPing()
     // The group's reducer middleware refuses every caller, as a player guard
     // would refuse the host's tokenless zero identity.
-    const guardedSettles = Stdb.StdbBuilder.group(
+    const guardedSettles = Stdb.Builder.group(
       IdcSenderModule,
       "IdcSenderSettles",
       {
@@ -201,7 +202,9 @@ describe("outbox results", () => {
   })
 
   it("keeps settle reducers out of the client-callable surface", () => {
-    expect(IdcSenderModule.spec.reducers.pingSettled.public).toBe(false)
+    const plan = StdbInternal.makeModulePlan(IdcSenderModule.spec)
+    expect(Object.keys(IdcSenderModule.spec.reducers)).toContain("pingSettled")
+    expect(Object.keys(plan.publicReducers)).not.toContain("pingSettled")
     expect(Stdb.validate(IdcSenderModule.spec)).toEqual([])
   })
 })

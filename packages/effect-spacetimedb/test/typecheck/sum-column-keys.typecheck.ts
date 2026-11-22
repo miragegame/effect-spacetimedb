@@ -1,6 +1,6 @@
+import type * as StdbServer from "effect-spacetimedb/server"
 import * as Effect from "effect/Effect"
 import * as Stdb from "effect-spacetimedb"
-import type * as StdbServer from "effect-spacetimedb/server"
 
 const Status = Stdb.sum({
   Ready: Stdb.unit(),
@@ -29,7 +29,7 @@ const progress = Stdb.table("progress", {
   ],
 })
 
-const ProgressModule = Stdb.StdbModule.make("sum_column_keys", {}).addTables(
+const ProgressModule = Stdb.Module.make("sum_column_keys", {}).addTables(
   progress,
 )
 

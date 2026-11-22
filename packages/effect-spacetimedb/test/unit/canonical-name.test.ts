@@ -1,6 +1,6 @@
 import * as EffectVitest from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { TestLayer } from "../helpers/test-layer"
 
 const { expect } = EffectVitest
@@ -12,7 +12,7 @@ const {
   pascalCaseName,
   snakeCaseName,
   splitWords,
-} = StdbTesting.ContractCanonicalName
+} = StdbInternal.ContractCanonicalName
 
 describe("canonical name mirror", (it) => {
   it.effect("matches native convert_case vectors for ASCII identifiers", () =>

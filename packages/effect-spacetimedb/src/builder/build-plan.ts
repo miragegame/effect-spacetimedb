@@ -1,3 +1,4 @@
+import { mountLabel, type NativeMount } from "../contract/mount.ts"
 import {
   lifecycle as defineLifecycle,
   type LifecycleName,
@@ -9,24 +10,28 @@ import {
   define as defineModule,
 } from "../contract/module.ts"
 
-import * as Server from "../server/bind.ts"
+import { bindModule } from "../server/bind.ts"
 
-import type { HandlerInputDefinitions } from "../server/handler-types.ts"
+import type {
+  HandlerInputDefinitions,
+  Handlers,
+} from "../server/handler-types.ts"
 
-import { serverRuntimeModeDefault } from "../server/runtime-layer.ts"
-
+import { group, groupPrechecked, lifecycle } from "./group-builders.ts"
 import {
-  group,
-  groupChecked,
-  groupPrechecked,
-  lifecycle,
-} from "./group-builders.ts"
-import { attachInternalStdbBuildPlan } from "./internal-build-plan.ts"
+  attachInternalStdbBuildPlan,
+  internalStdbBuildPlan,
+  type InternalStdbBuildPlan,
+  type MountBuildPlan,
+} from "./internal-build-plan.ts"
 import {
   GroupImplTypeId,
   LifecycleImplTypeId,
+  type MountImpl,
+  type InternalMountImpl,
+  type BuildImplsWithRuntime,
   type AnyBuilderImpl,
-  type AnyStdbModule,
+  type AnyModule,
   type BuildArgsWithoutRuntime,
   type BuildArgsWithRuntime,
   type BuildArgsWithRuntimeMode,
@@ -38,7 +43,7 @@ import {
   type InternalLifecycleImpl,
   type NoImplModuleMismatches,
   type RuntimeROfImpls,
-  type StdbBuildPlan,
+  type BuildPlan,
 } from "./handler-types.ts"
 import {
   diagnostic,
@@ -48,13 +53,78 @@ import {
 import type { RuntimeBuilderImpl } from "./runtime-impl.ts"
 import { mergeDefinitions, normalizeRuntime } from "./runtime-impl.ts"
 
-export const StdbBuilder = {
+export type MountsOfModule<M extends AnyModule> = NonNullable<
+  M["spec"]["mounts"]
+>
+export type MountKeys<M extends AnyModule, Kind extends string> = {
+  [K in keyof MountsOfModule<M> & string]: MountsOfModule<M>[K] extends {
+    readonly kind: Kind
+  }
+    ? K
+    : never
+}[keyof MountsOfModule<M> & string]
+export type MountedSpec<
+  M extends AnyModule,
+  K extends keyof MountsOfModule<M>,
+> = MountsOfModule<M>[K] extends { readonly module: infer Child }
+  ? Child
+  : never
+export type NativeLibrary<
+  M extends AnyModule,
+  K extends keyof MountsOfModule<M>,
+> = MountsOfModule<M>[K] extends NativeMount<infer L> ? L : never
+
+const mount = <
+  Parent extends AnyModule,
+  const K extends MountKeys<Parent, "moduleMount">,
+  Child extends AnyModule,
+  const Impls extends readonly AnyBuilderImpl[],
+>(
+  parent: Parent,
+  namespace: K,
+  implementation: {
+    readonly module: Child & { readonly spec: MountedSpec<Parent, K> }
+    readonly implementations: BuildImplsWithRuntime<Child, Impls>
+  },
+): MountImpl<K, Parent["spec"]["name"], RuntimeROfImpls<Impls>> =>
+  sealMount(parent, namespace, { kind: "moduleMount", ...implementation })
+
+const mountNative = <
+  Parent extends AnyModule,
+  const K extends MountKeys<Parent, "nativeMount">,
+>(
+  parent: Parent,
+  namespace: K,
+  library: NativeLibrary<Parent, K>,
+): MountImpl<K, Parent["spec"]["name"]> =>
+  sealMount(parent, namespace, { kind: "nativeMount", library })
+
+const mountImplementations = new WeakSet<object>()
+const sealMount = <K extends string, Parent extends AnyModule, R>(
+  module: Parent,
+  namespace: K,
+  implementation: InternalMountImpl["implementation"],
+): MountImpl<K, Parent["spec"]["name"], R> => {
+  const sealed = {
+    kind: "stdbMount" as const,
+    module,
+    namespace,
+    implementation,
+    definitions: {},
+  }
+  mountImplementations.add(sealed)
+  return sealed as unknown as MountImpl<K, Parent["spec"]["name"], R>
+}
+
+export const Builder = {
+  /** Implement a declared Effect mount with its module and implementations. The parent compiles a fresh child schema when built. */
+  mount,
+  /** Implement a declared native mount with the library's namespace import. It must resolve the same server SDK instance as the parent. */
+  mountNative,
   group,
-  groupChecked,
   groupPrechecked,
   lifecycle,
   handlersOf,
-  plan: planModule,
 }
 
 const isRecordLike = (value: unknown): value is Record<PropertyKey, unknown> =>
@@ -93,7 +163,7 @@ const invalidBuilderImpl = (impl: unknown, index: number): never => {
   throw diagnostic(
     "InvalidBuilderImpl",
     invalidBuilderImplPath(impl, index),
-    `Builder implementation at impls[${index}] must be created by StdbBuilder.group, StdbBuilder.groupChecked, StdbBuilder.groupPrechecked, or StdbBuilder.lifecycle`,
+    `Builder implementation at impls[${index}] must be created by Builder.group, Builder.groupPrechecked, or Builder.lifecycle`,
   )
 }
 
@@ -105,6 +175,7 @@ const unsealImpl = (
     return invalidBuilderImpl(impl, index)
   }
 
+  if (mountImplementations.has(impl)) return impl as InternalMountImpl
   const record = impl as Record<PropertyKey, unknown>
   if (hasTypeId(impl, GroupImplTypeId, GroupImplTypeId)) {
     if (
@@ -135,13 +206,19 @@ const unsealImpl = (
 }
 
 const assertImplBelongsToModule = (
-  module: AnyStdbModule,
+  module: AnyModule,
   impl: InternalBuilderImpl,
 ): void => {
   if (impl.module === module) {
     return
   }
 
+  if ("namespace" in impl)
+    throw diagnostic(
+      "UndeclaredMountImpl",
+      ["mounts", impl.namespace],
+      `${mountLabel(impl.namespace, impl.implementation.kind === "moduleMount" ? impl.implementation.module.id : undefined)} belongs to "${impl.module.id}". Pass this implementation to that parent's build or create one for "${module.id}".`,
+    )
   if (isLifecycleImpl(impl)) {
     throw diagnostic(
       "UndeclaredLifecycleImpl",
@@ -170,12 +247,12 @@ const flatHandlerDefinitions = (
     ...Object.entries(definitions.lifecycle ?? {}),
   ])
 
-function handlersOf<Module extends AnyStdbModule, Impl extends AnyBuilderImpl>(
+function handlersOf<Module extends AnyModule, Impl extends AnyBuilderImpl>(
   module: Module,
   impl: Impl & NoImplModuleMismatches<Module, readonly [Impl]>,
 ): Readonly<HandlersOf<Module, Impl>>
 function handlersOf(
-  module: AnyStdbModule,
+  module: AnyModule,
   impl: AnyBuilderImpl,
 ): Readonly<Record<string, unknown>> {
   const unsealed = unsealImpl(impl, 0)
@@ -252,7 +329,7 @@ const collectLifecycleSpecs = (
 }
 
 const moduleSpecWithLifecycle = <
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Impls extends ReadonlyArray<unknown>,
 >(
   module: Module,
@@ -272,11 +349,13 @@ const moduleSpecWithLifecycle = <
     name: base.name,
     settings: base.settings,
     environment: base.environment ?? {},
+    mounts: base.mounts ?? {},
     tables: base.tables,
     views: base.views,
     reducers: base.reducers,
     procedures: base.procedures,
     httpHandlers: base.httpHandlers,
+    httpGroupNames: base.httpGroupNames,
     httpGroups: base.httpGroups,
     reducerGroups: base.reducerGroups,
     procedureGroups: base.procedureGroups,
@@ -287,35 +366,37 @@ const moduleSpecWithLifecycle = <
   }) as BuildSpec<Module, Impls>
 }
 
-function planModule<
-  Module extends AnyStdbModule,
+export function planModule<
+  Module extends AnyModule,
   const Impls extends ReadonlyArray<AnyBuilderImpl>,
 >(
   ...args: BuildArgsWithoutRuntime<Module, Impls>
-): StdbBuildPlan<BuildSpec<Module, Impls>, RuntimeROfImpls<Impls>>
+): BuildPlan<BuildSpec<Module, Impls>, RuntimeROfImpls<Impls>>
 
-function planModule<
-  Module extends AnyStdbModule,
+export function planModule<
+  Module extends AnyModule,
   const Impls extends ReadonlyArray<AnyBuilderImpl>,
 >(
   ...args: BuildArgsWithRuntimeMode<Module, Impls>
-): StdbBuildPlan<BuildSpec<Module, Impls>, RuntimeROfImpls<Impls>>
+): BuildPlan<BuildSpec<Module, Impls>, RuntimeROfImpls<Impls>>
 
-function planModule<
-  Module extends AnyStdbModule,
+export function planModule<
+  Module extends AnyModule,
   const Impls extends ReadonlyArray<AnyBuilderImpl>,
 >(
   ...args: BuildArgsWithRuntime<Module, Impls>
-): StdbBuildPlan<BuildSpec<Module, Impls>, RuntimeROfImpls<Impls>>
+): BuildPlan<BuildSpec<Module, Impls>, RuntimeROfImpls<Impls>>
 
-function planModule<
-  Module extends AnyStdbModule,
+export function planModule<
+  Module extends AnyModule,
   const Impls extends ReadonlyArray<AnyBuilderImpl>,
 >(
   module: Module,
   impls: Impls,
   options?: BuildOptions<RuntimeROfImpls<Impls>>,
-): StdbBuildPlan<BuildSpec<Module, Impls>, RuntimeROfImpls<Impls>> {
+): BuildPlan<BuildSpec<Module, Impls>, RuntimeROfImpls<Impls>> {
+  const mounts: Record<string, MountBuildPlan> = Object.create(null)
+  const declarations = module.spec.mounts ?? {}
   const expectedGroups = new Set(module.groups.map((group) => group.id))
   const implementedGroups = new Set<string>()
   const unsealedImpls = impls.map((impl, index) => unsealImpl(impl, index))
@@ -323,6 +404,60 @@ function planModule<
   for (const impl of unsealedImpls) {
     assertImplBelongsToModule(module, impl)
 
+    if ("namespace" in impl) {
+      const key = impl.namespace
+      const mount = declarations[key]
+      const implementation = impl.implementation
+      const label = mountLabel(
+        key,
+        implementation.kind === "moduleMount"
+          ? implementation.module.id
+          : undefined,
+      )
+      if (
+        mount === undefined ||
+        mount.kind !== implementation.kind ||
+        (mount.kind === "moduleMount" &&
+          implementation.kind === "moduleMount" &&
+          mount.module !== implementation.module.spec)
+      ) {
+        throw diagnostic(
+          "UndeclaredMountImpl",
+          ["mounts", key],
+          mount === undefined
+            ? `${label} has no declaration on "${module.id}". Declare the mount on the parent or remove the implementation.`
+            : `${label} does not match the declaration on "${module.id}". Supply ${mount.kind === "moduleMount" ? `the declared module "${mount.module.name}" to Builder.mount` : "the native library to Builder.mountNative"}.`,
+        )
+      }
+      if (Object.hasOwn(mounts, key))
+        throw diagnostic(
+          "DuplicateMountImpl",
+          ["mounts", key],
+          `${label} has more than one implementation. Keep exactly one in the build of "${module.id}".`,
+        )
+      if (implementation.kind === "nativeMount") mounts[key] = implementation
+      else {
+        const plan = planModule(
+          implementation.module,
+          implementation.implementations as never,
+          (options ?? {}) as never,
+        )
+        if (Object.keys(plan.module.lifecycle).length > 0)
+          throw diagnostic(
+            "MountedLifecycle",
+            ["mounts", key],
+            `${label} adds lifecycle hooks. Declare and implement them on the root module.`,
+          )
+        mounts[key] = {
+          kind: "moduleMount",
+          plan: internalStdbBuildPlan(plan) as unknown as InternalStdbBuildPlan<
+            AnyModuleSpec,
+            unknown
+          >,
+        }
+      }
+      continue
+    }
     if (!isGroupImpl(impl)) {
       continue
     }
@@ -343,6 +478,14 @@ function planModule<
     implementedGroups.add(impl.groupName)
   }
 
+  for (const [key, declaration] of Object.entries(declarations)) {
+    if (!Object.hasOwn(mounts, key))
+      throw diagnostic(
+        "MountNotImplemented",
+        ["mounts", key],
+        `${mountLabel(key, declaration.kind === "moduleMount" ? declaration.module.name : undefined)} is missing an implementation. Add Builder.${declaration.kind === "moduleMount" ? "mount" : "mountNative"} for "${key}" to the build of "${module.id}".`,
+      )
+  }
   for (const group of expectedGroups) {
     if (!implementedGroups.has(group)) {
       throw diagnostic(
@@ -354,46 +497,28 @@ function planModule<
   }
 
   const spec = moduleSpecWithLifecycle<Module, Impls>(module, unsealedImpls)
-  const runtime =
-    options?.runtime === undefined
-      ? undefined
-      : normalizeRuntime(options.runtime)
-  const runtimeMode = options?.runtimeMode ?? serverRuntimeModeDefault
-  const onDefect = options?.onDefect
-  const server =
-    runtime === undefined
-      ? Server.make({
-          module: spec,
-          onDefect,
-          runtimeMode,
-        })
-      : Server.make({
-          module: spec,
-          onDefect,
-          runtime,
-          runtimeMode,
-        })
-  const typedServer = server as unknown as Server.InternalServerInstance<
-    BuildSpec<Module, Impls>,
-    RuntimeROfImpls<Impls>
-  >
-  const handlers = typedServer.handlers(
-    mergeDefinitions(
-      unsealedImpls as unknown as ReadonlyArray<
-        RuntimeBuilderImpl<Module, RuntimeROfImpls<Impls>>
-      >,
-    ) as HandlerInputDefinitions<
-      BuildSpec<Module, Impls>,
-      RuntimeROfImpls<Impls>
-    >,
-  )
+  const server = bindModule<BuildSpec<Module, Impls>, RuntimeROfImpls<Impls>>({
+    module: spec,
+    onDefect: options?.onDefect,
+    ...(options?.runtime === undefined
+      ? {}
+      : { runtime: normalizeRuntime(options.runtime) }),
+    ...(options?.runtimeMode === undefined
+      ? {}
+      : { runtimeMode: options.runtimeMode }),
+  })
 
   return attachInternalStdbBuildPlan(
     {
-      module: typedServer.module,
-      scheduleBindings: typedServer.scheduleBindings,
-      handlers,
+      module: server.module,
+      scheduleBindings: server.scheduleBindings,
+      handlers: mergeDefinitions(
+        unsealedImpls as unknown as ReadonlyArray<
+          RuntimeBuilderImpl<Module, RuntimeROfImpls<Impls>>
+        >,
+      ) as Handlers<BuildSpec<Module, Impls>, RuntimeROfImpls<Impls>>,
     },
-    typedServer,
+    server,
+    mounts,
   )
 }

@@ -42,11 +42,11 @@ describe("effect-spacetimedb live determinism guards", () => {
     () =>
       provideLiveTest(
         Effect.gen(function* () {
-          yield* callProbe("probeAsync", "ReducerAsyncNotAllowedError")
+          yield* callProbe("probeAsync", "HandlerAsyncNotAllowedDefect")
 
-          yield* callProbe("probeWallClock", "ReducerWallClockNotAllowedError")
+          yield* callProbe("probeWallClock", "HandlerWallClockNotAllowedDefect")
 
-          yield* callProbe("probeRandom", "ReducerGlobalRandomNotAllowedError")
+          yield* callProbe("probeRandom", "HandlerGlobalRandomNotAllowedDefect")
         }),
       ),
     { timeout: LIVE_TEST_TIMEOUT_MS },

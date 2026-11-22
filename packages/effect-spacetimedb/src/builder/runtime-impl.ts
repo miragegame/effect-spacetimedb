@@ -28,10 +28,9 @@ import {
 } from "../contract/type.ts"
 
 import {
-  isSyncRunnerLike,
+  isSyncRunner,
   fromLayer as syncRunnerFromLayer,
   type SyncRunner,
-  type SyncRunnerLike,
 } from "../server/sync-runner.ts"
 
 import type { HandlerInputDefinitions } from "../server/handler-types.ts"
@@ -51,17 +50,17 @@ import type {
   ScheduledReducerSpec,
 } from "./declarations.ts"
 
-import type { AnyStdbModule, BuildRuntime } from "./handler-types.ts"
+import type { AnyModule, BuildRuntime } from "./handler-types.ts"
 
 import type { SpecOfModule } from "./type-utils.ts"
 
-export type RuntimeBuilderImpl<Module extends AnyStdbModule, RuntimeR> = {
+export type RuntimeBuilderImpl<Module extends AnyModule, RuntimeR> = {
   readonly definitions: Partial<
     HandlerInputDefinitions<SpecOfModule<Module>, RuntimeR>
   >
 }
 
-export const mergeDefinitions = <Module extends AnyStdbModule, RuntimeR>(
+export const mergeDefinitions = <Module extends AnyModule, RuntimeR>(
   impls: ReadonlyArray<RuntimeBuilderImpl<Module, RuntimeR>>,
 ): Partial<HandlerInputDefinitions<SpecOfModule<Module>, RuntimeR>> => {
   const sections = {
@@ -108,8 +107,8 @@ export const mergeDefinitions = <Module extends AnyStdbModule, RuntimeR>(
 
 export const normalizeRuntime = <RuntimeR>(
   runtime: BuildRuntime<RuntimeR>,
-): SyncRunner<RuntimeR> | SyncRunnerLike<RuntimeR> =>
-  isSyncRunnerLike<RuntimeR>(runtime) ? runtime : syncRunnerFromLayer(runtime)
+): SyncRunner<RuntimeR> =>
+  isSyncRunner<RuntimeR>(runtime) ? runtime : syncRunnerFromLayer(runtime)
 
 const EmptyEndpointParams = struct({})
 
@@ -117,21 +116,18 @@ export const reducerEndpoint = <
   const Name extends string,
   const Params extends StructLikeValueType = typeof EmptyEndpointParams,
   const Errors extends ErrorsInput | undefined = undefined,
-  const Public extends boolean = true,
 >(
   name: Name,
   spec: {
     readonly params?: Params
     readonly errors?: Errors
-    readonly public?: Public
   },
-): ReducerDecl<Name, Params, DefinitionOfInputOrUndefined<Errors>, Public> => ({
+): ReducerDecl<Name, Params, DefinitionOfInputOrUndefined<Errors>> => ({
   declKind: "reducer",
   name,
   spec: defineReducer(spec as never) as ReducerSpec<
     Params,
-    DefinitionOfInputOrUndefined<Errors>,
-    Public
+    DefinitionOfInputOrUndefined<Errors>
   >,
 })
 
@@ -140,33 +136,29 @@ export const procedureEndpoint = <
   const Returns extends AnyValueType,
   const Params extends StructLikeValueType = typeof EmptyEndpointParams,
   const Errors extends ErrorsInput | undefined = undefined,
-  const Public extends boolean = true,
 >(
   name: Name,
   spec: {
     readonly params?: Params
     readonly returns: Returns
     readonly errors?: Errors
-    readonly public?: Public
   },
 ): ProcedureDecl<
   Name,
   Params,
   Returns,
-  DefinitionOfInputOrUndefined<Errors>,
-  Public
+  DefinitionOfInputOrUndefined<Errors>
 > => ({
   declKind: "procedure",
   name,
   spec: defineProcedure(spec as never) as ProcedureSpec<
     Params,
     Returns,
-    DefinitionOfInputOrUndefined<Errors>,
-    Public
+    DefinitionOfInputOrUndefined<Errors>
   >,
 })
 
-type ScheduledCallableOptions<
+export type ScheduledCallableOptions<
   Table extends AnyScheduledTableSpec,
   Errors extends ErrorsInput | undefined,
 > = {
@@ -193,7 +185,6 @@ export const scheduledReducerEndpoint = <
   const reducer = defineReducer({
     params: scheduledParams(spec.table),
     errors: spec.errors,
-    public: false,
   } as never) as ScheduledReducerSpec<
     Table,
     DefinitionOfInputOrUndefined<Errors>
@@ -228,7 +219,6 @@ export const scheduledProcedureEndpoint = <
     params: scheduledParams(spec.table),
     returns: unit(),
     errors: spec.errors,
-    public: false,
   } as never) as ScheduledProcedureSpec<
     Table,
     DefinitionOfInputOrUndefined<Errors>
@@ -248,7 +238,7 @@ export const scheduledProcedureEndpoint = <
 }
 
 /**
- * A reducer peer databases call through their outboxes (`StdbFn.receiver`).
+ * A reducer peer databases call through their outboxes (`Fn.receiver`).
  * Its wire name is pinned to `snakeCaseName(name)` under every case policy, and
  * the group that implements it must declare a guard as its reducer middleware.
  * A refusal is a failure with a declared error: the caller's settle reducer
@@ -268,8 +258,7 @@ export const receiverEndpoint = <
   const reducer = defineReducer({
     params: spec.params,
     errors: spec.errors,
-    public: true,
-  } as never) as ReducerSpec<Params, DefinitionOfInputOrUndefined<Errors>, true>
+  } as never) as ReducerSpec<Params, DefinitionOfInputOrUndefined<Errors>>
 
   return {
     declKind: "reducer",
@@ -282,7 +271,7 @@ export const receiverEndpoint = <
 }
 
 /**
- * The settle reducer of `table` (`StdbFn.outboxResult`): the host runs it with
+ * The settle reducer of `table` (`Fn.outboxResult`): the host runs it with
  * each row's outcome and deletes the row in the same transaction.
  */
 export const outboxResultEndpoint = <
@@ -294,7 +283,6 @@ export const outboxResultEndpoint = <
 ): OutboxResultDecl<Name, Table> => {
   const reducer = defineReducer({
     params: outboxResultParams(spec.table),
-    public: false,
   }) as unknown as OutboxResultSpec<Table>
 
   return {

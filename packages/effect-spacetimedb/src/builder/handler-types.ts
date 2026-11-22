@@ -31,12 +31,11 @@ import type { Request, SyncResponse } from "../http-primitives.ts"
 
 import type { ModulePlan } from "../module-plan.ts"
 
-import * as Server from "../server/bind.ts"
-
 import * as ServerContext from "../server/context.ts"
 import type { EnvironmentOfSpec } from "../server/environment.ts"
 import type {
   HandlerInputDefinitions,
+  Handlers,
   HttpHandlerErrors,
   HttpHandlerRequestOf,
   HttpHandlerResponseOf,
@@ -46,7 +45,7 @@ import type {
   ViewSuccessOf,
 } from "../server/handler-types.ts"
 import type { ConstrainedServerRuntimeMode } from "../server/runtime-layer.ts"
-import { type SyncRunner, type SyncRunnerLike } from "../server/sync-runner.ts"
+import { type SyncRunner } from "../server/sync-runner.ts"
 
 import type {
   AnonymousViewDecl,
@@ -83,7 +82,7 @@ import type {
   TableNamesTypeId,
 } from "./type-utils.ts"
 
-export type AnyStdbModule = RuntimeModuleState & {
+export type AnyModule = RuntimeModuleState & {
   readonly spec: AnyModuleSpec
   readonly [GroupTypeId]: AnyGroup
   readonly [GroupNamesTypeId]: string
@@ -95,37 +94,36 @@ export type AnyStdbModule = RuntimeModuleState & {
   readonly [ModuleSpecTypeId]: AnyModuleSpec
 }
 
-export type ModuleNameOf<Module extends AnyStdbModule> =
+export type ModuleNameOf<Module extends AnyModule> =
   SpecOfModule<Module>["name"] & string
 
 // Reads the eagerly-accumulated group-name union off the module (cheap) rather
 // than deriving it from the heavy `[GroupTypeId]` group union.
-export type GroupNames<Module extends AnyStdbModule> = Module extends {
+export type GroupNames<Module extends AnyModule> = Module extends {
   readonly [GroupNamesTypeId]: infer Names extends string
 }
   ? Names
   : never
 
-export type TableNames<Module extends AnyStdbModule> = Module extends {
+export type TableNames<Module extends AnyModule> = Module extends {
   readonly [TableNamesTypeId]: infer Names extends string
 }
   ? Names
   : never
 
-export type ScheduledTableNames<Module extends AnyStdbModule> = Module extends {
+export type ScheduledTableNames<Module extends AnyModule> = Module extends {
   readonly [ScheduledTableNamesTypeId]: infer Names extends string
 }
   ? Names
   : never
 
-export type SchedulePairsOfModule<Module extends AnyStdbModule> =
-  Module extends {
-    readonly [SchedulePairsTypeId]: infer Pairs extends SchedulePair
-  }
-    ? Pairs
-    : never
+export type SchedulePairsOfModule<Module extends AnyModule> = Module extends {
+  readonly [SchedulePairsTypeId]: infer Pairs extends SchedulePair
+}
+  ? Pairs
+  : never
 
-export type GroupEndpointPairsOfModule<Module extends AnyStdbModule> =
+export type GroupEndpointPairsOfModule<Module extends AnyModule> =
   Module extends {
     readonly [GroupEndpointPairsTypeId]: infer Pairs extends GroupEndpointPair
   }
@@ -133,12 +131,12 @@ export type GroupEndpointPairsOfModule<Module extends AnyStdbModule> =
     : never
 
 export type GroupByName<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Extract<GroupsOfModule<Module>, { readonly id: Name }>
 
 export type EndpointsOfGroupName<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = EndpointsOfGroup<GroupByName<Module, Name>>
 
@@ -216,89 +214,89 @@ export type ErrorsFor<Decl> = Decl extends {
               : unknown
 
 export type ReducerArgsFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Name extends keyof SpecOfModule<Module>["reducers"] & string
   ? ArgsFor<SpecOfModule<Module>["reducers"][Name]>
   : never
 
 export type RowOf<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends keyof SpecOfModule<Module>["tables"] & string,
 > = TableRow<SpecOfModule<Module>["tables"][Name]>
 
 export type ReducerSuccessFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Name extends keyof SpecOfModule<Module>["reducers"] & string
   ? SuccessFor<SpecOfModule<Module>["reducers"][Name]>
   : never
 
 export type ReducerErrorsFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Name extends keyof SpecOfModule<Module>["reducers"] & string
   ? ErrorsFor<SpecOfModule<Module>["reducers"][Name]>
   : never
 
 export type ProcedureArgsFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Name extends keyof SpecOfModule<Module>["procedures"] & string
   ? ArgsFor<SpecOfModule<Module>["procedures"][Name]>
   : never
 
 export type ProcedureSuccessFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Name extends keyof SpecOfModule<Module>["procedures"] & string
   ? SuccessFor<SpecOfModule<Module>["procedures"][Name]>
   : never
 
 export type ProcedureErrorsFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Name extends keyof SpecOfModule<Module>["procedures"] & string
   ? ErrorsFor<SpecOfModule<Module>["procedures"][Name]>
   : never
 
 export type HttpHandlerArgsFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Name extends keyof SpecOfModule<Module>["httpHandlers"] & string
   ? ArgsFor<SpecOfModule<Module>["httpHandlers"][Name]>
   : never
 
 export type HttpHandlerSuccessFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Name extends keyof SpecOfModule<Module>["httpHandlers"] & string
   ? SuccessFor<SpecOfModule<Module>["httpHandlers"][Name]>
   : never
 
 export type HttpHandlerErrorsFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Name extends keyof SpecOfModule<Module>["httpHandlers"] & string
   ? ErrorsFor<SpecOfModule<Module>["httpHandlers"][Name]>
   : never
 
 export type ViewArgsFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Name extends keyof SpecOfModule<Module>["views"] & string
   ? ArgsFor<SpecOfModule<Module>["views"][Name]>
   : never
 
 export type ViewSuccessFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Name extends keyof SpecOfModule<Module>["views"] & string
   ? SuccessFor<SpecOfModule<Module>["views"][Name]>
   : never
 
 export type ViewErrorsFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Name extends keyof SpecOfModule<Module>["views"] & string
   ? ErrorsFor<SpecOfModule<Module>["views"][Name]>
@@ -336,7 +334,7 @@ export type HasNoHandlerArgs<Decl> = IsNoPayloadArgs<ArgsFor<Decl>> extends true
   ? true
   : false
 
-export type AllowedFor<Module extends AnyStdbModule, Decl> = Decl extends {
+export type AllowedFor<Module extends AnyModule, Decl> = Decl extends {
   readonly declKind: "reducer" | "lifecycle"
 }
   ? ServerContext.ReducerAllowedRequirementsFor<SpecOfModule<Module>>
@@ -362,14 +360,14 @@ export type EndpointHandlerFn<
     : (args: ArgsFor<Decl>) => Effect.Effect<SuccessFor<Decl>, Error, unknown>
 
 export type GroupHandlerKeys<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Expand<{
   readonly [Decl in EndpointsOfGroupName<Module, Name> as Decl["name"]]: unknown
 }>
 
 export type GroupHandlersRecord<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Expand<{
   readonly [Decl in EndpointsOfGroupName<
@@ -388,8 +386,8 @@ export type GroupMiddlewareByKind = {
 
 export type GroupMiddleware = GroupMiddlewareEffect | GroupMiddlewareByKind
 
-type MiddlewareForKey<
-  Module extends AnyStdbModule,
+export type MiddlewareForKey<
+  Module extends AnyModule,
   Key extends string,
   Middleware,
   Spec extends AnyModuleSpec = SpecOfModule<Module>,
@@ -414,12 +412,11 @@ type MiddlewareForKey<
           : never
         : never
 
-type MiddlewareHandler<Middleware> = Middleware extends GroupMiddlewareEffect
-  ? () => Middleware
-  : never
+export type MiddlewareHandler<Middleware> =
+  Middleware extends GroupMiddlewareEffect ? () => Middleware : never
 
-type IsRawHttpHandlerKey<
-  Module extends AnyStdbModule,
+export type IsRawHttpHandlerKey<
+  Module extends AnyModule,
   Key extends string,
   Spec extends AnyModuleSpec = SpecOfModule<Module>,
 > = Key extends keyof Spec["httpHandlers"] & string
@@ -428,15 +425,15 @@ type IsRawHttpHandlerKey<
     : true
   : false
 
-type MiddlewareAllowedErrorsForKey<
-  Module extends AnyStdbModule,
+export type MiddlewareAllowedErrorsForKey<
+  Module extends AnyModule,
   Key extends string,
 > = IsRawHttpHandlerKey<Module, Key> extends true
   ? never
   : HandlerErrorsForKey<Module, Key>
 
 type MiddlewareUndeclaredErrorDiagnosticKeys<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Middleware,
 > = {
@@ -457,7 +454,7 @@ type MiddlewareUndeclaredErrorDiagnosticKeys<
 }[GroupEndpointNames<Module, Name>]
 
 type MiddlewareForbiddenServiceDiagnosticKeys<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Middleware,
 > = {
@@ -478,7 +475,7 @@ type MiddlewareForbiddenServiceDiagnosticKeys<
 }[GroupEndpointNames<Module, Name>]
 
 export type ValidateGroupMiddleware<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Middleware,
 > = DiagnosticRecord<
@@ -486,11 +483,12 @@ export type ValidateGroupMiddleware<
   | MiddlewareForbiddenServiceDiagnosticKeys<Module, Name, Middleware>
 >
 
-type MiddlewareEffects<Middleware> = Middleware extends GroupMiddlewareEffect
-  ? Middleware
-  : Middleware extends GroupMiddlewareByKind
-    ? Exclude<Middleware[keyof Middleware], undefined>
-    : never
+export type MiddlewareEffects<Middleware> =
+  Middleware extends GroupMiddlewareEffect
+    ? Middleware
+    : Middleware extends GroupMiddlewareByKind
+      ? Exclude<Middleware[keyof Middleware], undefined>
+      : never
 
 export type RuntimeROfGroupMiddleware<Middleware> = Exclude<
   MiddlewareEffects<Middleware> extends infer Candidate
@@ -527,7 +525,7 @@ type DiagnosticRecord<Keys extends string> = [Keys] extends [never]
       readonly [Key in Keys]: never
     }
 
-type HandlerErrorLabel<Error> = IsAny<Error> extends true
+export type HandlerErrorLabel<Error> = IsAny<Error> extends true
   ? "any"
   : IsUnknown<Error> extends true
     ? "unknown"
@@ -535,7 +533,7 @@ type HandlerErrorLabel<Error> = IsAny<Error> extends true
       ? Tag
       : "non-tagged error"
 
-type UndeclaredHandlerErrorLabels<Handler, AllowedError> = IsAny<
+export type UndeclaredHandlerErrorLabels<Handler, AllowedError> = IsAny<
   HandlerErrorsFor<Handler>
 > extends true
   ? never
@@ -548,7 +546,7 @@ type UndeclaredHandlerErrorLabels<Handler, AllowedError> = IsAny<
       : never
 
 type HandlerUndeclaredErrorDiagnosticKeys<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Handlers,
 > = {
@@ -566,7 +564,7 @@ type HandlerUndeclaredErrorDiagnosticKeys<
 }[keyof Handlers & string]
 
 type NoUndeclaredHandlerErrors<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Handlers,
 > = DiagnosticRecord<
@@ -618,7 +616,7 @@ type ForbiddenPrecheckedServiceLabels<Handler, Allowed> = Exclude<
   : never
 
 type ForbiddenHandlerServiceDiagnosticKeys<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Handlers,
 > = {
@@ -642,7 +640,7 @@ type ForbiddenHandlerServiceDiagnosticKeys<
 }[keyof Handlers & string]
 
 type NoForbiddenHandlerServices<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Handlers,
 > = DiagnosticRecord<
@@ -650,7 +648,7 @@ type NoForbiddenHandlerServices<
 >
 
 type PrecheckedForbiddenServiceDiagnosticKeys<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Handlers,
 > = {
@@ -674,7 +672,7 @@ type PrecheckedForbiddenServiceDiagnosticKeys<
 }[keyof Handlers & string]
 
 type NoPrecheckedForbiddenServices<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Handlers,
 > = DiagnosticRecord<
@@ -682,14 +680,14 @@ type NoPrecheckedForbiddenServices<
 >
 
 export type HandlerWithAllowedRequirements<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Decl,
   Handler,
 > = HasForbiddenRequirements<Handler, AllowedFor<Module, Decl>> extends true
   ? never
   : Handler
 
-type ServiceModuleName<Service> = Service extends ModuleBrand<infer Name>
+export type ServiceModuleName<Service> = Service extends ModuleBrand<infer Name>
   ? Name
   : never
 
@@ -701,15 +699,16 @@ type ForbiddenServices<Handler, Allowed> = Exclude<
   Allowed
 >
 
-type IsRawModuleScopedService<Service> = Service extends ServerContext.Http
-  ? false
-  : [ServiceModuleName<Service>] extends [never]
-    ? Service extends ServerContext.AnyServerContextRequirements
-      ? true
+export type IsRawModuleScopedService<Service> =
+  Service extends ServerContext.Http
+    ? false
+    : [ServiceModuleName<Service>] extends [never]
+      ? Service extends ServerContext.AnyServerContextRequirements
+        ? true
+        : false
       : false
-    : false
 
-type AccessorName<Service> = Service extends ServerContext.ReadonlyDb
+export type AccessorName<Service> = Service extends ServerContext.ReadonlyDb
   ? "ReadonlyDb"
   : Service extends ServerContext.ReducerCtx
     ? "ReducerCtx"
@@ -738,7 +737,7 @@ type AccessorName<Service> = Service extends ServerContext.ReadonlyDb
                           : "accessor"
 
 type ForbiddenServerServiceMessage<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Key extends string,
   Label extends string,
   Handler,
@@ -760,7 +759,7 @@ type ForbiddenServerServiceMessage<
   : never
 
 type PrecheckedForbiddenServiceMessage<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Key extends string,
   Label extends string,
   Handler,
@@ -794,7 +793,7 @@ export type HandlerForDecl<
 > = Decl["name"] extends keyof Handlers ? Handlers[Decl["name"]] : never
 
 export type ValidateGroupHandlers<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Handlers,
 > = NoExtraHandlerKeys<Handlers, GroupHandlerKeys<Module, Name>> &
@@ -802,7 +801,7 @@ export type ValidateGroupHandlers<
   NoForbiddenHandlerServices<Module, Name, Handlers>
 
 export type GroupEndpointNames<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Extract<
   GroupEndpointPairsOfModule<Module>,
@@ -810,20 +809,20 @@ export type GroupEndpointNames<
 >["name"]
 
 export type GroupEndpointKeyRecord<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = {
   readonly [Key in GroupEndpointNames<Module, Name>]: unknown
 }
 
 export type MissingGroupHandlerKeys<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Handlers,
 > = Exclude<GroupEndpointNames<Module, Name>, keyof Handlers>
 
 export type NoMissingGroupHandlerKeys<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Handlers,
 > = [MissingGroupHandlerKeys<Module, Name, Handlers>] extends [never]
@@ -833,7 +832,7 @@ export type NoMissingGroupHandlerKeys<
     }
 
 export type HandlerForKey<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Key extends string,
   Spec extends AnyModuleSpec = SpecOfModule<Module>,
 > = HandlerForKeyWithChannels<
@@ -843,13 +842,13 @@ export type HandlerForKey<
   AllowedRequirementsForKey<Module, Key, Spec>
 >
 
-type HandlerShapeForKey<
-  Module extends AnyStdbModule,
+export type HandlerShapeForKey<
+  Module extends AnyModule,
   Key extends string,
   Spec extends AnyModuleSpec = SpecOfModule<Module>,
 > = HandlerForKeyWithChannels<Key, Spec, unknown, unknown>
 
-type HandlerForKeyWithChannels<
+export type HandlerForKeyWithChannels<
   Key extends string,
   Spec extends AnyModuleSpec,
   Error,
@@ -886,8 +885,8 @@ type HandlerForKeyWithChannels<
           ? () => Effect.Effect<unknown, Error, Requirements>
           : never
 
-type HandlerErrorsForKey<
-  Module extends AnyStdbModule,
+export type HandlerErrorsForKey<
+  Module extends AnyModule,
   Key extends string,
   Spec extends AnyModuleSpec = SpecOfModule<Module>,
 > = Key extends keyof Spec["reducers"] & string
@@ -903,7 +902,7 @@ type HandlerErrorsForKey<
           : never
 
 export type HandlerFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Key extends string,
   Spec extends AnyModuleSpec = SpecOfModule<Module>,
@@ -912,7 +911,7 @@ export type HandlerFor<
   : never
 
 export type AllowedRequirementsForKey<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Key extends string,
   Spec extends AnyModuleSpec = SpecOfModule<Module>,
 > = Key extends keyof Spec["reducers"] & string
@@ -929,8 +928,8 @@ export type AllowedRequirementsForKey<
           ? ServerContext.ReducerAllowedRequirementsFor<Spec>
           : never
 
-type ScopeRuleForKey<
-  Module extends AnyStdbModule,
+export type ScopeRuleForKey<
+  Module extends AnyModule,
   Key extends string,
   Spec extends AnyModuleSpec = SpecOfModule<Module>,
 > = Key extends keyof Spec["reducers"] & string
@@ -948,7 +947,7 @@ type ScopeRuleForKey<
           : "use this endpoint's module accessors"
 
 export type CheckedForbiddenHandlerKeys<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Handlers,
 > = {
@@ -966,7 +965,7 @@ export type CheckedForbiddenHandlerKeys<
 }[keyof Handlers & string]
 
 export type NoCheckedForbiddenRequirements<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Handlers,
 > = [CheckedForbiddenHandlerKeys<Module, Name, Handlers>] extends [never]
@@ -979,25 +978,8 @@ export type NoCheckedForbiddenRequirements<
       >]: never
     }
 
-export type ValidateCheckedGroupHandlers<
-  Module extends AnyStdbModule,
-  Name extends string,
-  Handlers,
-> = NoExtraHandlerKeys<Handlers, GroupEndpointKeyRecord<Module, Name>> &
-  NoMissingGroupHandlerKeys<Module, Name, Handlers> &
-  NoUndeclaredHandlerErrors<Module, Name, Handlers> &
-  NoForbiddenHandlerServices<Module, Name, Handlers> &
-  Expand<{
-    readonly [Key in keyof Handlers & string]: Key extends GroupEndpointNames<
-      Module,
-      Name
-    >
-      ? HandlerShapeForKey<Module, Key>
-      : unknown
-  }>
-
 export type ValidatePrecheckedGroupHandlers<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
   Handlers,
 > = NoExtraHandlerKeys<Handlers, GroupEndpointKeyRecord<Module, Name>> &
@@ -1014,7 +996,7 @@ export type ValidatePrecheckedGroupHandlers<
   }>
 
 export type GroupCheckedHandlers<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends GroupNames<Module>,
   Keys extends GroupEndpointNames<Module, Name> = GroupEndpointNames<
     Module,
@@ -1025,7 +1007,7 @@ export type GroupCheckedHandlers<
 }>
 
 export type GroupImplHandlersFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Name extends string,
 > = Expand<{
   readonly [Key in GroupEndpointNames<Module, Name>]: HandlerFor<
@@ -1036,7 +1018,7 @@ export type GroupImplHandlersFor<
 }>
 
 export type LifecycleImplHandlersFor<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Hooks extends LifecycleName,
 > = Expand<{
   readonly [Key in Hooks]: () => Effect.Effect<
@@ -1051,7 +1033,7 @@ export type LifecycleHandlerKeys = {
 }
 
 type NoForbiddenLifecycleServices<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Handlers,
 > = DiagnosticRecord<
   {
@@ -1072,7 +1054,7 @@ type NoForbiddenLifecycleServices<
 >
 
 export type ValidateLifecycleHandlers<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Handlers,
 > = NoExtraHandlerKeys<Handlers, LifecycleHandlerKeys> &
   NoForbiddenLifecycleServices<Module, Handlers> &
@@ -1120,7 +1102,19 @@ export type LifecycleImpl<
   readonly [GroupImplRuntimeTypeId]: RuntimeR
 }
 
+/** A server implementation for one named mount on a particular parent module. Pass it in the parent's build array. */
+export type MountImpl<
+  Name extends string = string,
+  ModuleName extends string = string,
+  R = never,
+> = ModuleBrand<ModuleName> & {
+  readonly kind: "stdbMount"
+  readonly namespace: Name
+  readonly [GroupImplRuntimeTypeId]: R
+}
+
 export type AnyBuilderImpl =
+  | MountImpl<string, string, unknown>
   | GroupImpl<string, unknown, string>
   | LifecycleImpl<LifecycleName, unknown, string>
 
@@ -1129,7 +1123,7 @@ export type InternalGroupImpl<
   RuntimeR = unknown,
   ModuleName extends string = string,
 > = GroupImpl<Name, RuntimeR, ModuleName> & {
-  readonly module: AnyStdbModule
+  readonly module: AnyModule
   readonly definitions: Partial<
     HandlerInputDefinitions<AnyModuleSpec, RuntimeR>
   >
@@ -1140,14 +1134,27 @@ export type InternalLifecycleImpl<
   RuntimeR = unknown,
   ModuleName extends string = string,
 > = LifecycleImpl<Hooks, RuntimeR, ModuleName> & {
-  readonly module: AnyStdbModule
+  readonly module: AnyModule
   readonly lifecycleSpecs: Partial<LifecycleRecordFromNames<Hooks>>
   readonly definitions: Partial<
     HandlerInputDefinitions<AnyModuleSpec, RuntimeR>
   >
 }
 
+export type InternalMountImpl = MountImpl<string, string, unknown> & {
+  readonly module: AnyModule
+  readonly definitions: {}
+  readonly implementation:
+    | {
+        readonly kind: "moduleMount"
+        readonly module: AnyModule
+        readonly implementations: readonly AnyBuilderImpl[]
+      }
+    | { readonly kind: "nativeMount"; readonly library: unknown }
+}
+
 export type InternalBuilderImpl =
+  | InternalMountImpl
   | InternalGroupImpl<string, unknown, string>
   | InternalLifecycleImpl<LifecycleName, unknown, string>
 
@@ -1172,24 +1179,27 @@ export type LifecycleHooksOfImpl<Impl> = Impl extends {
   ? Hooks
   : never
 
-export type ModuleNameOfImpl<Impl> = Impl extends GroupImpl<
+export type ModuleNameOfImpl<Impl> = Impl extends MountImpl<
   string,
-  unknown,
-  infer ModuleName extends string
+  infer Parent,
+  unknown
 >
-  ? ModuleName
-  : Impl extends LifecycleImpl<
-        LifecycleName,
-        unknown,
-        infer ModuleName extends string
-      >
+  ? Parent
+  : Impl extends GroupImpl<string, unknown, infer ModuleName extends string>
     ? ModuleName
-    : never
+    : Impl extends LifecycleImpl<
+          LifecycleName,
+          unknown,
+          infer ModuleName extends string
+        >
+      ? ModuleName
+      : never
 
-export type HandlersOf<
-  Module extends AnyStdbModule,
-  Impl,
-> = Impl extends GroupImpl<infer Name extends string, unknown, string>
+export type HandlersOf<Module extends AnyModule, Impl> = Impl extends GroupImpl<
+  infer Name extends string,
+  unknown,
+  string
+>
   ? GroupImplHandlersFor<Module, Name>
   : Impl extends LifecycleImpl<
         infer Hooks extends LifecycleName,
@@ -1217,16 +1227,17 @@ export type SpecWithLifecycle<
   Spec["httpGroups"],
   Spec["reducerGroups"],
   Spec["procedureGroups"],
-  EnvironmentOfSpec<Spec>
+  EnvironmentOfSpec<Spec>,
+  NonNullable<Spec["mounts"]>
 > & { readonly name: Spec["name"] }
 
 export type BuildSpec<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Impls extends ReadonlyArray<unknown>,
 > = SpecWithLifecycle<SpecOfModule<Module>, LifecycleSpecsOfImpls<Impls>>
 
 export type MissingGroups<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Impls extends ReadonlyArray<unknown>,
 > = Exclude<GroupNames<Module>, ImplGroupName<Impls[number]>>
 
@@ -1247,7 +1258,7 @@ export type DuplicateImplGroups<
   : Dup
 
 export type CoverAllGroups<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Impls extends ReadonlyArray<unknown>,
 > = [MissingGroups<Module, Impls>] extends [never]
   ? [DuplicateImplGroups<Impls>] extends [never]
@@ -1261,15 +1272,15 @@ export type CoverAllGroups<
         string as `Group not implemented: ${Name}`]: never
     }
 
-export type MissingScheduleTargets<Module extends AnyStdbModule> = Exclude<
+export type MissingScheduleTargets<Module extends AnyModule> = Exclude<
   ScheduledTableNames<Module>,
   SchedulePairsOfModule<Module>["table"]
 >
 
-export type UnregisteredScheduleTargetTables<Module extends AnyStdbModule> =
+export type UnregisteredScheduleTargetTables<Module extends AnyModule> =
   Exclude<SchedulePairsOfModule<Module>["table"], TableNames<Module>>
 
-export type CoverScheduleBindings<Module extends AnyStdbModule> = [
+export type CoverScheduleBindings<Module extends AnyModule> = [
   UnregisteredScheduleTargetTables<Module>,
 ] extends [never]
   ? [MissingScheduleTargets<Module>] extends [never]
@@ -1286,22 +1297,24 @@ export type CoverScheduleBindings<Module extends AnyStdbModule> = [
 // Derived from the assembled spec at build time rather than accumulated on
 // every add, like schedules are: a module declares few outboxes, and the build
 // is the only place the pairing is checked.
-type OutboxTableNames<Module extends AnyStdbModule> = OutboxTableNameOf<
+export type OutboxTableNames<Module extends AnyModule> = OutboxTableNameOf<
   SpecOfModule<Module>["tables"][keyof SpecOfModule<Module>["tables"]]
 >
 
-type SettledOutboxTableNames<Module extends AnyStdbModule> =
+export type SettledOutboxTableNames<Module extends AnyModule> =
   SettledOutboxTableNamesOf<SpecOfModule<Module>["reducers"]>
 
-export type UnsettledOutboxTables<Module extends AnyStdbModule> = Exclude<
+export type UnsettledOutboxTables<Module extends AnyModule> = Exclude<
   OutboxTableNames<Module>,
   SettledOutboxTableNames<Module>
 >
 
-export type UnregisteredSettledOutboxTables<Module extends AnyStdbModule> =
-  Exclude<SettledOutboxTableNames<Module>, TableNames<Module>>
+export type UnregisteredSettledOutboxTables<Module extends AnyModule> = Exclude<
+  SettledOutboxTableNames<Module>,
+  TableNames<Module>
+>
 
-export type CoverOutboxResultBindings<Module extends AnyStdbModule> = [
+export type CoverOutboxResultBindings<Module extends AnyModule> = [
   UnregisteredSettledOutboxTables<Module>,
 ] extends [never]
   ? [UnsettledOutboxTables<Module>] extends [never]
@@ -1315,32 +1328,36 @@ export type CoverOutboxResultBindings<Module extends AnyStdbModule> = [
         string as `Settle reducer references an unregistered table: ${Name}`]: never
     }
 
-type TupleIndexKeys<Values extends ReadonlyArray<unknown>> = Exclude<
+export type TupleIndexKeys<Values extends ReadonlyArray<unknown>> = Exclude<
   keyof Values,
   keyof (readonly unknown[])
 >
 
 type ImplModuleMismatchDiagnosticKey<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Impl,
 > = string extends ModuleNameOf<Module>
   ? "module type was widened; use a concretely-typed module"
   : string extends ModuleNameOfImpl<Impl>
     ? Impl extends GroupImpl<infer Name extends string, unknown, string>
-      ? `Group impl '${Name}' has a widened module type; use the concrete return from StdbBuilder.group`
-      : Impl extends LifecycleImpl<LifecycleName, unknown, string>
-        ? "Lifecycle impl has a widened module type; use the concrete return from StdbBuilder.lifecycle"
-        : never
+      ? `Group impl '${Name}' has a widened module type; use the concrete return from Builder.group`
+      : Impl extends MountImpl<string, string, unknown>
+        ? "Mount implementation has a widened module type"
+        : Impl extends LifecycleImpl<LifecycleName, unknown, string>
+          ? "Lifecycle impl has a widened module type; use the concrete return from Builder.lifecycle"
+          : never
     : ModuleNameOfImpl<Impl> extends ModuleNameOf<Module>
       ? never
       : Impl extends GroupImpl<string, unknown, string>
         ? `Group impl was built for module '${ModuleNameOfImpl<Impl>}', not '${ModuleNameOf<Module>}'`
-        : Impl extends LifecycleImpl<LifecycleName, unknown, string>
-          ? `Lifecycle impl was built for module '${ModuleNameOfImpl<Impl>}', not '${ModuleNameOf<Module>}'`
-          : never
+        : Impl extends MountImpl<string, string, unknown>
+          ? `Mount impl was built for module '${ModuleNameOfImpl<Impl>}', not '${ModuleNameOf<Module>}'`
+          : Impl extends LifecycleImpl<LifecycleName, unknown, string>
+            ? `Lifecycle impl was built for module '${ModuleNameOfImpl<Impl>}', not '${ModuleNameOf<Module>}'`
+            : never
 
 export type ImplModuleMismatchDiagnosticKeys<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Impls extends ReadonlyArray<unknown>,
 > = {
   readonly [Index in TupleIndexKeys<Impls>]: ImplModuleMismatchDiagnosticKey<
@@ -1350,29 +1367,60 @@ export type ImplModuleMismatchDiagnosticKeys<
 }[TupleIndexKeys<Impls>]
 
 export type NoImplModuleMismatches<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Impls extends ReadonlyArray<unknown>,
 > = DiagnosticRecord<ImplModuleMismatchDiagnosticKeys<Module, Impls>>
 
-type CoverBuildImpls<
-  Module extends AnyStdbModule,
+export type MountKeyOfImpl<Impl> = Impl extends MountImpl<
+  infer Key,
+  string,
+  unknown
+>
+  ? Key
+  : never
+export type MountCoverage<
+  Module extends AnyModule,
+  Impls extends readonly unknown[],
+> = DiagnosticRecord<
+  | `Mount not implemented: ${Exclude<keyof NonNullable<Module["spec"]["mounts"]> & string, MountKeyOfImpl<Impls[number]>>}`
+  | `Undeclared mount: ${Exclude<MountKeyOfImpl<Impls[number]>, keyof NonNullable<Module["spec"]["mounts"]>>}`
+  | `Duplicate mount: ${DuplicateMountKeys<Impls> & string}`
+>
+export type DuplicateMountKeys<
+  Impls extends readonly unknown[],
+  Seen = never,
+  Duplicates = never,
+> = Impls extends readonly [infer Head, ...infer Tail]
+  ? DuplicateMountKeys<
+      Tail,
+      Seen | MountKeyOfImpl<Head>,
+      Duplicates | Extract<MountKeyOfImpl<Head>, Seen>
+    >
+  : Duplicates
+
+export type CoverBuildImpls<
+  Module extends AnyModule,
   Impls extends ReadonlyArray<unknown>,
 > = [ImplModuleMismatchDiagnosticKeys<Module, Impls>] extends [never]
-  ? CoverAllGroups<Module, Impls> &
+  ? MountCoverage<Module, Impls> &
+      CoverAllGroups<Module, Impls> &
       CoverScheduleBindings<Module> &
       CoverOutboxResultBindings<Module>
   : unknown
 
 export type BuildRuntime<RuntimeR> =
   | SyncRunner<RuntimeR>
-  | SyncRunnerLike<RuntimeR>
   | Layer.Layer<RuntimeR, never, never>
 
 export type BuildOptions<RuntimeR> = {
   /**
-   * Called synchronously with the cause of any handler that died. Typed
-   * failures never reach it, and the cause is observed rather than consumed:
-   * the handler still throws and its transaction still aborts.
+   * Called synchronously, once, with the cause of every undeclared failure: a
+   * die, a host failure or a typed failure no declared error matches, including
+   * one inside `withTx` and a handler that went asynchronous. Declared errors, a
+   * sender refusal from a reducer or a lifecycle hook, and a caller's bad
+   * arguments to a reducer, a procedure or a view never reach it. The cause is
+   * observed, not consumed: the call still fails as it would have, and its
+   * transaction still aborts.
    */
   readonly onDefect?: ((cause: Cause.Cause<unknown>) => void) | undefined
   readonly runtime?: BuildRuntime<RuntimeR>
@@ -1395,7 +1443,7 @@ export type RejectWidenedImplArray<Impls extends ReadonlyArray<unknown>> =
     : unknown
 
 export type BuildImplsWithoutRuntime<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Impls extends ReadonlyArray<AnyBuilderImpl>,
 > = Impls &
   RejectWidenedImplArray<Impls> &
@@ -1408,7 +1456,7 @@ export type BuildImplsWithoutRuntime<
       })
 
 export type BuildImplsWithRuntime<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Impls extends ReadonlyArray<AnyBuilderImpl>,
 > = Impls &
   RejectWidenedImplArray<Impls> &
@@ -1419,9 +1467,6 @@ export type BuildOptionsWithoutRuntime<
   Impls extends ReadonlyArray<AnyBuilderImpl>,
 > = BuildOptions<RuntimeROfImpls<Impls>> & {
   readonly runtime?: never
-  readonly runtimeMode: NonNullable<
-    BuildOptions<RuntimeROfImpls<Impls>>["runtimeMode"]
-  >
 }
 
 export type BuildOptionsWithRuntime<
@@ -1431,12 +1476,12 @@ export type BuildOptionsWithRuntime<
 }
 
 export type BuildArgsWithoutRuntime<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Impls extends ReadonlyArray<AnyBuilderImpl>,
 > = readonly [module: Module, impls: BuildImplsWithoutRuntime<Module, Impls>]
 
 export type BuildArgsWithRuntimeMode<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Impls extends ReadonlyArray<AnyBuilderImpl>,
 > = readonly [
   module: Module,
@@ -1445,7 +1490,7 @@ export type BuildArgsWithRuntimeMode<
 ]
 
 export type BuildArgsWithRuntime<
-  Module extends AnyStdbModule,
+  Module extends AnyModule,
   Impls extends ReadonlyArray<AnyBuilderImpl>,
 > = readonly [
   module: Module,
@@ -1453,11 +1498,11 @@ export type BuildArgsWithRuntime<
   options: BuildOptionsWithRuntime<Impls>,
 ]
 
-export type StdbBuildPlan<
+export type BuildPlan<
   Module extends AnyModuleSpec = AnyModuleSpec,
   RuntimeR = never,
 > = {
   readonly module: Module
   readonly scheduleBindings: ModulePlan<Module>["scheduleBindings"]
-  readonly handlers: Server.Handlers<Module, RuntimeR>
+  readonly handlers: Handlers<Module, RuntimeR>
 }

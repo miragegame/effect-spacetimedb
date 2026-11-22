@@ -16,9 +16,11 @@ const TurnEventContent = Stdb.sum({
 const prose = TurnEventContent.make.Prose({ text: "hello" })
 const score = TurnEventContent.make.Score({ delta: 1 })
 const done = TurnEventContent.make.Done
-const namedProse = TurnEventContent.name("turn_event_content").make.Prose({
-  text: "hello",
-})
+const namedProse = TurnEventContent.columnName("turn_event_content").make.Prose(
+  {
+    text: "hello",
+  },
+)
 const optionalDone = TurnEventContent.optional().make.Done
 
 type ProseContent = Extract<
@@ -76,7 +78,7 @@ type _NameContent = Assert<
 
 const Phase = Stdb.enum("Lobby", "Running")
 const lobby = Phase.make.Lobby
-const namedLobby = Phase.name("phase").make.Lobby
+const namedLobby = Phase.columnName("phase").make.Lobby
 
 type _LobbyContent = Assert<
   IsEqual<

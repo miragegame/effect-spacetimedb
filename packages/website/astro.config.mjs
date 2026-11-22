@@ -274,6 +274,10 @@ export default defineConfig({
               link: "/core-concepts/subscriptions",
             },
             {
+              label: "Testing",
+              link: "/core-concepts/testing",
+            },
+            {
               label: "Clients",
               collapsed: false,
               items: [
@@ -300,6 +304,10 @@ export default defineConfig({
                 {
                   label: "Migrations",
                   link: "/core-concepts/databases/migrations",
+                },
+                {
+                  label: "Submodules",
+                  link: "/core-concepts/databases/submodules",
                 },
                 {
                   label: "Environment Variables",
@@ -340,6 +348,10 @@ export default defineConfig({
             {
               label: "Migrating From Native SDK",
               link: "/the-effect-layer/migrating-from-native-sdk",
+            },
+            {
+              label: "Upgrading from 0.8 to 0.9",
+              link: "/the-effect-layer/upgrading-from-0-8",
             },
           ],
         },

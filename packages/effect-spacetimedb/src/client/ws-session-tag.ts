@@ -8,7 +8,7 @@ import type {
   ManagedWsConnection,
 } from "./generated-ws-adapter.ts"
 import { canonicalValueKey } from "./table-ref.ts"
-import type { makeFromModulePlan as makeWsClient } from "./ws-client.ts"
+import type { makeFromModulePlan as wsMake } from "./ws-client.ts"
 
 /**
  * The session a WebSocket client resource yields, and the Context keys that
@@ -17,13 +17,11 @@ import type { makeFromModulePlan as makeWsClient } from "./ws-client.ts"
 
 type Simplify<Value> = { readonly [Key in keyof Value]: Value[Key] } & {}
 
-type WsClientRuntime<
+export type WsClientRuntime<
   Module extends AnyModuleSpec,
   ErrorContext,
   RelationContext,
-> = Simplify<
-  ReturnType<typeof makeWsClient<Module, ErrorContext, RelationContext>>
->
+> = Simplify<ReturnType<typeof wsMake<Module, ErrorContext, RelationContext>>>
 
 export type WsSession<
   Module extends AnyModuleSpec,
@@ -88,7 +86,7 @@ const sessionTagForModule = <
     WsSession<Module, ErrorContext, RelationContext>
   >(sessionTagIdForModule(module, name))
 
-export const sessionTag = <
+export const wsSessionTag = <
   Module extends AnyModuleSpec,
   ErrorContext,
   RelationContext,

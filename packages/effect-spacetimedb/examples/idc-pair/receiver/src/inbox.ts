@@ -18,12 +18,12 @@ export class IdcPairBlankNote extends Schema.TaggedError<IdcPairBlankNote>()(
   {},
 ) {}
 
-export const IdcPairInbox = Stdb.StdbGroup.make("IdcPairInbox", {
+export const IdcPairInbox = Stdb.Group.make("IdcPairInbox", {
   errors: Stdb.errors(IdcPairUnknownSender, IdcPairBlankNote),
 }).add(
   // Called as `receive_note`. Parameter names are single lowercase words so
   // the call's signature does not depend on either module's case policy.
-  Stdb.StdbFn.receiver("receiveNote", {
+  Stdb.Fn.receiver("receiveNote", {
     params: Stdb.struct({ note: Stdb.string() }),
   }),
 )

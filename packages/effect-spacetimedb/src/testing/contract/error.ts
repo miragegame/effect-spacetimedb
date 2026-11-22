@@ -1,6 +1,7 @@
 export {
   decodeString,
   encodeString,
+  encodeUndeclaredFailure,
   error,
   errors,
   isReservedDeclaredErrorTag,
@@ -9,6 +10,7 @@ export {
   namespace,
   normalizeErrorsInput,
   peekStringEnvelopeTag,
+  peekUndeclaredFailure,
   statusOf,
   tagOf,
 } from "../../contract/error.ts"
@@ -24,4 +26,5 @@ export type {
   NamespacedErrorDefinition,
   ProcedureDeclaredErrorCarrier,
   TaggedErrorClass,
+  UndeclaredFailure,
 } from "../../contract/error.ts"

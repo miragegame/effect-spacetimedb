@@ -6,22 +6,21 @@ import { MembershipFunctions } from "./memberships/contract"
 import { NativeRangeFunctions } from "./native-ranges/contract"
 import { ScheduleFunctions } from "./schedules/contract"
 import { exampleTables } from "./schema"
+import { SerialEntryFunctions } from "./serial-entries/contract"
 import { ThingFunctions, ThingRoutes } from "./things/contract"
 import { UserFunctions } from "./users/contract"
 import { WebhookRoutes } from "./webhooks/contract"
 
-export const ExampleModule = Stdb.StdbModule.make(
-  "effect_spacetimedb_example",
-  {
-    lifecycle: ExampleLifecycle,
-  },
-)
+export const ExampleModule = Stdb.Module.make("effect_spacetimedb_example", {
+  lifecycle: ExampleLifecycle,
+})
   .addTables(...exampleTables)
   .add(UserFunctions)
   .add(ConstraintEntryFunctions)
   .add(DeterminismFunctions)
   .add(MembershipFunctions)
   .add(NativeRangeFunctions)
+  .add(SerialEntryFunctions)
   .add(ThingFunctions)
   .add(ScheduleFunctions)
   .add(ThingRoutes)

@@ -1,3 +1,5 @@
+import { withDeadline } from "./call-duration.ts"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import {
   DisconnectedError,
@@ -9,6 +11,7 @@ import {
   ConnectionIdentityChangedError,
   ConnectionLostError,
   type TransportError,
+  type WsConnectionFailure,
   WsRpcInvokeError,
 } from "./call-errors.ts"
 import type {
@@ -20,12 +23,7 @@ import {
   type WsCallableTransport,
 } from "./websocket-contract.ts"
 
-type WsConnectionCallFailure =
-  | ConnectionLostError
-  | CallNotSentError
-  | ConnectionIdentityChangedError
-
-type WsCallFailure = WsConnectionCallFailure | TransportError | WsRpcInvokeError
+type WsInvokeFailure = WsConnectionFailure | TransportError | WsRpcInvokeError
 
 /**
  * Whether `cause` is the SDK error class named `name`. A generated client
@@ -84,15 +82,18 @@ const unsendableReason = (
 export const makeWsConnectionAwareCalls = (options: {
   readonly connectionState: WsConnectionState
   readonly transport: WsCallableTransport | undefined
+  readonly callDurationMax: Duration.Input
+  /** Ends the connection a call overran on. It must invalidate it. */
+  readonly endConnection: (message: string) => Effect.Effect<void>
 }): {
   readonly invokeProcedure: (
     name: string,
     params: object,
-  ) => Effect.Effect<unknown, WsCallFailure>
+  ) => Effect.Effect<unknown, WsInvokeFailure>
   readonly invokeReducer: (
     name: string,
     params: object,
-  ) => Effect.Effect<void, WsCallFailure>
+  ) => Effect.Effect<void, WsInvokeFailure>
 } => {
   const connectionLost = options.connectionState
     .awaitInvalidation()
@@ -102,10 +103,28 @@ export const makeWsConnectionAwareCalls = (options: {
       ),
     )
 
+  // The socket reports `open` for a peer that has gone, so the SDK neither
+  // answers nor rejects, and nothing else would ever settle the call. An
+  // unanswered call is the evidence of that, so the connection ends with it,
+  // and the disconnect must run although invalidating already woke the race.
+  const overrunCall = (name: string) =>
+    Effect.suspend(() => {
+      const message = `${name} got no answer within ${Duration.format(Duration.fromInputUnsafe(options.callDurationMax))}`
+      return options
+        .endConnection(message)
+        .pipe(
+          Effect.uninterruptible,
+          Effect.andThen(
+            Effect.fail(new ConnectionLostError({ raw: message })),
+          ),
+        )
+    })
+
   const invokeWithConnection = <A>(
+    name: string,
     invoke: () => Promise<A>,
-  ): Effect.Effect<A, WsConnectionCallFailure | WsRpcInvokeError> =>
-    Effect.suspend<A, WsConnectionCallFailure | WsRpcInvokeError, never>(() => {
+  ): Effect.Effect<A, WsConnectionFailure | WsRpcInvokeError> =>
+    Effect.suspend<A, WsConnectionFailure | WsRpcInvokeError, never>(() => {
       const invalidation = options.connectionState.invalidation()
       if (invalidation != null) {
         return Effect.fail(invalidationCallFailure(invalidation))
@@ -119,14 +138,20 @@ export const makeWsConnectionAwareCalls = (options: {
         try: invoke,
         catch: classifyWsInvokeRejection,
       })
-    }).pipe(Effect.raceFirst(connectionLost))
+    }).pipe(
+      Effect.raceFirst(connectionLost),
+      withDeadline({
+        duration: options.callDurationMax,
+        orElse: () => overrunCall(name),
+      }),
+    )
 
   const transport = options.transport
 
   return {
     invokeProcedure: (name, params) =>
       transport != null
-        ? invokeWithConnection(() =>
+        ? invokeWithConnection(name, () =>
             transport.callProcedureWithParams(
               name,
               undefined,
@@ -137,7 +162,7 @@ export const makeWsConnectionAwareCalls = (options: {
         : missingWsRpcTransport,
     invokeReducer: (name, params) =>
       transport != null
-        ? invokeWithConnection(() =>
+        ? invokeWithConnection(name, () =>
             transport.callReducerWithParams(name, undefined, params),
           )
         : missingWsRpcTransport,

@@ -12,12 +12,14 @@ Tables are declared with `Stdb.table(name, options)`. Bind each table to a
 variable so its `row` value type, column metadata, index metadata, and generated
 accessor types can flow through the module.
 
-```typescript twoslash
+```typescript
 import * as Schema from "effect/Schema"
 import * as Stdb from "effect-spacetimedb"
 
 const UserId = Schema.String.pipe(Schema.brand("UserId"))
-const ShortString = Stdb.string(Schema.String.pipe(Schema.minLength(1)))
+const ShortString = Stdb.string(
+  Schema.String.pipe(Schema.check(Schema.isMinLength(1))),
+)
 
 export const user = Stdb.table("user", {
   public: true,
@@ -30,11 +32,11 @@ export const user = Stdb.table("user", {
 export const membership = Stdb.table("membership", {
   public: false,
   columns: {
-    tenant_id: ShortString,
+    tenantId: ShortString,
     email: ShortString,
   },
-  indexes: (c) => [Stdb.index("membership_email_tenant_idx", [c.email, c.tenant_id])],
-  constraints: (c) => [Stdb.unique("membership_tenant_email_unique", [c.tenant_id, c.email])],
+  indexes: (c) => [Stdb.index("byTenantEmail", [c.tenantId, c.email])],
+  constraints: (c) => [Stdb.unique("tenantEmailUnique", [c.tenantId, c.email])],
 })
 ```
 
@@ -50,34 +52,26 @@ both.
 
 ## Value-Type Pattern
 
-Use a plain Effect schema as the domain source of truth, then wrap it at
-SpaceTimeDB declaration boundaries:
-
-```ts
-const UserId = Schema.String.pipe(Schema.brand("UserId"))
-
-Stdb.string(UserId) // table columns, params, returns, and declared error fields
-```
-
-Keep reusable `Stdb.*` aliases for generic non-branded values, such as a
-length-limited string used in many columns. For custom codecs, use
-`Stdb.custom(schema, { type })` so the SpaceTimeDB lowering is explicit.
+By default, `Stdb.string()` accepts any string. The table example above passes
+an Effect schema to add an optional brand or length check. The same value type
+can be reused in parameters, returns and declared errors. For custom codecs,
+use `Stdb.custom(schema, { type })` to specify the SpaceTimeDB lowering.
 
 For the full helper catalog, including integer widths, native timestamp/UUID
 values, and transport codecs, see [Value Types](/the-effect-layer/value-types).
 
 ## Column Names And Row Types
 
-Use `.name("db_name")` on a value type when the database column name should
+Use `.columnName("db_name")` on a value type when the database column name should
 differ from the TypeScript field name.
 
-```typescript twoslash
+```typescript
 import * as Stdb from "effect-spacetimedb"
 
 const user = Stdb.table("user", {
   columns: {
-    userId: Stdb.string().name("user_id").primaryKey(),
-    displayName: Stdb.string().name("display_name"),
+    userId: Stdb.string().columnName("user_id").primaryKey(),
+    displayName: Stdb.string().columnName("display_name"),
   },
 })
 

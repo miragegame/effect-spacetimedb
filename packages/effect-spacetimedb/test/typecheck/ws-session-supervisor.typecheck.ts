@@ -1,26 +1,25 @@
 import * as Effect from "effect/Effect"
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import { FullModule, UserId, UserName } from "../fixtures/full-module"
 
-const plan = StdbTesting.makeModulePlan(FullModule)
-declare const builder: StdbTesting.GeneratedWsBuilderLike<
+const plan = StdbInternal.makeModulePlan(FullModule)
+declare const builder: StdbInternal.GeneratedWsBuilderLike<
   typeof FullModule,
   unknown
 >
 
-const supervised = StdbTesting.makeWsSessionSupervisorFromModulePlan({
+const supervised = StdbInternal.makeWsSessionSupervisorFromModulePlan({
   plan,
   config: {
     builder: () => builder,
     uri: "ws://localhost:3000",
     databaseName: "test",
-    connectTimeoutMillis: 1_000,
+    connectDurationMax: 1_000,
   },
 })
 
-const missingTimeout = StdbTesting.makeWsSessionSupervisorFromModulePlan({
+const defaultTimeout = StdbInternal.makeWsSessionSupervisorFromModulePlan({
   plan,
-  // @ts-expect-error supervised sessions require a timeout for every connection attempt
   config: {
     builder: () => builder,
     uri: "ws://localhost:3000",
@@ -28,14 +27,14 @@ const missingTimeout = StdbTesting.makeWsSessionSupervisorFromModulePlan({
   },
 })
 
-const reconnecting = StdbTesting.makeWsSessionSupervisorFromModulePlan({
+const reconnecting = StdbInternal.makeWsSessionSupervisorFromModulePlan({
   plan,
   config: {
     builder: () => builder,
     uri: "ws://localhost:3000",
     databaseName: "test",
-    connectTimeoutMillis: 1_000,
-    automaticReconnect: { delayMillisMin: 500 },
+    connectDurationMax: 1_000,
+    automaticReconnect: { delayMin: 500 },
     token: Effect.succeed("token"),
   },
   onAutomaticReconnect: (session) =>
@@ -45,16 +44,16 @@ const reconnecting = StdbTesting.makeWsSessionSupervisorFromModulePlan({
 })
 
 const tokenFailingWithoutError =
-  StdbTesting.makeWsSessionSupervisorFromModulePlan({
+  StdbInternal.makeWsSessionSupervisorFromModulePlan({
     plan,
     config: {
       builder: () => builder,
       uri: "ws://localhost:3000",
       databaseName: "test",
-      connectTimeoutMillis: 1_000,
+      connectDurationMax: 1_000,
       // @ts-expect-error a token Effect fails with an Error, so it can be a WsConnectError cause; @effect-diagnostics-next-line missingEffectError:off
       token: Effect.fail("no token"),
     },
   })
 
-void [supervised, missingTimeout, reconnecting, tokenFailingWithoutError]
+void [supervised, defaultTimeout, reconnecting, tokenFailingWithoutError]

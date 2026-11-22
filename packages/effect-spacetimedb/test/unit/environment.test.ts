@@ -1,3 +1,4 @@
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import * as EffectVitest from "@effect/vitest"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
@@ -52,7 +53,7 @@ const published = describedAs({
 // spec is re-assembled with the lifecycle, so it also proves the declarations
 // survive that step.
 const callables = StdbTesting.bindCallables(
-  Stdb.StdbBuilder.plan(EnvironmentModule, [
+  StdbInternal.planModule(EnvironmentModule, [
     EnvironmentFunctionsLive,
     EnvironmentRoutesLive,
     EnvironmentLifecycleLive,
@@ -65,6 +66,16 @@ const invoke = (name: string, ctx: unknown, args: unknown): unknown => {
     throw new Error(`fixture callable ${name} is not bound`)
   }
   return callable.invoke(ctx, args)
+}
+
+/** A procedure's success, out of the result it answers with. */
+const invokeProcedure = (
+  name: string,
+  ctx: unknown,
+  args: unknown,
+): unknown => {
+  const reply = invoke(name, ctx, args) as { readonly ok: unknown }
+  return reply.ok
 }
 
 const makeHarness = (
@@ -106,13 +117,13 @@ const defectOf = <A>(exit: Exit.Exit<A>): unknown =>
 
 const diagnosticsOf = (
   build: () => unknown,
-): ReadonlyArray<Stdb.StdbDiagnostic> => {
+): ReadonlyArray<Stdb.Diagnostic> => {
   // The contract builder reports invalid declarations by throwing when the
   // spec is assembled; the thrown diagnostics are the observation.
   try {
     build()
   } catch (cause) {
-    if (cause instanceof Stdb.StdbValidationError) {
+    if (cause instanceof Stdb.StdbValidationDefect) {
       return cause.diagnostics
     }
     throw cause
@@ -124,7 +135,7 @@ const diagnosticCodesOf = (build: () => unknown): ReadonlyArray<string> =>
   diagnosticsOf(build).map((diagnostic) => diagnostic.code)
 
 const specWithEnvironment = (environment: Stdb.Environment.Declarations) =>
-  Stdb.StdbModule.make("environment_validation", { environment }).spec
+  Stdb.Module.make("environment_validation", { environment }).spec
 
 describe("database environment declarations", () => {
   it("keeps the declarations on the assembled spec", () => {
@@ -138,7 +149,7 @@ describe("database environment declarations", () => {
       },
       REGION: { kind: "string", optional: true },
     })
-    expect(Stdb.StdbModule.make("no_environment").spec.environment).toEqual({})
+    expect(Stdb.Module.make("no_environment").spec.environment).toEqual({})
   })
 
   it("refuses key names the host refuses", () => {
@@ -329,12 +340,12 @@ describe("database environment reads", () => {
     expect(harness.db.observation.source.find("reducer")?.description).toBe(
       published,
     )
-    expect(invoke("readEnvironment", harness.makeProcedureCtx(), {})).toBe(
-      published,
-    )
-    expect(invoke("readEnvironmentInTx", harness.makeProcedureCtx(), {})).toBe(
-      published,
-    )
+    expect(
+      invokeProcedure("readEnvironment", harness.makeProcedureCtx(), {}),
+    ).toBe(published)
+    expect(
+      invokeProcedure("readEnvironmentInTx", harness.makeProcedureCtx(), {}),
+    ).toBe(published)
     expect(
       invoke("environmentView", harness.makeAnonymousViewCtx(), {}),
     ).toEqual([{ source: "view", description: published }])
@@ -353,9 +364,9 @@ describe("database environment reads", () => {
     const counted = countingReader(harness.environment)
     const ctx = harness.makeProcedureCtx({ env: counted.reader })
 
-    expect(invoke("readEnvironment", ctx, {})).toBe(published)
+    expect(invokeProcedure("readEnvironment", ctx, {})).toBe(published)
     harness.updateEnvironment({ GREETING: "updated", REGION: "eu" })
-    expect(invoke("readEnvironment", ctx, {})).toBe(
+    expect(invokeProcedure("readEnvironment", ctx, {})).toBe(
       describedAs({
         greeting: "updated",
         apiKey: "secret-value-1",
@@ -395,8 +406,8 @@ describe("database environment reads", () => {
     }
     const ctx = harness.makeProcedureCtx({ transaction: { env: snapshot } })
 
-    expect(invoke("readEnvironment", ctx, {})).toBe(published)
-    expect(invoke("readEnvironmentInTx", ctx, {})).toBe(
+    expect(invokeProcedure("readEnvironment", ctx, {})).toBe(published)
+    expect(invokeProcedure("readEnvironmentInTx", ctx, {})).toBe(
       describedAs({
         greeting: "from-the-transaction",
         apiKey: "secret-value-1",
@@ -509,7 +520,7 @@ describe("test harness environments", () => {
   it("refuses an environment the host would refuse at publish", () => {
     const { MODE: _mode, ...withoutMode } = publishedValues
     expect(() => makeHarness(withoutMode)).toThrow(
-      new StdbTesting.TestModuleEnvironmentError({
+      new StdbTesting.TestModuleEnvironmentDefect({
         key: "MODE",
         reason: "requiredValueMissing",
       }),
@@ -517,7 +528,7 @@ describe("test harness environments", () => {
     expect(() =>
       makeHarness({ ...publishedValues, MODE: "staging" as never }),
     ).toThrow(
-      new StdbTesting.TestModuleEnvironmentError({
+      new StdbTesting.TestModuleEnvironmentDefect({
         key: "MODE",
         reason: "valueOutsideDeclaration",
       }),
@@ -528,7 +539,7 @@ describe("test harness environments", () => {
         GREETING: "x".repeat(Environment.valueBytesMax + 1),
       }),
     ).toThrow(
-      new StdbTesting.TestModuleEnvironmentError({
+      new StdbTesting.TestModuleEnvironmentDefect({
         key: "GREETING",
         reason: "valueTooLong",
       }),
@@ -544,13 +555,13 @@ describe("test harness environments", () => {
         MODE: "staging" as never,
       }),
     ).toThrow(
-      new StdbTesting.TestModuleEnvironmentError({
+      new StdbTesting.TestModuleEnvironmentDefect({
         key: "MODE",
         reason: "valueOutsideDeclaration",
       }),
     )
     expect(() => harness.updateEnvironment({ GREETING: undefined })).toThrow(
-      new StdbTesting.TestModuleEnvironmentError({
+      new StdbTesting.TestModuleEnvironmentDefect({
         key: "GREETING",
         reason: "requiredValueMissing",
       }),
@@ -558,7 +569,7 @@ describe("test harness environments", () => {
     expect(harness.environment.get("GREETING")).toBe("hello")
     expect(harness.environment.get("REGION")).toBeNull()
     expect(() => harness.environment.get("UNDECLARED")).toThrow(
-      new StdbTesting.TestModuleEnvironmentError({
+      new StdbTesting.TestModuleEnvironmentDefect({
         key: "UNDECLARED",
         reason: "undeclaredKey",
       }),
@@ -581,7 +592,7 @@ describe("test harness environments", () => {
       })
       expect(StdbTesting.SpacetimeSysStub.env_get("GREETING")).toBe("hello")
       expect(() => StdbTesting.SpacetimeSysStub.env_get("UNDECLARED")).toThrow(
-        StdbTesting.TestModuleEnvironmentError,
+        StdbTesting.TestModuleEnvironmentDefect,
       )
     })
     expect(() => StdbTesting.SpacetimeSysStub.env_get("GREETING")).toThrow(

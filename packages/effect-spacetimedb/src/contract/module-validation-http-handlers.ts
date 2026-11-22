@@ -1,4 +1,4 @@
-import { StdbDiagnostic } from "./diagnostic.ts"
+import { Diagnostic } from "./diagnostic.ts"
 import { statusOf, tagOf } from "./error.ts"
 import { type HttpHandlerSpec, isTypedHttpHandlerSpec } from "./http-handler.ts"
 import type { AnyModuleSpec } from "./module.ts"
@@ -14,7 +14,7 @@ export const httpHandlerRoutesOverlap = (
     left.method === right.method)
 
 export const validateHttpHandlerSchemaMode = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   key: string,
   spec: HttpHandlerSpec,
 ): void => {
@@ -39,7 +39,7 @@ export const validateHttpHandlerSchemaMode = (
 }
 
 export const validateHttpHandlerErrorStatuses = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   key: string,
   spec: HttpHandlerSpec,
 ): void => {
@@ -72,7 +72,7 @@ export const routePathAllowedCharacter = (char: string): boolean =>
   char === "/"
 
 export const validateHttpHandlerPath = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   key: string,
   spec: HttpHandlerSpec,
 ): void => {
@@ -121,45 +121,15 @@ export const validateHttpHandlerPath = (
 
 export const javascriptIdentifierToken = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 
-export const RESERVED_GROUP_CLIENT_KEYS: ReadonlyArray<string> = [
-  "reducers",
-  "procedures",
-  "httpHandlers",
-  "moduleName",
-  "cache",
-  "awaitInvalidation",
-  "isInvalidated",
-  "observeInvalidation",
-  "isActive",
-  "subscribe",
-  "subscribeTableRef",
-  "subscribeRowRef",
-  "subscribeTableGroupRef",
-  "rowMatchesPrimaryKey",
-  "streamEventTable",
-  "streamRows",
-  "streamViewRows",
-  "tableGroup",
-  "viewGroup",
-  "streamTableEvents",
-  "streamTable",
-  "streamTableWithContext",
-  "streamTarget",
-  "waitUntil",
-  "waitUntilView",
-  "connection",
-  "identity",
-  "token",
-  "prototype",
-  ...Object.getOwnPropertyNames(Object.prototype),
-]
+export const groupClientKeysReserved: ReadonlyArray<string> =
+  Object.getOwnPropertyNames(Object.prototype)
 
 export const validateGroupClientKeys = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   module: AnyModuleSpec,
 ): void => {
   const seen = new Set<string>()
-  const reserved = new Set(RESERVED_GROUP_CLIENT_KEYS)
+  const reserved = new Set(groupClientKeysReserved)
   const groupRecord = (
     key: "reducerGroups" | "procedureGroups" | "httpGroups",
   ): Record<string, string> => (Object.hasOwn(module, key) ? module[key] : {})
@@ -191,7 +161,7 @@ export const validateGroupClientKeys = (
           diagnostics,
           "InvalidGroupClientKey",
           [section, endpointName],
-          `Group ${groupName} collides with a reserved client property key`,
+          `Group ${groupName} collides with a JavaScript prototype property`,
         )
       }
     }
@@ -199,7 +169,7 @@ export const validateGroupClientKeys = (
 }
 
 export const validateHttpHandlers = (
-  diagnostics: Array<StdbDiagnostic>,
+  diagnostics: Array<Diagnostic>,
   module: AnyModuleSpec,
 ): void => {
   const entries = Object.entries(module.httpHandlers)

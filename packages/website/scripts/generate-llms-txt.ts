@@ -2,12 +2,12 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import type * as EffectSpacetimeDb from "effect-spacetimedb"
 
-// Twoslash samples in MDX code fences import the package indirectly; this
-// type-level anchor keeps the package dependency explicit in this script.
-const twoslashPackageEntrypointAnchor = [] satisfies ReadonlyArray<
+// The samples in MDX code fences import the package; this type-level anchor
+// keeps that dependency explicit in this script.
+const packageEntrypointAnchor = [] satisfies ReadonlyArray<
   keyof typeof EffectSpacetimeDb
 >
-void twoslashPackageEntrypointAnchor
+void packageEntrypointAnchor
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const docsDir = path.resolve(here, "../src/content/docs")

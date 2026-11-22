@@ -1,11 +1,11 @@
-import * as StdbTesting from "effect-spacetimedb/testing"
+import * as StdbInternal from "effect-spacetimedb/testing/internal"
 import * as Stdb from "effect-spacetimedb"
 import { FullModule, MissingAuth, UserMissing } from "../fixtures/full-module"
 import type { Assert, ErrorOf, IsEqual } from "./helpers"
 import { makeFullModuleWsConnection } from "../helpers/ws-fixtures"
 import { fixtureCallDurationMax } from "../helpers/transport-bounds"
 
-const ws = StdbTesting.ClientWs.make({
+const ws = StdbInternal.ClientWs.make({
   module: FullModule,
   connection: makeFullModuleWsConnection(),
   transport: {
@@ -14,7 +14,7 @@ const ws = StdbTesting.ClientWs.make({
   },
 })
 
-const http = StdbTesting.ClientHttp.make({
+const http = StdbInternal.ClientHttp.make({
   module: FullModule,
   uri: "http://localhost:3000",
   databaseName: "example",
@@ -22,12 +22,13 @@ const http = StdbTesting.ClientHttp.make({
   token: "example-token",
 })
 
-type ExpectedFailure = StdbTesting.CallFailure<MissingAuth | UserMissing>
+type ExpectedFailure = StdbInternal.CallFailure<MissingAuth | UserMissing>
+type ExpectedWsFailure = StdbInternal.WsCallFailure<MissingAuth | UserMissing>
 
 type HttpReducerError = ErrorOf<ReturnType<typeof http.reducers.userRequire>>
 type HttpProcedureError = ErrorOf<ReturnType<typeof http.procedures.userGet>>
 type GroupedHttpProcedureError = ErrorOf<
-  ReturnType<typeof http.FullCallables.procedures.userGet>
+  ReturnType<typeof http.groups.FullCallables.procedures.userGet>
 >
 type WsReducerError = ErrorOf<ReturnType<typeof ws.reducers.userRequire>>
 type WsProcedureError = ErrorOf<ReturnType<typeof ws.procedures.userGet>>
@@ -52,6 +53,31 @@ type RawDomainErrorOf<Failure> = Extract<
 }
   ? Error
   : never
+
+type ConnectionFailureOf<Failure> = Extract<Failure, Stdb.WsConnectionFailure>
+
+// An HTTP call has no connection to lose, so nothing to catch for one.
+type _HttpReducerConnectionFailure = Assert<
+  IsEqual<ConnectionFailureOf<HttpReducerError>, never>
+>
+type _HttpProcedureConnectionFailure = Assert<
+  IsEqual<ConnectionFailureOf<HttpProcedureError>, never>
+>
+type _GroupedHttpProcedureConnectionFailure = Assert<
+  IsEqual<ConnectionFailureOf<GroupedHttpProcedureError>, never>
+>
+type _HttpRawProcedureConnectionFailure = Assert<
+  IsEqual<ConnectionFailureOf<HttpRawProcedureError>, never>
+>
+type _WsReducerConnectionFailure = Assert<
+  IsEqual<ConnectionFailureOf<WsReducerError>, Stdb.WsConnectionFailure>
+>
+type _WsProcedureConnectionFailure = Assert<
+  IsEqual<ConnectionFailureOf<WsProcedureError>, Stdb.WsConnectionFailure>
+>
+type _WsRawProcedureConnectionFailure = Assert<
+  IsEqual<ConnectionFailureOf<WsRawProcedureError>, Stdb.WsConnectionFailure>
+>
 
 type _HttpReducerError = Assert<
   IsEqual<DirectDomainErrorOf<HttpReducerError>, MissingAuth | UserMissing>
@@ -87,21 +113,21 @@ declare const wsProcedureDomainError: DirectDomainErrorOf<WsProcedureError>
 
 const _httpReducer: ExpectedFailure = httpReducerError
 const _httpProcedure: ExpectedFailure = httpProcedureError
-const _wsReducer: ExpectedFailure = wsReducerError
-const _wsProcedure: ExpectedFailure = wsProcedureError
+const _wsReducer: ExpectedWsFailure = wsReducerError
+const _wsProcedure: ExpectedWsFailure = wsProcedureError
 const _httpProcedureDomain: MissingAuth | UserMissing = httpProcedureDomainError
 const _wsProcedureDomain: MissingAuth | UserMissing = wsProcedureDomainError
 
-const ArrayErrorModule = Stdb.StdbModule.make("client_array_errors", {}).add(
-  Stdb.StdbGroup.make("Calls").add(
-    Stdb.StdbFn.procedure("arrayErrorCall", {
+const ArrayErrorModule = Stdb.Module.make("client_array_errors", {}).add(
+  Stdb.Group.make("Calls").add(
+    Stdb.Fn.procedure("arrayErrorCall", {
       returns: Stdb.unit(),
       errors: [Stdb.errors(MissingAuth), UserMissing],
     }),
   ),
 ).spec
 
-const arrayHttp = StdbTesting.ClientHttp.make({
+const arrayHttp = StdbInternal.ClientHttp.make({
   module: ArrayErrorModule,
   uri: "http://localhost:3000",
   databaseName: "client_array_errors",
